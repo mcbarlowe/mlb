@@ -15,6 +15,22 @@ class GameFeedData:
     def __init__(self):
         """Initialize the GameFeedData transformer."""
         self.data_types = {
+            "game_pk": int,
+            "season": int,
+            "game_type": str,
+            "game_date": str,
+            "day_night": str,
+            "double_header": str,
+            "game_number": int,
+            "away_team_id": int,
+            "away_team_name": str,
+            "home_team_id": int,
+            "home_team_name": str,
+            "venue_id": int,
+            "venue_name": str,
+            "weather_condition": str,
+            "weather_temp": float,
+            "weather_wind": str,
             "event": str,
             "event_type": str,
             "description": str,
@@ -78,6 +94,55 @@ class GameFeedData:
             "is_runner_on_third": bool,
             "runner_on_third_id": float,
         }
+
+    def _process_game_data(self, data: dict) -> dict:
+        """
+        Process gameData node and extract game-level metadata.
+
+        Args:
+            data (dict): Full GUMBO JSON response containing gameData node
+
+        Returns:
+            dict: Dictionary of game-level metadata fields
+        """
+        game_data = data.get("gameData", {})
+        game_info = {}
+
+        # Extract from game node
+        game = game_data.get("game", {})
+        game_info["game_pk"] = game.get("pk")
+        game_info["season"] = game.get("season")
+        game_info["game_type"] = game.get("type")
+        game_info["double_header"] = game.get("doubleHeader")
+        game_info["game_number"] = game.get("gameNumber", 1)
+
+        # Extract from datetime node
+        datetime_info = game_data.get("datetime", {})
+        game_info["game_date"] = datetime_info.get("dateTime")
+        game_info["day_night"] = datetime_info.get("dayNight")
+
+        # Extract from teams node
+        teams = game_data.get("teams", {})
+        away_team = teams.get("away", {})
+        home_team = teams.get("home", {})
+
+        game_info["away_team_id"] = away_team.get("id")
+        game_info["away_team_name"] = away_team.get("name")
+        game_info["home_team_id"] = home_team.get("id")
+        game_info["home_team_name"] = home_team.get("name")
+
+        # Extract from venue node
+        venue = game_data.get("venue", {})
+        game_info["venue_id"] = venue.get("id")
+        game_info["venue_name"] = venue.get("name")
+
+        # Extract from weather node
+        weather = game_data.get("weather", {})
+        game_info["weather_condition"] = weather.get("condition")
+        game_info["weather_temp"] = weather.get("temp")
+        game_info["weather_wind"] = weather.get("wind")
+
+        return game_info
 
     def _process_pitch_data(self, pitch: dict) -> dict:
         """
@@ -143,12 +208,13 @@ class GameFeedData:
 
         return row
 
-    def _process_play_data(self, play: dict) -> list:
+    def _process_play_data(self, play: dict, game_info: dict = None) -> list:
         """
         Process individual play data and return pitch-level records.
 
         Args:
             play (dict): Data of a single play in game to filter pitches out.
+            game_info (dict, optional): Game-level metadata to include with each pitch.
 
         Returns:
             list: A list of dictionaries with processed play+pitch information.
@@ -192,24 +258,32 @@ class GameFeedData:
         for index in play["pitchIndex"]:
             pitch = play["playEvents"][index]
             pitch_info = self._process_pitch_data(pitch)
-            pitch_info = {**play_info, **pitch_info}  # Merge play and pitch info
-            pitches.append(pitch_info)
+
+            # Merge game_info, play_info, and pitch_info
+            combined_info = {}
+            if game_info:
+                combined_info.update(game_info)
+            combined_info.update(play_info)
+            combined_info.update(pitch_info)
+
+            pitches.append(combined_info)
 
         return pitches
 
-    def _process_plays_data(self, plays: list) -> pd.DataFrame:
+    def _process_plays_data(self, plays: list, game_info: dict = None) -> pd.DataFrame:
         """
         Process all plays and return structured DataFrame.
 
         Args:
             plays (list): List of all plays in the game.
+            game_info (dict, optional): Game-level metadata to include with each pitch.
 
         Returns:
             pd.DataFrame: DataFrame with pitch-level records.
         """
         rows = []
         for play in plays:
-            rows.extend(self._process_play_data(play))
+            rows.extend(self._process_play_data(play, game_info))
 
         return pd.DataFrame(rows)
 
@@ -220,16 +294,25 @@ class GameFeedData:
 
         Args:
             data (dict): Raw GUMBO JSON response
-            game_id (int, optional): Game identifier
-            season (int, optional): Season year
+            game_id (int, optional): Game identifier (deprecated - extracted from gameData)
+            season (int, optional): Season year (deprecated - extracted from gameData)
 
         Returns:
             pd.DataFrame: Transformed pitch-level data
         """
+        # Extract game-level metadata from gameData node
+        game_info = self._process_game_data(data)
+
+        # Override with parameters if provided (for backwards compatibility)
+        if game_id is not None:
+            game_info["game_pk"] = game_id
+        if season is not None:
+            game_info["season"] = season
+
         live_data = data["liveData"]
         plays = live_data["plays"]["allPlays"]
 
-        pitches_df = self._process_plays_data(plays)
+        pitches_df = self._process_plays_data(plays, game_info)
 
         # Handle missing runner columns
         if "is_runner_on_third" not in pitches_df.columns:

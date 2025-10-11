@@ -9,7 +9,7 @@ This module demonstrates how to:
 
 from pathlib import Path
 
-from src.data import BoxscoreData, GameFeedData, LinescoreData, ReferenceData
+from src.data import BoxscoreData, GameFeedData, LinescoreData, PlayerData, ReferenceData, TeamData
 from src.database import DuckDBHandler
 from src.endpoints.game_feed import GameFeed
 from src.endpoints.pitch_types import PitchTypes
@@ -30,7 +30,7 @@ def example_create_database():
 
 def example_load_game_data():
     """
-    Example: Fetch game data and load into database.
+    Example: Fetch game data and load into database including dimension tables.
     """
     db_path = Path("data/mlb.duckdb")
     game_pk = 716828  # Example game
@@ -43,6 +43,16 @@ def example_load_game_data():
         # Ensure tables exist
         if not db.table_exists("pitches"):
             db.create_all_tables()
+
+        # Transform and load team dimension data
+        team_transformer = TeamData()
+        teams_df = team_transformer.transform(game_data)
+        team_transformer.save_to_db(teams_df, db)
+
+        # Transform and load player dimension data
+        player_transformer = PlayerData()
+        players_df = player_transformer.transform(game_data)
+        player_transformer.save_to_db(players_df, db)
 
         # Transform and load pitch data
         pitch_transformer = GameFeedData()
@@ -166,6 +176,75 @@ def example_query_database():
         print(result.to_string())
 
 
+def example_query_with_dimensions():
+    """
+    Example: Query database using dimension tables for enriched results.
+    """
+    db_path = Path("data/mlb.duckdb")
+
+    with DuckDBHandler(db_path) as db:
+        # Example 1: Pitches with full player names
+        print("\n=== Pitches with Player Details ===")
+        query = """
+        SELECT
+            p.game_pk,
+            p.inning,
+            p.half_inning,
+            batter.full_name as batter_name,
+            batter.bat_side_code,
+            pitcher.full_name as pitcher_name,
+            pitcher.pitch_hand_code,
+            p.pitch_type,
+            p.pitch_start_speed,
+            p.pitch_call_description
+        FROM pitches p
+        JOIN players batter ON p.batter_id = batter.player_id
+        JOIN players pitcher ON p.pitcher_id = pitcher.player_id
+        LIMIT 10
+        """
+        result = db.query(query)
+        print(result.to_string())
+
+        # Example 2: Game summary with team names
+        print("\n=== Games by Team Matchup ===")
+        query = """
+        SELECT DISTINCT
+            p.game_pk,
+            p.game_date,
+            away.team_name as away_team,
+            home.team_name as home_team,
+            p.venue_name,
+            p.weather_condition
+        FROM pitches p
+        JOIN teams away ON p.away_team_id = away.team_id
+        JOIN teams home ON p.home_team_id = home.team_id
+        ORDER BY p.game_date DESC
+        LIMIT 10
+        """
+        result = db.query(query)
+        print(result.to_string())
+
+        # Example 3: Player performance aggregation
+        print("\n=== Top Pitchers by Average Velocity ===")
+        query = """
+        SELECT
+            pl.full_name,
+            pl.primary_position_name,
+            COUNT(*) as total_pitches,
+            ROUND(AVG(p.pitch_start_speed), 2) as avg_velocity,
+            MAX(p.pitch_start_speed) as max_velocity
+        FROM pitches p
+        JOIN players pl ON p.pitcher_id = pl.player_id
+        WHERE p.pitch_start_speed IS NOT NULL
+        GROUP BY pl.player_id, pl.full_name, pl.primary_position_name
+        HAVING COUNT(*) >= 10
+        ORDER BY avg_velocity DESC
+        LIMIT 10
+        """
+        result = db.query(query)
+        print(result.to_string())
+
+
 def example_database_info():
     """
     Example: Get database information and statistics.
@@ -173,7 +252,7 @@ def example_database_info():
     db_path = Path("data/mlb.duckdb")
 
     with DuckDBHandler(db_path) as db:
-        tables = ["pitches", "linescore", "batting", "pitching", "fielding"]
+        tables = ["teams", "players", "pitches", "linescore", "batting", "pitching", "fielding"]
 
         print("\n=== Database Statistics ===")
         for table in tables:
@@ -254,7 +333,7 @@ if __name__ == "__main__":
     # Step 2: Load reference data
     # example_load_reference_data()
 
-    # Step 3: Load game data
+    # Step 3: Load game data (includes dimension tables)
     # example_load_game_data()
 
     # Step 4: Load multiple games
@@ -263,10 +342,13 @@ if __name__ == "__main__":
     # Step 5: Query the database
     # example_query_database()
 
-    # Step 6: View database info
+    # Step 6: Query with dimension tables
+    # example_query_with_dimensions()
+
+    # Step 7: View database info
     # example_database_info()
 
-    # Step 7: Export to Parquet
+    # Step 8: Export to Parquet
     # example_export_to_parquet()
 
     print("\nUncomment the function calls in __main__ to run examples.")

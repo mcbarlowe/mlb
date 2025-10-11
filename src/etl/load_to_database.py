@@ -10,7 +10,9 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from src.data import BoxscoreData, GameFeedData, LinescoreData
+from src.data import BoxscoreData, GameFeedData, LinescoreData, PlayerData, TeamData
+from src.data.venue_data import VenueData
+from src.data.game_data import GameData
 from src.database import DuckDBHandler
 
 
@@ -42,6 +44,15 @@ def load_raw_livefeeds_to_db(db_path: Path, raw_data_path: Path = None):
     pitch_transformer = GameFeedData()
     linescore_transformer = LinescoreData()
     boxscore_transformer = BoxscoreData()
+    team_transformer = TeamData()
+    venue_transformer = VenueData()
+    game_transformer = GameData()
+    player_transformer = PlayerData()
+
+    # Track unique teams, venues, and players to avoid duplicate inserts
+    seen_teams = set()
+    seen_venues = set()
+    seen_players = set()
 
     with DuckDBHandler(db_path) as db:
         # Ensure tables exist
@@ -57,6 +68,37 @@ def load_raw_livefeeds_to_db(db_path: Path, raw_data_path: Path = None):
                 # Load JSON
                 with open(file_path, "r") as f:
                     game_data = json.load(f)
+
+                # Transform and load team dimension data
+                teams_df = team_transformer.transform(game_data)
+                if not teams_df.empty:
+                    # Filter to only new teams
+                    new_teams_df = teams_df[~teams_df["team_id"].isin(seen_teams)]
+                    if not new_teams_df.empty:
+                        team_transformer.save_to_db(new_teams_df, db)
+                        seen_teams.update(new_teams_df["team_id"].tolist())
+
+                # Transform and load venue dimension data
+                venue_df = venue_transformer.transform(game_data)
+                if not venue_df.empty:
+                    venue_id = venue_df.iloc[0]["venue_id"]
+                    if venue_id not in seen_venues:
+                        venue_transformer.save_to_db(venue_df, db)
+                        seen_venues.add(venue_id)
+
+                # Transform and load player dimension data
+                players_df = player_transformer.transform(game_data)
+                if not players_df.empty:
+                    # Filter to only new players
+                    new_players_df = players_df[~players_df["player_id"].isin(seen_players)]
+                    if not new_players_df.empty:
+                        player_transformer.save_to_db(new_players_df, db)
+                        seen_players.update(new_players_df["player_id"].tolist())
+
+                # Transform and load game fact data (must be before pitches due to FK)
+                game_df = game_transformer.transform(game_data)
+                if not game_df.empty:
+                    game_transformer.save_to_db(game_df, db)
 
                 # Transform and load pitch data
                 pitches_df = pitch_transformer.transform(
@@ -80,7 +122,7 @@ def load_raw_livefeeds_to_db(db_path: Path, raw_data_path: Path = None):
 
         # Print final statistics
         print("\n=== Database Statistics ===")
-        tables = ["pitches", "linescore", "batting", "pitching", "fielding"]
+        tables = ["teams", "venues", "players", "games", "pitches", "linescore", "batting", "pitching", "fielding"]
         for table in tables:
             if db.table_exists(table):
                 count = db.get_row_count(table)

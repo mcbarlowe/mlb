@@ -7,7 +7,7 @@ to convert API responses into tabular formats.
 
 from pathlib import Path
 
-from src.data import BoxscoreData, GameFeedData, LinescoreData, ReferenceData
+from src.data import BoxscoreData, GameFeedData, LinescoreData, PlayerData, ReferenceData, TeamData
 from src.endpoints.game_feed import GameFeed
 from src.endpoints.pitch_types import PitchTypes
 from src.endpoints.positions import Positions
@@ -105,6 +105,46 @@ def example_reference_data_transform():
     print(pitch_types_df.head())
 
 
+def example_team_dimension_transform():
+    """
+    Example: Extract team dimension data from game feed.
+    """
+    # Fetch game data
+    game_feed = GameFeed()
+    game_data = game_feed.get(game_pk=716828)
+
+    # Transform to team dimension
+    transformer = TeamData()
+    teams_df = transformer.transform(game_data)
+
+    # Save to parquet
+    output_path = Path("data/processed/dimensions/teams.parquet")
+    transformer.save(teams_df, output_path, format="parquet")
+
+    print(f"Saved {len(teams_df)} team records to {output_path}")
+    print(teams_df[["team_id", "team_name", "abbreviation", "league_name", "division_name"]])
+
+
+def example_player_dimension_transform():
+    """
+    Example: Extract player dimension data from game feed.
+    """
+    # Fetch game data
+    game_feed = GameFeed()
+    game_data = game_feed.get(game_pk=716828)
+
+    # Transform to player dimension
+    transformer = PlayerData()
+    players_df = transformer.transform(game_data)
+
+    # Save to parquet
+    output_path = Path("data/processed/dimensions/players.parquet")
+    transformer.save(players_df, output_path, format="parquet")
+
+    print(f"Saved {len(players_df)} player records to {output_path}")
+    print(players_df[["player_id", "full_name", "primary_position_name", "bat_side_code", "pitch_hand_code"]].head(10))
+
+
 def example_batch_processing():
     """
     Example: Batch process multiple games.
@@ -144,6 +184,12 @@ if __name__ == "__main__":
 
     print("\n=== Reference Data Transform ===")
     # example_reference_data_transform()
+
+    print("\n=== Team Dimension Transform ===")
+    # example_team_dimension_transform()
+
+    print("\n=== Player Dimension Transform ===")
+    # example_player_dimension_transform()
 
     print("\n=== Batch Processing ===")
     # example_batch_processing()
