@@ -5,5 +5,18 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11.4"
 dependencies = [
+    "duckdb>=1.0.0",
+    "jupyter>=1.1.1",
+    "pandas>=2.3.1",
+    "pandas-stubs==2.3.0.250703",
+    "polars>=1.32.3",
+    "pyarrow>=21.0.0",
     "requests>=2.32.4",
+    "seaborn>=0.13.2",
+    "tqdm>=4.67.1",
+]
+
+[dependency-groups]
+dev = [
+    "black[d]>=25.1.0",
 ]
