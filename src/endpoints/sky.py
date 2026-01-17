@@ -1,25 +1,27 @@
 import requests
 
-from src.endpoints.base_api import BaseAPI
+from src.endpoints.base_api import AsyncBaseAPI, BaseAPI
 
 
-class Sky(BaseAPI):
+class Sky(BaseAPI, AsyncBaseAPI):
     """
     Endpoint wrapper for the MLB Sky Conditions API.
 
     Returns available sky/weather condition codes.
+    Supports both sync and async operations.
     """
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, concurrency_limit: int = 15, *args, **kwargs) -> None:
         """
         Initialize the Sky endpoint.
         """
-        super().__init__(*args, **kwargs)
+        BaseAPI.__init__(self, *args, **kwargs)
+        AsyncBaseAPI.__init__(self, concurrency_limit, *args, **kwargs)
         self.base_url = "https://statsapi.mlb.com/api/v1/sky"
 
     def get(self, *args, **kwargs) -> dict:
         """
-        Fetch available sky conditions.
+        Fetch available sky conditions (sync).
 
         Args:
             **kwargs: Additional query parameters
@@ -39,3 +41,12 @@ class Sky(BaseAPI):
             raise Exception(f"HTTP error occurred: {e}")
         except requests.exceptions.RequestException as e:
             raise Exception(f"Request error occurred: {e}")
+
+    async def get_async(self, **kwargs) -> dict:
+        """
+        Fetch available sky conditions (async).
+
+        Returns:
+            dict: List of sky condition codes and descriptions
+        """
+        return await self._request_with_retry(self.base_url, params=kwargs)

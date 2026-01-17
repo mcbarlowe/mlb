@@ -3,8 +3,11 @@ ETL script to load MLB data from JSON files into DuckDB database.
 
 This script reads raw JSON files and processed parquet files,
 transforms the data, and loads it into a DuckDB database.
+
+Uses async methods where applicable for faster API fetches.
 """
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -28,14 +31,14 @@ def load_raw_livefeeds_to_db(db_path: Path, raw_data_path: Path = None):
         raw_data_path = Path("data/raw/livefeeds/")
 
     if not raw_data_path.exists():
-        print(f"⚠ Warning: {raw_data_path} does not exist")
+        print(f"Warning: {raw_data_path} does not exist")
         return
 
     # Get all JSON files
     json_files = list(raw_data_path.glob("**/*.json"))
 
     if not json_files:
-        print(f"⚠ Warning: No JSON files found in {raw_data_path}")
+        print(f"Warning: No JSON files found in {raw_data_path}")
         return
 
     print(f"\nFound {len(json_files)} game files to process")
@@ -118,7 +121,7 @@ def load_raw_livefeeds_to_db(db_path: Path, raw_data_path: Path = None):
                         boxscore_transformer.save_to_db(df, stat_type, db)
 
             except Exception as e:
-                tqdm.write(f"✗ Error processing {file_path}: {e}")
+                tqdm.write(f"Error processing {file_path}: {e}")
 
         # Print final statistics
         print("\n=== Database Statistics ===")
@@ -129,9 +132,11 @@ def load_raw_livefeeds_to_db(db_path: Path, raw_data_path: Path = None):
                 print(f"{table}: {count:,} rows")
 
 
-def load_reference_data_to_db(db_path: Path):
+async def load_reference_data_to_db_async(db_path: Path):
     """
-    Load reference data into database.
+    Load reference data into database using async API calls.
+
+    Fetches all 4 reference data types concurrently for faster loading.
 
     Args:
         db_path (Path): Path to DuckDB database
@@ -146,50 +151,82 @@ def load_reference_data_to_db(db_path: Path):
 
     ref_transformer = ReferenceData()
 
+    # Fetch all reference data concurrently
+    async with Positions() as positions_api, \
+               PitchTypes() as pitch_types_api, \
+               EventTypes() as event_types_api, \
+               GameTypes() as game_types_api:
+
+        results = await asyncio.gather(
+            positions_api.get_async(),
+            pitch_types_api.get_async(),
+            event_types_api.get_async(),
+            game_types_api.get_async(),
+            return_exceptions=True,
+        )
+
+    positions_data, pitch_types_data, event_types_data, game_types_data = results
+
     with DuckDBHandler(db_path) as db:
         # Ensure reference tables exist
         if not db.table_exists("positions"):
             db.create_reference_tables()
 
         # Load positions
-        try:
-            positions_api = Positions()
-            positions_data = positions_api.get()
-            positions_df = ref_transformer.transform(positions_data)
-            ref_transformer.save_to_db(positions_df, "positions", db)
-            print("✓ Loaded positions")
-        except Exception as e:
-            print(f"✗ Error loading positions: {e}")
+        if isinstance(positions_data, Exception):
+            print(f"Error loading positions: {positions_data}")
+        else:
+            try:
+                positions_df = ref_transformer.transform(positions_data)
+                ref_transformer.save_to_db(positions_df, "positions", db)
+                print("Loaded positions")
+            except Exception as e:
+                print(f"Error loading positions: {e}")
 
         # Load pitch types
-        try:
-            pitch_types_api = PitchTypes()
-            pitch_types_data = pitch_types_api.get()
-            pitch_types_df = ref_transformer.transform(pitch_types_data)
-            ref_transformer.save_to_db(pitch_types_df, "pitch_types", db)
-            print("✓ Loaded pitch types")
-        except Exception as e:
-            print(f"✗ Error loading pitch types: {e}")
+        if isinstance(pitch_types_data, Exception):
+            print(f"Error loading pitch types: {pitch_types_data}")
+        else:
+            try:
+                pitch_types_df = ref_transformer.transform(pitch_types_data)
+                ref_transformer.save_to_db(pitch_types_df, "pitch_types", db)
+                print("Loaded pitch types")
+            except Exception as e:
+                print(f"Error loading pitch types: {e}")
 
         # Load event types
-        try:
-            event_types_api = EventTypes()
-            event_types_data = event_types_api.get()
-            event_types_df = ref_transformer.transform(event_types_data)
-            ref_transformer.save_to_db(event_types_df, "event_types", db)
-            print("✓ Loaded event types")
-        except Exception as e:
-            print(f"✗ Error loading event types: {e}")
+        if isinstance(event_types_data, Exception):
+            print(f"Error loading event types: {event_types_data}")
+        else:
+            try:
+                event_types_df = ref_transformer.transform(event_types_data)
+                ref_transformer.save_to_db(event_types_df, "event_types", db)
+                print("Loaded event types")
+            except Exception as e:
+                print(f"Error loading event types: {e}")
 
         # Load game types
-        try:
-            game_types_api = GameTypes()
-            game_types_data = game_types_api.get()
-            game_types_df = ref_transformer.transform(game_types_data)
-            ref_transformer.save_to_db(game_types_df, "game_types", db)
-            print("✓ Loaded game types")
-        except Exception as e:
-            print(f"✗ Error loading game types: {e}")
+        if isinstance(game_types_data, Exception):
+            print(f"Error loading game types: {game_types_data}")
+        else:
+            try:
+                game_types_df = ref_transformer.transform(game_types_data)
+                ref_transformer.save_to_db(game_types_df, "game_types", db)
+                print("Loaded game types")
+            except Exception as e:
+                print(f"Error loading game types: {e}")
+
+
+def load_reference_data_to_db(db_path: Path):
+    """
+    Load reference data into database.
+
+    Uses async API calls internally for concurrent fetching.
+
+    Args:
+        db_path (Path): Path to DuckDB database
+    """
+    asyncio.run(load_reference_data_to_db_async(db_path))
 
 
 def create_indexes(db_path: Path):
@@ -207,24 +244,26 @@ def create_indexes(db_path: Path):
             db.connection.execute("CREATE INDEX IF NOT EXISTS idx_pitches_game_pk ON pitches(game_pk)")
             db.connection.execute("CREATE INDEX IF NOT EXISTS idx_pitches_pitcher ON pitches(pitcher_id)")
             db.connection.execute("CREATE INDEX IF NOT EXISTS idx_pitches_batter ON pitches(batter_id)")
-            print("✓ Created indexes on pitches table")
+            print("Created indexes on pitches table")
 
         # Indexes for batting table
         if db.table_exists("batting"):
             db.connection.execute("CREATE INDEX IF NOT EXISTS idx_batting_game_pk ON batting(game_pk)")
             db.connection.execute("CREATE INDEX IF NOT EXISTS idx_batting_player ON batting(player_id)")
-            print("✓ Created indexes on batting table")
+            print("Created indexes on batting table")
 
         # Indexes for pitching table
         if db.table_exists("pitching"):
             db.connection.execute("CREATE INDEX IF NOT EXISTS idx_pitching_game_pk ON pitching(game_pk)")
             db.connection.execute("CREATE INDEX IF NOT EXISTS idx_pitching_player ON pitching(player_id)")
-            print("✓ Created indexes on pitching table")
+            print("Created indexes on pitching table")
 
 
 def main():
     """
     Main ETL function to load all data into database.
+
+    Uses async methods for API calls to speed up reference data loading.
     """
     db_path = Path("data/mlb.duckdb")
 
@@ -236,7 +275,7 @@ def main():
     with DuckDBHandler(db_path) as db:
         db.create_all_tables()
 
-    # Step 2: Load reference data
+    # Step 2: Load reference data (uses async internally)
     print("\nStep 2: Loading reference data...")
     load_reference_data_to_db(db_path)
 
@@ -253,7 +292,7 @@ def main():
     with DuckDBHandler(db_path) as db:
         db.vacuum()
 
-    print(f"\n✓ ETL Complete! Database ready at {db_path}")
+    print(f"\nETL Complete! Database ready at {db_path}")
 
 
 if __name__ == "__main__":

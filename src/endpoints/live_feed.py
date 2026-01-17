@@ -1,29 +1,40 @@
+import asyncio
+from typing import Callable, Optional
+
 import pandas as pd
 import requests
 
-from src.endpoints.base_api import BaseAPI
+from src.endpoints.base_api import AsyncBaseAPI, BaseAPI
 
 
-class LiveFeed(BaseAPI):
+class LiveFeed(BaseAPI, AsyncBaseAPI):
     """
     Endpoint wrapper for fetching live feeds from the MLB API.
+
+    Supports both sync and async operations:
+    - Sync: live_feed.extract(game_id)
+    - Async: async with LiveFeed() as lf: await lf.extract_async(game_id)
     """
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, concurrency_limit: int = 15, *args, **kwargs) -> None:
         """
-        Initialize the GetLiveFeeds endpoint.
+        Initialize the LiveFeed endpoint.
+
+        Args:
+            concurrency_limit: Maximum concurrent requests for async operations
         """
-        super().__init__(*args, **kwargs)
+        BaseAPI.__init__(self, *args, **kwargs)
+        AsyncBaseAPI.__init__(self, concurrency_limit, *args, **kwargs)
+        self.base_url = "https://statsapi.mlb.com/api/v1.1/game"
 
     def extract(self, game_id, *args, **kwargs) -> dict:
         """
-        Handle GET requests to fetch live feeds.
+        Handle GET requests to fetch live feeds (sync).
         """
-
-        self.base_url = f"https://statsapi.mlb.com/api/v1.1/game/{game_id}/feed/live"
+        url = f"https://statsapi.mlb.com/api/v1.1/game/{game_id}/feed/live"
         headers = {"Accept-Encoding": "gzip"}
 
-        response = requests.get(self.base_url, params=kwargs, headers=headers)
+        response = requests.get(url, params=kwargs, headers=headers)
 
         try:
             response.raise_for_status()  # Raise an error for bad responses
@@ -32,6 +43,53 @@ class LiveFeed(BaseAPI):
             raise Exception(f"HTTP error occurred: {e}")
         except requests.exceptions.RequestException as e:
             raise Exception(f"Request error occurred: {e}")
+
+    async def extract_async(self, game_id: int, **kwargs) -> dict:
+        """
+        Handle GET requests to fetch live feeds (async).
+
+        Args:
+            game_id: MLBAM unique game identifier
+            **kwargs: Additional query parameters
+
+        Returns:
+            dict: Complete game state JSON response
+        """
+        url = f"{self.base_url}/{game_id}/feed/live"
+        headers = {"Accept-Encoding": "gzip"}
+
+        return await self._request_with_retry(url, params=kwargs, headers=headers)
+
+    async def extract_many_async(
+        self,
+        game_ids: list[int],
+        on_success: Optional[Callable[[int, dict], None]] = None,
+        on_error: Optional[Callable[[int, Exception], None]] = None,
+    ) -> list[Optional[dict]]:
+        """
+        Extract multiple game feeds concurrently.
+
+        Args:
+            game_ids: List of MLBAM game identifiers to fetch
+            on_success: Callback for successful fetches (game_id, result)
+            on_error: Callback for failed fetches (game_id, exception)
+
+        Returns:
+            list: List of results in same order as game_ids (None for failed items)
+        """
+        async def fetch_one(game_id: int) -> Optional[dict]:
+            try:
+                result = await self.extract_async(game_id)
+                if on_success:
+                    on_success(game_id, result)
+                return result
+            except Exception as e:
+                if on_error:
+                    on_error(game_id, e)
+                return None
+
+        tasks = [fetch_one(game_id) for game_id in game_ids]
+        return await asyncio.gather(*tasks)
 
     def _process_pitch_data(self, pitch: dict) -> dict:
         """
