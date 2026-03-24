@@ -244,14 +244,25 @@ class GameFeedData:
         play_info["pitcher_name"] = ab_matchup.get("pitcher", {}).get("fullName")
         play_info["throw_side"] = ab_matchup.get("pitchHand", {}).get("code")
 
+        # Initialize runner columns to False (will be set to True if runner exists)
+        play_info["is_runner_on_first"] = False
+        play_info["runner_on_first_id"] = None
+        play_info["is_runner_on_second"] = False
+        play_info["runner_on_second_id"] = None
+        play_info["is_runner_on_third"] = False
+        play_info["runner_on_third_id"] = None
+
+        # Check runners' 'start' field to determine who was on base at the START of the at-bat
+        # The 'start' field shows where each runner was positioned when the play began
         for runner in ab_runners:
-            if runner["movement"]["originBase"] == "1B":
+            start_base = runner["movement"].get("start")
+            if start_base == "1B":
                 play_info["is_runner_on_first"] = True
                 play_info["runner_on_first_id"] = runner["details"]["runner"]["id"]
-            elif runner["movement"]["originBase"] == "2B":
+            elif start_base == "2B":
                 play_info["is_runner_on_second"] = True
                 play_info["runner_on_second_id"] = runner["details"]["runner"]["id"]
-            elif runner["movement"]["originBase"] == "3B":
+            elif start_base == "3B":
                 play_info["is_runner_on_third"] = True
                 play_info["runner_on_third_id"] = runner["details"]["runner"]["id"]
 

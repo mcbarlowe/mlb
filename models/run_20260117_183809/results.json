@@ -1,0 +1,55 @@
+{
+  "config": {
+    "hidden_dim": 128,
+    "n_layers": 2,
+    "dropout": 0.3,
+    "n_location_components": 3,
+    "embedding_dim": 32,
+    "learning_rate": 0.001,
+    "type_weight": 1.0,
+    "location_weight": 0.5
+  },
+  "timestamp": "20260117_183809",
+  "args": {
+    "data_path": "data/processed/livefeeds",
+    "exclude_2020": true,
+    "include_2020": false,
+    "hidden_dim": 128,
+    "n_layers": 2,
+    "dropout": 0.3,
+    "n_components": 3,
+    "embedding_dim": 32,
+    "batch_size": 64,
+    "n_epochs": 50,
+    "patience": 7,
+    "learning_rate": 0.001,
+    "type_weight": 1.0,
+    "location_weight": 0.5,
+    "output_dir": "models",
+    "plots": true,
+    "no_plots": false,
+    "show_batch_progress": false,
+    "device": "auto",
+    "seed": 42,
+    "quick": false
+  },
+  "training": {
+    "best_val_loss": 2.602180989502031,
+    "total_epochs": 11,
+    "n_parameters": 536925
+  },
+  "test_results": {
+    "accuracy": 0.4070435847367384,
+    "top3_accuracy": 0.7923559000371582,
+    "f1_macro": 0.2932382829765637,
+    "f1_weighted": 0.34672606879788165,
+    "nll": "2.1638434",
+    "mae_px": "0.6169699",
+    "mae_pz": "0.7409924",
+    "rmse_px": "0.78458214",
+    "rmse_pz": "0.9482032",
+    "euclidean_error": "1.0625044",
+    "coverage_90": 0.948226759337538,
+    "coverage_95": 0.974347176605842
+  }
+}
