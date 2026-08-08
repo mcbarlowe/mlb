@@ -59,14 +59,16 @@ class PitchFeatureEngine:
     OFFSPEED_TYPES = ["CH", "FS"]
     BREAKING_TYPES = ["SL", "CU", "KC", "ST", "SV"]  # SV = slurve
 
-    def __init__(self, data_path: Optional[Path] = None):
+    def __init__(self, data_path: Optional[Path | str] = None):
         """
         Initialize the feature engine.
 
         Args:
-            data_path: Path to parquet files. If None, uses default location.
+            data_path: Path to parquet files or the string ``\"postgres\"``.
         """
-        self.data_path = data_path or Path("data/processed/livefeeds")
+        raw_data_path = data_path or Path("data/processed/livefeeds")
+        self.use_postgres = str(raw_data_path) == "postgres"
+        self.data_path = None if self.use_postgres else Path(raw_data_path)
         self.pitcher_to_idx: dict[int, int] = {}
         self.batter_to_idx: dict[int, int] = {}
         self.pitcher_ff_pct: dict[int, float] = {}  # Pitcher fastball percentage
@@ -79,7 +81,7 @@ class PitchFeatureEngine:
         sample_frac: Optional[float] = None,
     ) -> pl.DataFrame:
         """
-        Load pitch data from parquet files.
+        Load pitch data from parquet files or PostgreSQL.
 
         Args:
             seasons: List of seasons to load (e.g., ["2023", "2024"]).
@@ -89,7 +91,12 @@ class PitchFeatureEngine:
         Returns:
             Polars DataFrame with pitch data.
         """
-        if seasons:
+        if self.use_postgres:
+            from src.ml.postgres_data import load_pitches_from_postgres
+
+            df = load_pitches_from_postgres(seasons=seasons)
+        elif seasons:
+            assert self.data_path is not None
             patterns = [self.data_path / season / "*.parquet" for season in seasons]
             dfs = []
             for pattern in patterns:
@@ -97,12 +104,10 @@ class PitchFeatureEngine:
                     dfs.append(pl.scan_parquet(str(pattern)))
             if not dfs:
                 raise ValueError(f"No data found for seasons: {seasons}")
-            df = pl.concat(dfs)
+            df = pl.concat(dfs).collect()
         else:
-            df = pl.scan_parquet(str(self.data_path / "**/*.parquet"))
-
-        # Collect and optionally sample
-        df = df.collect()
+            assert self.data_path is not None
+            df = pl.scan_parquet(str(self.data_path / "**/*.parquet")).collect()
 
         if sample_frac and sample_frac < 1.0:
             df = df.sample(fraction=sample_frac, seed=42)
@@ -807,7 +812,7 @@ class PitchFeatureEngine:
 def compute_class_weights(
     df: pl.DataFrame,
     pitch_type_col: str = "pitch_type_idx",
-    n_classes: int = None,
+    n_classes: int | None = None,
     smoothing: float = 0.1,
 ) -> torch.Tensor:
     """

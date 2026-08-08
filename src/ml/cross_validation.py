@@ -6,17 +6,17 @@ the temporal nature of baseball data.
 """
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Optional
 
 import numpy as np
 import polars as pl
-import torch
 from torch.utils.data import DataLoader
 
 from src.ml.dataset import PitchSequenceDataset, collate_pitch_sequences
 from src.ml.features import PitchFeatureEngine
+from src.ml.season_splits import discover_available_seasons
 
 
 @dataclass
@@ -48,7 +48,7 @@ class CVResults:
         if not self.fold_results:
             return {}
 
-        keys = [k for k in self.fold_results[0].keys() if k != "fold"]
+        keys = [k for k in self.fold_results[0] if k != "fold"]
         return {
             key: np.mean([r[key] for r in self.fold_results if key in r])
             for key in keys
@@ -59,7 +59,7 @@ class CVResults:
         if not self.fold_results:
             return {}
 
-        keys = [k for k in self.fold_results[0].keys() if k != "fold"]
+        keys = [k for k in self.fold_results[0] if k != "fold"]
         return {
             f"{key}_std": np.std([r[key] for r in self.fold_results if key in r])
             for key in keys
@@ -90,32 +90,33 @@ class TimeSeriesCrossValidator:
 
     def __init__(
         self,
-        data_path: str = "data/processed/livefeeds",
-        train_seasons: Optional[list[str]] = None,
-        val_seasons: Optional[list[str]] = None,
-        test_season: Optional[str] = None,
+        data_path: str = "postgres",
+        train_seasons: list[str] | None = None,
+        val_seasons: list[str] | None = None,
+        test_season: str | None = None,
         batch_size: int = 64,
         max_seq_len: int = 20,
-        exclude_seasons: Optional[list[str]] = None,
+        exclude_seasons: list[str] | None = None,
     ):
         """
         Initialize the cross-validator.
 
         Args:
-            data_path: Path to processed parquet files.
-            train_seasons: Seasons available for training (default: 2018-2023).
+            data_path: Path to processed parquet files or the string ``"postgres"``.
+            train_seasons: Seasons available for training (default: all available
+                seasons before the held-out test season).
             val_seasons: Seasons to use for validation folds (default: 2022-2024).
             test_season: Season held out for final testing (default: 2025).
             batch_size: Batch size for data loaders.
             max_seq_len: Maximum sequence length for at-bats.
             exclude_seasons: Seasons to exclude (e.g., ["2020"] for COVID year).
         """
-        self.data_path = Path(data_path)
+        self.data_path = data_path
+        self.use_postgres = data_path == "postgres"
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
 
-        # Default seasons
-        all_seasons = ["2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025"]
+        all_seasons = discover_available_seasons(data_path)
 
         # Remove excluded seasons
         if exclude_seasons:
@@ -128,17 +129,21 @@ class TimeSeriesCrossValidator:
         self.val_seasons = val_seasons or ["2022", "2023", "2024"]
 
         # Feature engine (fitted once on all available training data)
-        self.feature_engine: Optional[PitchFeatureEngine] = None
+        self.feature_engine: PitchFeatureEngine | None = None
         self._season_data: dict[str, pl.DataFrame] = {}
 
     def _load_season(self, season: str) -> pl.DataFrame:
         """Load and cache data for a single season."""
         if season not in self._season_data:
-            pattern = self.data_path / season / "*.parquet"
-            if not pattern.parent.exists():
-                raise ValueError(f"Season {season} not found at {pattern.parent}")
+            if self.use_postgres:
+                from src.ml.postgres_data import load_pitches_from_postgres
 
-            df = pl.scan_parquet(str(pattern)).collect()
+                df = load_pitches_from_postgres(seasons=[season])
+            else:
+                pattern = Path(self.data_path) / season / "*.parquet"
+                if not pattern.parent.exists():
+                    raise ValueError(f"Season {season} not found at {pattern.parent}")
+                df = pl.scan_parquet(str(pattern)).collect()
             self._season_data[season] = df
             print(f"Loaded season {season}: {len(df):,} pitches")
 
@@ -164,6 +169,7 @@ class TimeSeriesCrossValidator:
         self, seasons: list[str], shuffle: bool = True
     ) -> tuple[DataLoader, int]:
         """Create a DataLoader for specified seasons."""
+        assert self.feature_engine is not None
         print(f"  Loading {len(seasons)} season(s): {seasons}")
         dfs = [self._load_season(s) for s in seasons]
         # Use how="diagonal" to handle schema differences across seasons

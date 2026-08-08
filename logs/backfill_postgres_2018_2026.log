@@ -1,0 +1,192 @@
+
+[Phase 1] Downloading missing schedule and live feed JSON files...
+Season 2018: All games already downloaded (3024 files exist)
+Season 2019: All games already downloaded (3010 files exist)
+Season 2020: All games already downloaded (1375 files exist)
+Season 2021: All games already downloaded (2968 files exist)
+Season 2022: All games already downloaded (2804 files exist)
+Season 2023: All games already downloaded (3009 files exist)
+Season 2024: All games already downloaded (2998 files exist)
+Season 2025: All games already downloaded (2995 files exist)
+Season 2026: All games already downloaded (2946 files exist)
+
+[Phase 2] Backfilling PostgreSQL from raw live feeds...
+
+Creating MLB database tables...
+✓ Created table: teams
+✓ Created table: players
+✓ Created table: positions
+✓ Created table: pitch_types
+✓ Created table: event_types
+✓ Created table: game_types
+✓ Created table: venues
+✓ Created table: games
+✓ Created table: pitches
+✓ Created table: linescore
+✓ Created table: batting
+✓ Created table: pitching
+✓ Created table: fielding
+
+✓ All tables created successfully!
+Discovered 18 seasons; 8 already complete.
+Bulk backfilling seasons:   0%|          | 0/10 [00:00<?, ?season/s]                                                                    Failed season 2009: Need to pass bool-like values
+Bulk backfilling seasons:   0%|          | 0/10 [00:00<?, ?season/s]                                                                    Failed season 2010: Need to pass bool-like values
+Bulk backfilling seasons:   0%|          | 0/10 [00:00<?, ?season/s]                                                                    Failed season 2012: Need to pass bool-like values
+Bulk backfilling seasons:   0%|          | 0/10 [00:01<?, ?season/s]Bulk backfilling seasons:  30%|███       | 3/10 [00:01<00:02,  2.85season/s]                                                                            Failed season 2014: Need to pass bool-like values
+Bulk backfilling seasons:  30%|███       | 3/10 [00:01<00:02,  2.85season/s]Bulk backfilling seasons:  40%|████      | 4/10 [00:01<00:02,  2.62season/s]                                                                            Failed season 2015: Need to pass bool-like values
+Bulk backfilling seasons:  40%|████      | 4/10 [00:03<00:02,  2.62season/s]Bulk backfilling seasons:  50%|█████     | 5/10 [00:03<00:03,  1.33season/s]                                                                            Failed season 2016: Need to pass bool-like values
+Bulk backfilling seasons:  50%|█████     | 5/10 [00:03<00:03,  1.33season/s]Bulk backfilling seasons:  60%|██████    | 6/10 [00:03<00:02,  1.70season/s]                                                                            Failed season 2017: Need to pass bool-like values
+Bulk backfilling seasons:  60%|██████    | 6/10 [00:03<00:02,  1.70season/s]Bulk backfilling seasons:  70%|███████   | 7/10 [00:03<00:01,  2.26season/s]                                                                            Failed season 2018: Need to pass bool-like values
+Bulk backfilling seasons:  70%|███████   | 7/10 [00:04<00:01,  2.26season/s]Bulk backfilling seasons:  80%|████████  | 8/10 [00:04<00:01,  1.52season/s]                                                                            Failed season 2019: Need to pass bool-like values
+Bulk backfilling seasons:  80%|████████  | 8/10 [00:06<00:01,  1.52season/s]Bulk backfilling seasons:  90%|█████████ | 9/10 [00:06<00:00,  1.06season/s]                                                                            Failed season 2024: Need to pass bool-like values
+Bulk backfilling seasons:  90%|█████████ | 9/10 [00:21<00:00,  1.06season/s]Bulk backfilling seasons: 100%|██████████| 10/10 [00:21<00:00,  5.41s/season]Bulk backfilling seasons: 100%|██████████| 10/10 [00:21<00:00,  2.19s/season]
+
+Creating indexes...
+Created indexes on pitches table
+Created indexes on batting table
+Created indexes on pitching table
+✓ Vacuumed and analyzed managed tables
+
+Pipeline summary
+- target: dbname=postgres schema=mlb host=local-socket
+- schedules downloaded: 0
+- schedules skipped existing: 9
+- live feeds downloaded: 0
+- live feeds skipped existing: 25129
+- live feed download errors: 0
+- discovered seasons: 18
+- processed seasons: 0
+- skipped already complete: 8
+- failed seasons: 10
+
+[Phase 1] Downloading missing schedule and live feed JSON files...
+Season 2018: All games already downloaded (3024 files exist)
+Season 2019: All games already downloaded (3010 files exist)
+Season 2020: All games already downloaded (1375 files exist)
+Season 2021: All games already downloaded (2968 files exist)
+Season 2022: All games already downloaded (2804 files exist)
+Season 2023: All games already downloaded (3009 files exist)
+Season 2024: All games already downloaded (2998 files exist)
+Season 2025: All games already downloaded (2995 files exist)
+Season 2026: All games already downloaded (2946 files exist)
+
+[Phase 2] Backfilling PostgreSQL from raw live feeds...
+
+Creating MLB database tables...
+✓ Created table: teams
+✓ Created table: players
+✓ Created table: positions
+✓ Created table: pitch_types
+✓ Created table: event_types
+✓ Created table: game_types
+✓ Created table: venues
+✓ Created table: games
+✓ Created table: pitches
+✓ Created table: linescore
+✓ Created table: batting
+✓ Created table: pitching
+✓ Created table: fielding
+
+✓ All tables created successfully!
+Discovered 18 seasons; 8 already complete.
+Bulk backfilling seasons:   0%|          | 0/10 [00:00<?, ?season/s]✓ Inserted 1 rows into teams
+✓ Inserted 1 rows into games
+✓ Inserted 120 rows into pitches
+✓ Inserted 18 rows into linescore
+✓ Inserted 31 rows into batting
+✓ Inserted 10 rows into pitching
+✓ Inserted 41 rows into fielding
+Bulk backfilling seasons:  10%|█         | 1/10 [00:00<00:01,  4.80season/s]✓ Inserted 1 rows into teams
+✓ Inserted 5 rows into players
+✓ Inserted 1 rows into games
+✓ Inserted 124 rows into pitches
+✓ Inserted 18 rows into linescore
+✓ Inserted 41 rows into batting
+✓ Inserted 10 rows into pitching
+✓ Inserted 51 rows into fielding
+Bulk backfilling seasons:  20%|██        | 2/10 [00:00<00:01,  5.22season/s]✓ Inserted 6 rows into teams
+✓ Inserted 2 rows into venues
+✓ Inserted 271 rows into players
+✓ Inserted 26 rows into games
+✓ Inserted 3898 rows into pitches
+✓ Inserted 352 rows into linescore
+✓ Inserted 729 rows into batting
+✓ Inserted 315 rows into pitching
+✓ Inserted 928 rows into fielding
+Bulk backfilling seasons:  30%|███       | 3/10 [00:03<00:10,  1.44s/season]✓ Inserted 2 rows into teams
+✓ Inserted 1 rows into venues
+✓ Inserted 124 rows into players
+✓ Inserted 36 rows into games
+✓ Inserted 2547 rows into pitches
+✓ Inserted 266 rows into linescore
+✓ Inserted 501 rows into batting
+✓ Inserted 182 rows into pitching
+✓ Inserted 658 rows into fielding
+Bulk backfilling seasons:  40%|████      | 4/10 [00:06<00:12,  2.07s/season]✓ Inserted 3 rows into teams
+✓ Inserted 195 rows into players
+✓ Inserted 22 rows into games
+✓ Inserted 3132 rows into pitches
+✓ Inserted 300 rows into linescore
+✓ Inserted 569 rows into batting
+✓ Inserted 196 rows into pitching
+✓ Inserted 723 rows into fielding
+Bulk backfilling seasons:  50%|█████     | 5/10 [00:08<00:10,  2.15s/season]✓ Inserted 4 rows into teams
+✓ Inserted 2 rows into venues
+✓ Inserted 173 rows into players
+✓ Inserted 31 rows into games
+✓ Inserted 2642 rows into pitches
+✓ Inserted 218 rows into linescore
+✓ Inserted 458 rows into batting
+✓ Inserted 166 rows into pitching
+✓ Inserted 612 rows into fielding
+Bulk backfilling seasons:  60%|██████    | 6/10 [00:11<00:09,  2.35s/season]✓ Inserted 1 rows into teams
+✓ Inserted 95 rows into players
+✓ Inserted 10 rows into games
+✓ Inserted 1257 rows into pitches
+✓ Inserted 138 rows into linescore
+✓ Inserted 309 rows into batting
+✓ Inserted 102 rows into pitching
+✓ Inserted 398 rows into fielding
+Bulk backfilling seasons:  70%|███████   | 7/10 [00:12<00:05,  1.93s/season]✓ Inserted 121 rows into players
+✓ Inserted 16 rows into games
+✓ Inserted 2179 rows into pitches
+✓ Inserted 196 rows into linescore
+✓ Inserted 390 rows into batting
+✓ Inserted 133 rows into pitching
+✓ Inserted 508 rows into fielding
+Bulk backfilling seasons:  80%|████████  | 8/10 [00:14<00:03,  1.83s/season]✓ Inserted 2 rows into teams
+✓ Inserted 151 rows into players
+✓ Inserted 24 rows into games
+✓ Inserted 2224 rows into pitches
+✓ Inserted 176 rows into linescore
+✓ Inserted 316 rows into batting
+✓ Inserted 121 rows into pitching
+✓ Inserted 433 rows into fielding
+Bulk backfilling seasons:  90%|█████████ | 9/10 [00:16<00:01,  1.94s/season]✓ Inserted 4 rows into teams
+✓ Inserted 1 rows into venues
+✓ Inserted 144 rows into players
+✓ Inserted 209 rows into games
+✓ Inserted 49223 rows into pitches
+✓ Inserted 3728 rows into linescore
+✓ Inserted 6808 rows into batting
+✓ Inserted 2787 rows into pitching
+✓ Inserted 9571 rows into fielding
+Bulk backfilling seasons: 100%|██████████| 10/10 [00:42<00:00,  9.37s/season]Bulk backfilling seasons: 100%|██████████| 10/10 [00:42<00:00,  4.23s/season]
+
+Creating indexes...
+Created indexes on pitches table
+Created indexes on batting table
+Created indexes on pitching table
+✓ Vacuumed and analyzed managed tables
+
+Pipeline summary
+- target: dbname=postgres schema=mlb host=local-socket
+- schedules downloaded: 0
+- schedules skipped existing: 9
+- live feeds downloaded: 0
+- live feeds skipped existing: 25129
+- live feed download errors: 0
+- discovered seasons: 18
+- processed seasons: 10
+- skipped already complete: 8
+- failed seasons: 0

@@ -2,48 +2,46 @@
 Test script for game, team, and venue dimension tables.
 
 This script tests the extraction and loading of dimension and fact tables
-from MLB live feed data.
+from MLB live feed data into a local PostgreSQL schema.
 """
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from src.data.game_data import GameData
 from src.data.team_data import TeamData
 from src.data.venue_data import VenueData
-from src.database.duckdb_handler import DuckDBHandler
+from src.database import PostgresConfig, PostgresHandler
+
+SAMPLE_FILE = Path("example_json_files/example_live_feed.json")
+TEST_SCHEMA = "mlb_test_dimensions"
 
 
 def test_dimension_extraction():
     """Test extraction of game, team, and venue data from a sample live feed."""
 
-    # Load sample data
-    sample_file = Path("data/raw/livefeeds/2022/661363.json")
-    print(f"Loading sample data from: {sample_file}")
-
-    with open(sample_file, "r") as f:
+    print(f"Loading sample data from: {SAMPLE_FILE}")
+    with open(SAMPLE_FILE, "r") as f:
         live_feed_data = json.load(f)
 
     print("\n" + "=" * 60)
     print("EXTRACTING DIMENSION AND FACT DATA")
     print("=" * 60)
 
-    # Extract venue dimension
     print("\n1. Extracting Venue Dimension...")
     venue_extractor = VenueData()
     venue_df = venue_extractor.transform(live_feed_data)
     print(f"   ✓ Extracted {len(venue_df)} venue record(s)")
     print(f"   Venue: {venue_df['venue_name'].iloc[0]}")
 
-    # Extract team dimension
     print("\n2. Extracting Team Dimension...")
     team_extractor = TeamData()
     team_df = team_extractor.transform(live_feed_data)
     print(f"   ✓ Extracted {len(team_df)} team record(s)")
-    for idx, row in team_df.iterrows():
-        print(f"   Team {idx + 1}: {row['team_name']} (ID: {row['team_id']})")
+    for team_number, row in enumerate(team_df.itertuples(index=False), start=1):
+        print(f"   Team {team_number}: {row.team_name} (ID: {row.team_id})")
 
-    # Extract game fact
     print("\n3. Extracting Game Fact...")
     game_extractor = GameData()
     game_df = game_extractor.transform(live_feed_data)
@@ -55,28 +53,26 @@ def test_dimension_extraction():
     print(f"   Venue ID: {game_df['venue_id'].iloc[0]}")
 
     print("\n" + "=" * 60)
-    print("LOADING DATA INTO DUCKDB")
+    print("LOADING DATA INTO POSTGRES")
     print("=" * 60)
 
-    # Create database and tables
-    db_path = Path("data/test_mlb.duckdb")
-    print(f"\nCreating test database: {db_path}")
+    db_config = replace(PostgresConfig.from_env(), schema=TEST_SCHEMA)
+    print(f"\nUsing test schema: {db_config.describe()}")
 
-    with DuckDBHandler(db_path) as db:
-        # Create tables
+    with PostgresHandler(db_config) as db:
+        db.reset_schema()
+
         print("\nCreating tables...")
         db.create_teams_table()
-        db.create_reference_tables()  # Creates venues table
+        db.create_reference_tables()
         db.create_games_table()
 
-        # Insert dimension data first (required for FK constraints)
         print("\n4. Inserting Team Dimension...")
         team_extractor.save_to_db(team_df, db, if_exists="append")
 
         print("\n5. Inserting Venue Dimension...")
         venue_extractor.save_to_db(venue_df, db, if_exists="append")
 
-        # Insert fact data
         print("\n6. Inserting Game Fact...")
         game_extractor.save_to_db(game_df, db, if_exists="append")
 
@@ -84,7 +80,6 @@ def test_dimension_extraction():
         print("VERIFYING DATA")
         print("=" * 60)
 
-        # Verify data
         print("\n7. Querying Teams Table...")
         teams_query = "SELECT team_id, team_name, abbreviation, league_name, division_name FROM teams"
         teams_result = db.query(teams_query)
@@ -132,7 +127,6 @@ def test_dimension_extraction():
         join_result = db.query(join_query)
         print(join_result.to_string(index=False))
 
-        # Get row counts
         print("\n" + "=" * 60)
         print("TABLE ROW COUNTS")
         print("=" * 60)
@@ -143,7 +137,7 @@ def test_dimension_extraction():
     print("\n" + "=" * 60)
     print("TEST COMPLETED SUCCESSFULLY!")
     print("=" * 60)
-    print(f"\nTest database saved at: {db_path}")
+    print(f"\nTest schema ready at: {db_config.describe()}")
 
 
 if __name__ == "__main__":

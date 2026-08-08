@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Training script for Pitch-Type-Conditioned Location Model.
 
@@ -15,7 +14,7 @@ Usage:
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
@@ -24,18 +23,18 @@ sys.path.insert(0, str(project_root))
 import numpy as np
 import polars as pl
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES, IDX_TO_PITCH_TYPE
+from src.ml.evaluate import compute_mdn_coverage, compute_mdn_nll
+from src.ml.features import IDX_TO_PITCH_TYPE, PITCH_TYPE_CODES, PitchFeatureEngine
+from src.ml.mdn_location_model import BivariateMDN, MDNLocationTrainer
 from src.ml.pitch_type_location_model import (
     PitchTypeConditionedMDN,
     PitchTypeLocationDataset,
     PitchTypeLocationTrainer,
-    create_pitch_type_location_dataloaders,
     compare_to_baseline,
 )
-from src.ml.mdn_location_model import BivariateMDN, MDNLocationTrainer
-from src.ml.evaluate import compute_mdn_nll, compute_mdn_coverage
+from src.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42):
@@ -256,7 +255,7 @@ def train_baseline_model(
 def run_training(args):
     """Run the pitch-type-conditioned location model training pipeline."""
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) / f"pitch_type_location_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -404,7 +403,7 @@ def run_training(args):
         dropout=args.dropout,
     )
 
-    print(f"\nModel architecture:")
+    print("\nModel architecture:")
     print(f"  Hidden dims: {args.hidden_dims}")
     print(f"  Components per pitch type: {args.n_components}")
     print(f"  Total pitch type heads: {len(PITCH_TYPE_CODES)}")
@@ -551,15 +550,15 @@ def main():
     parser.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/livefeeds",
-        help="Path to processed parquet files",
+        default="postgres",
+        help="Training data source: 'postgres' or a parquet path",
     )
     parser.add_argument(
         "--train-seasons",
         type=str,
         nargs="+",
-        default=["2021", "2022", "2023"],
-        help="Training seasons",
+        default=None,
+        help="Optional explicit training seasons; default uses all available pre-validation seasons except 2020",
     )
     parser.add_argument(
         "--val-season",
@@ -651,6 +650,13 @@ def main():
         args.train_seasons = ["2023"]
         args.hidden_dims = [128, 64]
         print("Quick mode enabled: reduced epochs, data, and model size")
+    if args.train_seasons is None:
+        args.train_seasons = default_data_source_train_seasons(
+            args.data_path,
+            val_season=args.val_season,
+            test_season=args.test_season,
+            exclude_2020=True,
+        )
 
     run_training(args)
 

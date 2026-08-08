@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Train per-pitcher pitch type prediction models.
 
@@ -15,24 +14,37 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import polars as pl
-from tqdm import tqdm
 
 from src.ml.features import PitchFeatureEngine
 from src.ml.per_pitcher_trainer import PerPitcherTrainer
+from src.ml.season_splits import default_data_source_train_seasons
 
 
-def load_season_data(season: str) -> pl.DataFrame:
-    """Load all parquet files for a season."""
-    season_dir = Path(f"data/processed/livefeeds/{season}")
-    files = list(season_dir.glob("*.parquet"))
-    dfs = [pl.read_parquet(f) for f in tqdm(files, desc=f"Loading {season}", leave=False)]
-    return pl.concat(dfs) if dfs else pl.DataFrame()
+def load_season_data(feature_engine: PitchFeatureEngine, season: str) -> pl.DataFrame:
+    """Load pitch data for a single season from the configured source."""
+    return feature_engine.load_data(seasons=[season])
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train per-pitcher models")
+    parser.add_argument(
+        "--data-path",
+        type=str,
+        default="postgres",
+        help="Training data source: 'postgres' or a parquet path",
+    )
+    parser.add_argument(
+        "--train-seasons",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Optional explicit training seasons; default uses all available pre-validation seasons except 2020",
+    )
+    parser.add_argument("--val-season", type=str, default="2024")
+    parser.add_argument("--test-season", type=str, default="2025")
+    parser.add_argument("--exclude-2020", action="store_true", default=True)
+    parser.add_argument("--include-2020", action="store_true")
     parser.add_argument(
         "--min-pitches",
         type=int,
@@ -59,6 +71,16 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.include_2020:
+        args.exclude_2020 = False
+    if args.train_seasons is None:
+        args.train_seasons = default_data_source_train_seasons(
+            args.data_path,
+            val_season=args.val_season,
+            test_season=args.test_season,
+            exclude_2020=args.exclude_2020,
+        )
+
     # Setup output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) if args.output_dir else Path(f"models/per_pitcher_{timestamp}")
@@ -79,30 +101,30 @@ def main():
     print("LOADING DATA")
     print("=" * 70)
 
-    train_seasons = ["2018", "2019", "2021", "2022", "2023"]
-    val_season = "2024"
-    test_season = "2025"
+    feature_engine = PitchFeatureEngine(args.data_path)
+    train_seasons = args.train_seasons
+    val_season = args.val_season
+    test_season = args.test_season
 
     print("Loading training data...")
     train_dfs = []
     for season in train_seasons:
-        df = load_season_data(season)
+        df = load_season_data(feature_engine, season)
         print(f"  {season}: {len(df):,} pitches")
         train_dfs.append(df)
-    train_df = pl.concat(train_dfs)
+    train_df = pl.concat(train_dfs, how="diagonal")
     print(f"Total training: {len(train_df):,} pitches")
 
     print(f"\nLoading validation data: {val_season}")
-    val_df = load_season_data(val_season)
+    val_df = load_season_data(feature_engine, val_season)
     print(f"  {val_season}: {len(val_df):,} pitches")
 
     print(f"\nLoading test data: {test_season}")
-    test_df = load_season_data(test_season)
+    test_df = load_season_data(feature_engine, test_season)
     print(f"  {test_season}: {len(test_df):,} pitches")
 
     # Fit feature engine on training data
     print("\nFitting feature engine...")
-    feature_engine = PitchFeatureEngine()
     feature_engine.fit(train_df)
     print(f"Pitchers: {len(feature_engine.pitcher_to_idx):,}")
     print(f"Batters: {len(feature_engine.batter_to_idx):,}")
@@ -152,7 +174,7 @@ def main():
 
     test_results = trainer.evaluate(test_df, feature_engine)
 
-    print(f"\nTest Results:")
+    print("\nTest Results:")
     print(f"  Overall Accuracy:      {test_results['overall_accuracy']:.1%}")
     print(f"  Overall Top-3 Accuracy: {test_results['overall_top3_accuracy']:.1%}")
     print(f"  Overall F1 (macro):    {test_results['overall_f1_macro']:.4f}")

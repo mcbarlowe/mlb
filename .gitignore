@@ -7,7 +7,11 @@ wheels/
 *.egg-info
 .DS_Store
 
-# Virtual environments
+# Virtual environments and tool caches
 .venv
+.pytest_cache/
+.ruff_cache/
+.basedpyright/
+.ipynb_checkpoints/
 
 /data/

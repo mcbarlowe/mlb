@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
+
+from src.data._type_utils import coerce_dataframe_types
 
 
 class GameData:
@@ -210,8 +211,7 @@ class GameData:
         game_df = pd.DataFrame([game_info])
 
         if not game_df.empty:
-            # Apply data types
-            game_df = game_df.astype(self.data_types)
+            game_df = coerce_dataframe_types(game_df, self.data_types)
 
         return game_df
 
@@ -240,11 +240,11 @@ class GameData:
 
     def save_to_db(self, df: pd.DataFrame, db_handler, if_exists: str = "append") -> None:
         """
-        Save DataFrame to DuckDB database.
+        Save DataFrame to the configured PostgreSQL database.
 
         Args:
             df (pd.DataFrame): DataFrame to save
-            db_handler: DuckDBHandler instance
+            db_handler: PostgresHandler instance
             if_exists (str): How to behave if table exists ('append', 'replace', 'fail')
         """
         db_handler.insert_dataframe(df, "games", if_exists=if_exists)

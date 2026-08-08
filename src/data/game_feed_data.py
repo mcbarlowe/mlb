@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
+
+from src.data._type_utils import coerce_dataframe_types
 
 
 class GameFeedData:
@@ -208,7 +209,7 @@ class GameFeedData:
 
         return row
 
-    def _process_play_data(self, play: dict, game_info: dict = None) -> list:
+    def _process_play_data(self, play: dict, game_info: dict | None = None) -> list:
         """
         Process individual play data and return pitch-level records.
 
@@ -221,15 +222,15 @@ class GameFeedData:
         """
         pitches = []
 
-        ab_result = play["result"]
-        ab_about = play["about"]
-        ab_matchup = play["matchup"]
+        ab_result = play.get("result", {})
+        ab_about = play.get("about", {})
+        ab_matchup = play.get("matchup", {})
         ab_runners = play.get("runners", [])
 
         play_info = {}
         play_info["event"] = ab_result.get("event")
-        play_info["event_type"] = ab_result["eventType"]
-        play_info["description"] = ab_result["description"]
+        play_info["event_type"] = ab_result.get("eventType")
+        play_info["description"] = ab_result.get("description")
         play_info["rbi"] = ab_result.get("rbi", 0)
         play_info["away_score"] = ab_result.get("awayScore", 0)
         play_info["home_score"] = ab_result.get("homeScore", 0)
@@ -255,19 +256,28 @@ class GameFeedData:
         # Check runners' 'start' field to determine who was on base at the START of the at-bat
         # The 'start' field shows where each runner was positioned when the play began
         for runner in ab_runners:
-            start_base = runner["movement"].get("start")
+            movement = runner.get("movement", {})
+            runner_details = runner.get("details", {})
+            runner_info = runner_details.get("runner", {})
+            start_base = movement.get("start")
+            runner_id = runner_info.get("id")
+
             if start_base == "1B":
                 play_info["is_runner_on_first"] = True
-                play_info["runner_on_first_id"] = runner["details"]["runner"]["id"]
+                play_info["runner_on_first_id"] = runner_id
             elif start_base == "2B":
                 play_info["is_runner_on_second"] = True
-                play_info["runner_on_second_id"] = runner["details"]["runner"]["id"]
+                play_info["runner_on_second_id"] = runner_id
             elif start_base == "3B":
                 play_info["is_runner_on_third"] = True
-                play_info["runner_on_third_id"] = runner["details"]["runner"]["id"]
+                play_info["runner_on_third_id"] = runner_id
 
-        for index in play["pitchIndex"]:
-            pitch = play["playEvents"][index]
+        pitch_indices = play.get("pitchIndex", [])
+        play_events = play.get("playEvents", [])
+        for index in pitch_indices:
+            if index >= len(play_events):
+                continue
+            pitch = play_events[index]
             pitch_info = self._process_pitch_data(pitch)
 
             # Merge game_info, play_info, and pitch_info
@@ -281,7 +291,7 @@ class GameFeedData:
 
         return pitches
 
-    def _process_plays_data(self, plays: list, game_info: dict = None) -> pd.DataFrame:
+    def _process_plays_data(self, plays: list, game_info: dict | None = None) -> pd.DataFrame:
         """
         Process all plays and return structured DataFrame.
 
@@ -298,8 +308,8 @@ class GameFeedData:
 
         return pd.DataFrame(rows)
 
-    def transform(self, data: dict, game_id: Optional[int] = None,
-                  season: Optional[int] = None) -> pd.DataFrame:
+    def transform(self, data: dict, game_id: int | None = None,
+                  season: int | None = None) -> pd.DataFrame:
         """
         Transform game feed JSON into pitch-level DataFrame.
 
@@ -320,10 +330,13 @@ class GameFeedData:
         if season is not None:
             game_info["season"] = season
 
-        live_data = data["liveData"]
-        plays = live_data["plays"]["allPlays"]
+        live_data = data.get("liveData", {})
+        plays = live_data.get("plays", {}).get("allPlays", [])
 
         pitches_df = self._process_plays_data(plays, game_info)
+
+        if pitches_df.empty:
+            return pd.DataFrame(columns=self.data_types.keys())
 
         # Handle missing runner columns
         if "is_runner_on_third" not in pitches_df.columns:
@@ -338,8 +351,7 @@ class GameFeedData:
             pitches_df["is_runner_on_first"] = False
             pitches_df["runner_on_first_id"] = None
 
-        # Apply data types
-        pitches_df = pitches_df.astype(self.data_types)
+        pitches_df = coerce_dataframe_types(pitches_df, self.data_types)
 
         return pitches_df
 
@@ -368,11 +380,11 @@ class GameFeedData:
 
     def save_to_db(self, df: pd.DataFrame, db_handler, if_exists: str = "append") -> None:
         """
-        Save DataFrame to DuckDB database.
+        Save DataFrame to the configured PostgreSQL database.
 
         Args:
             df (pd.DataFrame): DataFrame to save
-            db_handler: DuckDBHandler instance
+            db_handler: PostgresHandler instance
             if_exists (str): How to behave if table exists ('append', 'replace', 'fail')
         """
         db_handler.insert_dataframe(df, "pitches", if_exists=if_exists)

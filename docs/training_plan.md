@@ -35,12 +35,12 @@ Standard k-fold cross-validation is inappropriate because:
 │                         DATA SPLIT STRATEGY                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│  CROSS-VALIDATION (2018-2024)              │  TEST SET (2025)      │
-│  ────────────────────────────────────────  │  ──────────────────── │
-│                                            │                       │
-│  Fold 1: Train [2018-2021] → Val [2022]    │                       │
-│  Fold 2: Train [2018-2022] → Val [2023]    │   HELD OUT            │
-│  Fold 3: Train [2018-2023] → Val [2024]    │   Final Evaluation    │
+│  CROSS-VALIDATION (2009-2024, excluding 2020) │  TEST SET (2025)    │
+│  ────────────────────────────────────────────  │  ────────────────── │
+│                                               │                     │
+│  Fold 1: Train [2009-2019, 2021] → Val [2022] │                     │
+│  Fold 2: Train [2009-2019, 2021-2022] → Val [2023] │ HELD OUT       │
+│  Fold 3: Train [2009-2019, 2021-2023] → Val [2024] │ Final Eval     │
 │                                            │                       │
 │  (Expanding window cross-validation)       │                       │
 │                                                                     │
@@ -60,9 +60,9 @@ Standard k-fold cross-validation is inappropriate because:
 
 | Fold | Training Seasons | Validation Season | Training Size (approx) |
 |------|-----------------|-------------------|------------------------|
-| 1 | 2018-2021 | 2022 | ~10,000 games |
-| 2 | 2018-2022 | 2023 | ~13,000 games |
-| 3 | 2018-2023 | 2024 | ~16,000 games |
+| 1 | 2009-2019, 2021 | 2022 | ~35,600 games |
+| 2 | 2009-2019, 2021-2022 | 2023 | ~38,300 games |
+| 3 | 2009-2019, 2021-2023 | 2024 | ~41,300 games |
 
 ### Metrics to Track Per Fold
 
@@ -130,7 +130,7 @@ best_config = select_best_config()
 
 After selecting best hyperparameters:
 
-1. **Train on all CV data** (2018-2024)
+1. **Train on all CV data** (2009-2019, 2021-2024)
 2. Use 2024 as validation for early stopping
 3. Train until convergence or patience exceeded
 
@@ -138,7 +138,7 @@ After selecting best hyperparameters:
 final_model = create_model(**best_config)
 trainer = PitchPredictionTrainer(
     model=final_model,
-    train_loader=all_training_data,  # 2018-2023
+    train_loader=all_training_data,  # 2009-2019, 2021-2023
     val_loader=validation_data,       # 2024
 )
 trainer.train(n_epochs=50, early_stopping_patience=10)

@@ -1,0 +1,70 @@
+{
+  "config": {
+    "model_type": "lstm_attention",
+    "hidden_dim": 128,
+    "n_layers": 2,
+    "dropout": 0.3,
+    "n_location_components": 3,
+    "embedding_dim": 32,
+    "learning_rate": 0.001,
+    "type_weight": 1.0,
+    "location_weight": 0.5,
+    "n_attention_heads": 4,
+    "n_attention_layers": 1
+  },
+  "timestamp": "20260729_221637",
+  "args": {
+    "data_path": "postgres",
+    "train_seasons": [
+      "2021"
+    ],
+    "val_season": "2024",
+    "test_season": "2025",
+    "exclude_2020": true,
+    "include_2020": false,
+    "model_type": "lstm_attention",
+    "hidden_dim": 128,
+    "n_layers": 2,
+    "dropout": 0.3,
+    "n_components": 3,
+    "embedding_dim": 32,
+    "n_attention_heads": 4,
+    "n_attention_layers": 1,
+    "batch_size": 64,
+    "n_epochs": 3,
+    "patience": 2,
+    "learning_rate": 0.001,
+    "type_weight": 1.0,
+    "location_weight": 0.5,
+    "use_class_weights": true,
+    "no_class_weights": false,
+    "class_weight_smoothing": 0.5,
+    "output_dir": "models/pitch_type",
+    "plots": false,
+    "no_plots": true,
+    "show_batch_progress": false,
+    "device": "cpu",
+    "seed": 42,
+    "quick": true
+  },
+  "training": {
+    "best_val_loss": 2.4967284442517705,
+    "total_epochs": 3,
+    "n_parameters": 572413
+  },
+  "test_results": {
+    "accuracy": 0.6537683423704929,
+    "top3_accuracy": 0.9249064117881323,
+    "f1_macro": 0.5157301599292459,
+    "f1_weighted": 0.6483533449316735,
+    "nll": "2.4295547",
+    "mae_px": "0.64114475",
+    "mae_pz": "0.6898195",
+    "rmse_px": "0.8103322",
+    "rmse_pz": "0.880567",
+    "euclidean_error": "1.0401242",
+    "coverage_90": 0.959883589130901,
+    "coverage_95": 0.9811206077872745
+  },
+  "output_dir": "models/pitch_type/run_20260729_221637"
+}

@@ -1,0 +1,56 @@
+2026/07/27 21:32:10 INFO mlflow.tracking.fluent: Experiment with name 'mlb-model-training-postgres' does not exist. Creating a new experiment.
+======================================================================
+PITCH PREDICTION MODEL TRAINING
+======================================================================
+Output directory: models/pitch_type/run_20260728_013210
+Device: mps
+
+Model Configuration:
+  model_type: lstm_attention
+  hidden_dim: 256
+  n_layers: 2
+  dropout: 0.3
+  n_location_components: 3
+  embedding_dim: 32
+  learning_rate: 0.001
+  type_weight: 1.0
+  location_weight: 0.5
+  n_attention_heads: 8
+  n_attention_layers: 2
+
+Data Split:
+  Train: ['2018', '2019', '2021', '2022', '2023']
+  Validation: 2024
+  Test: 2025 (held out)
+  Excluded: ['2020']
+
+======================================================================
+PHASE 1: PREPARING DATA
+======================================================================
+
+Loaded season 2018: 829,846 pitches
+Loaded season 2019: 838,204 pitches
+Loaded season 2021: 820,097 pitches
+Loaded season 2022: 792,103 pitches
+Loaded season 2023: 849,737 pitches
+Traceback (most recent call last):
+  File "/Users/matthewbarlowe/code/python/mlb/scripts/train_models_with_mlflow.py", line 187, in <module>
+    main()
+  File "/Users/matthewbarlowe/code/python/mlb/scripts/train_models_with_mlflow.py", line 162, in main
+    pitch_results = train_pitch_type_model(pitch_args)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/matthewbarlowe/code/python/mlb/scripts/train_models_with_mlflow.py", line 111, in train_pitch_type_model
+    results = run_full_training.run_training(args)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/matthewbarlowe/code/python/mlb/scripts/run_full_training.py", line 145, in run_training
+    train_loader, val_loader, n_train, n_val = cv.get_final_train_val_loaders(
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/matthewbarlowe/code/python/mlb/src/ml/cross_validation.py", line 280, in get_final_train_val_loaders
+    self._fit_feature_engine(self.train_seasons)
+  File "/Users/matthewbarlowe/code/python/mlb/src/ml/cross_validation.py", line 161, in _fit_feature_engine
+    combined_df = pl.concat(dfs, how="diagonal")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/matthewbarlowe/code/python/mlb/.venv/lib/python3.11/site-packages/polars/functions/eager.py", line 243, in concat
+    out = wrap_df(plr.concat_df_diagonal(elems))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+polars.exceptions.SchemaError: type Float64 is incompatible with expected type Int64

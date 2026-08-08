@@ -93,11 +93,11 @@ class LinescoreData:
 
     def save_to_db(self, df: pd.DataFrame, db_handler, if_exists: str = "append") -> None:
         """
-        Save DataFrame to DuckDB database.
+        Save DataFrame to the configured PostgreSQL database.
 
         Args:
             df (pd.DataFrame): DataFrame to save
-            db_handler: DuckDBHandler instance
+            db_handler: PostgresHandler instance
             if_exists (str): How to behave if table exists ('append', 'replace', 'fail')
         """
         db_handler.insert_dataframe(df, "linescore", if_exists=if_exists)

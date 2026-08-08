@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
+
+from src.data._type_utils import coerce_dataframe_types
 
 
 class VenueData:
@@ -117,8 +118,7 @@ class VenueData:
         venue_df = pd.DataFrame([venue_info])
 
         if not venue_df.empty:
-            # Apply data types
-            venue_df = venue_df.astype(self.data_types)
+            venue_df = coerce_dataframe_types(venue_df, self.data_types)
 
         return venue_df
 
@@ -147,11 +147,11 @@ class VenueData:
 
     def save_to_db(self, df: pd.DataFrame, db_handler, if_exists: str = "append") -> None:
         """
-        Save DataFrame to DuckDB database.
+        Save DataFrame to the configured PostgreSQL database.
 
         Args:
             df (pd.DataFrame): DataFrame to save
-            db_handler: DuckDBHandler instance
+            db_handler: PostgresHandler instance
             if_exists (str): How to behave if table exists ('append', 'replace', 'fail')
         """
         db_handler.insert_dataframe(df, "venues", if_exists=if_exists)

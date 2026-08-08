@@ -184,12 +184,12 @@ class BoxscoreData:
     def save_to_db(self, df: pd.DataFrame, table_name: str, db_handler,
                    if_exists: str = "append") -> None:
         """
-        Save DataFrame to DuckDB database.
+        Save DataFrame to the configured PostgreSQL database.
 
         Args:
             df (pd.DataFrame): DataFrame to save
             table_name (str): Table name ('batting', 'pitching', or 'fielding')
-            db_handler: DuckDBHandler instance
+            db_handler: PostgresHandler instance
             if_exists (str): How to behave if table exists ('append', 'replace', 'fail')
         """
         db_handler.insert_dataframe(df, table_name, if_exists=if_exists)

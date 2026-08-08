@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Combined training script for pitch prediction models.
 
@@ -59,15 +58,14 @@ import polars as pl
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES
 from src.ml.catboost_model import PitchCatBoostModel
+from src.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
 from src.ml.mdn_location_model import (
     BivariateMDN,
     MDNLocationTrainer,
     plot_multiple_densities,
-    get_point_estimate,
-    predict_location_batch,
 )
+from src.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42):
@@ -77,28 +75,33 @@ def set_seed(seed: int = 42):
     torch.manual_seed(seed)
 
 
-def load_data(data_path: Path, train_seasons: list[str], val_season: str, test_season: str):
+def load_data(
+    data_path: str,
+    train_seasons: list[str],
+    val_season: str,
+    test_season: str,
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, PitchFeatureEngine]:
     """Load data for all seasons."""
+    feature_engine = PitchFeatureEngine(data_path)
+
     print("Loading training data...")
     train_dfs = []
     for season in train_seasons:
-        path = data_path / season
-        if path.exists():
-            df = pl.scan_parquet(str(path / "*.parquet")).collect()
-            train_dfs.append(df)
-            print(f"  {season}: {len(df):,} pitches")
+        df = feature_engine.load_data(seasons=[season])
+        train_dfs.append(df)
+        print(f"  {season}: {len(df):,} pitches")
     train_df = pl.concat(train_dfs, how="diagonal")
     print(f"Total training: {len(train_df):,} pitches")
 
     print(f"\nLoading validation data: {val_season}")
-    val_df = pl.scan_parquet(str(data_path / val_season / "*.parquet")).collect()
+    val_df = feature_engine.load_data(seasons=[val_season])
     print(f"  {val_season}: {len(val_df):,} pitches")
 
     print(f"\nLoading test data: {test_season}")
-    test_df = pl.scan_parquet(str(data_path / test_season / "*.parquet")).collect()
+    test_df = feature_engine.load_data(seasons=[test_season])
     print(f"  {test_season}: {len(test_df):,} pitches")
 
-    return train_df, val_df, test_df
+    return train_df, val_df, test_df, feature_engine
 
 
 def prepare_mdn_features(
@@ -106,8 +109,6 @@ def prepare_mdn_features(
     feature_engine: PitchFeatureEngine,
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Prepare features for MDN location prediction."""
-    from src.ml.features import PITCH_TYPE_TO_IDX
-
     df = feature_engine.transform(df)
 
     df = df.filter(
@@ -117,7 +118,7 @@ def prepare_mdn_features(
     )
 
     # Get feature columns from the feature engine and add pitch_type_idx for location prediction
-    feature_cols = feature_engine.get_feature_columns() + ["pitch_type_idx"]
+    feature_cols = [*feature_engine.get_feature_columns(), "pitch_type_idx"]
 
     # Remove any duplicates while preserving order
     seen = set()
@@ -172,7 +173,7 @@ def train_catboost(
     print(f"Val: {len(X_val):,} samples")
     print(f"Test: {len(X_test):,} samples")
 
-    train_results = model.train(
+    model.train(
         X_train, y_type_train, y_px_train, y_pz_train,
         X_val, y_type_val, y_px_val, y_pz_val,
         cat_features=cat_features,
@@ -346,10 +347,14 @@ def run_combined_training(args):
 
     set_seed(args.seed)
 
-    # Define seasons
-    train_seasons = ["2018", "2019", "2021", "2022", "2023"]
-    val_season = "2024"
-    test_season = "2025"
+    train_seasons = args.train_seasons or default_data_source_train_seasons(
+        args.data_path,
+        val_season=args.val_season,
+        test_season=args.test_season,
+        exclude_2020=args.exclude_2020,
+    )
+    val_season = args.val_season
+    test_season = args.test_season
 
     print("Data Split:")
     print(f"  Train: {train_seasons}")
@@ -361,13 +366,15 @@ def run_combined_training(args):
     print("LOADING DATA")
     print("=" * 70)
 
-    data_path = Path(args.data_path)
-    train_df, val_df, test_df = load_data(data_path, train_seasons, val_season, test_season)
+    train_df, val_df, test_df, feature_engine = load_data(
+        args.data_path,
+        train_seasons,
+        val_season,
+        test_season,
+    )
 
-    # Fit feature engine
     print("\nFitting feature engine...")
     all_df = pl.concat([train_df, val_df, test_df], how="diagonal")
-    feature_engine = PitchFeatureEngine(data_path)
     feature_engine.fit(all_df)
     print(f"Pitchers: {feature_engine.n_pitchers:,}")
     print(f"Batters: {feature_engine.n_batters:,}")
@@ -479,8 +486,22 @@ def main():
         description="Train CatBoost (pitch type) + MDN (location density) models",
     )
 
-    # Data
-    parser.add_argument("--data-path", default="data/processed/livefeeds")
+    parser.add_argument(
+        "--data-path",
+        default="postgres",
+        help="Training data source: 'postgres' or a parquet path",
+    )
+    parser.add_argument(
+        "--train-seasons",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Optional explicit training seasons; default uses all available pre-validation seasons except 2020",
+    )
+    parser.add_argument("--val-season", type=str, default="2024")
+    parser.add_argument("--test-season", type=str, default="2025")
+    parser.add_argument("--exclude-2020", action="store_true", default=True)
+    parser.add_argument("--include-2020", action="store_true")
 
     # CatBoost settings
     parser.add_argument("--catboost-iterations", type=int, default=1000)
@@ -501,6 +522,8 @@ def main():
     parser.add_argument("--quick", action="store_true", help="Quick test run")
 
     args = parser.parse_args()
+    if args.include_2020:
+        args.exclude_2020 = False
 
     if args.quick:
         args.catboost_iterations = 100

@@ -1,0 +1,28 @@
+{
+  "servers": {
+    "basedpyright": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--no-sync",
+        "basedpyright-langserver",
+        "--stdio"
+      ]
+    },
+    "ruff": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--no-sync",
+        "ruff",
+        "server"
+      ]
+    },
+    "pyright": {
+      "disabled": true
+    },
+    "pylsp": {
+      "disabled": true
+    }
+  }
+}

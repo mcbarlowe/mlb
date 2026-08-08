@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Training script for standalone MDN location prediction.
 
@@ -29,9 +28,9 @@ from src.ml.features import PitchFeatureEngine
 from src.ml.mdn_location_model import (
     BivariateMDN,
     MDNLocationTrainer,
-    plot_density_prediction,
     plot_multiple_densities,
 )
+from src.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42):
@@ -44,14 +43,13 @@ def set_seed(seed: int = 42):
 def prepare_location_features(
     df: pl.DataFrame,
     feature_engine: PitchFeatureEngine,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """
     Prepare features specifically for location prediction.
 
     Uses all engineered features plus pitch_type_code as a feature
     (since we're predicting location, knowing the pitch type helps).
     """
-    from src.ml.features import PITCH_TYPE_TO_IDX
 
     # Transform data
     df = feature_engine.transform(df)
@@ -131,6 +129,9 @@ def run_training(args):
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,
         "n_epochs": args.n_epochs,
+        "train_seasons": args.train_seasons,
+        "val_season": args.val_season,
+        "test_season": args.test_season,
     }
     print("\nModel Configuration:")
     for k, v in config.items():
@@ -143,34 +144,31 @@ def run_training(args):
     print("LOADING DATA")
     print("=" * 70)
 
-    data_path = Path(args.data_path)
+    feature_engine = PitchFeatureEngine(args.data_path)
 
     # Load training data
-    train_seasons = ["2018", "2019", "2021", "2022", "2023"]
+    train_seasons = args.train_seasons
     print(f"\nTraining seasons: {train_seasons}")
     train_dfs = []
     for season in train_seasons:
-        path = data_path / season
-        if path.exists():
-            df = pl.scan_parquet(str(path / "*.parquet")).collect()
-            train_dfs.append(df)
-            print(f"  {season}: {len(df):,} pitches")
+        df = feature_engine.load_data(seasons=[season])
+        train_dfs.append(df)
+        print(f"  {season}: {len(df):,} pitches")
     train_df = pl.concat(train_dfs, how="diagonal")
 
     # Validation
-    print(f"\nValidation: 2024")
-    val_df = pl.scan_parquet(str(data_path / "2024" / "*.parquet")).collect()
-    print(f"  2024: {len(val_df):,} pitches")
+    print(f"\nValidation: {args.val_season}")
+    val_df = feature_engine.load_data(seasons=[args.val_season])
+    print(f"  {args.val_season}: {len(val_df):,} pitches")
 
     # Test
-    print(f"\nTest: 2025")
-    test_df = pl.scan_parquet(str(data_path / "2025" / "*.parquet")).collect()
-    print(f"  2025: {len(test_df):,} pitches")
+    print(f"\nTest: {args.test_season}")
+    test_df = feature_engine.load_data(seasons=[args.test_season])
+    print(f"  {args.test_season}: {len(test_df):,} pitches")
 
     # Fit feature engine
     print("\nFitting feature engine...")
     all_df = pl.concat([train_df, val_df, test_df], how="diagonal")
-    feature_engine = PitchFeatureEngine(data_path)
     feature_engine.fit(all_df)
 
     # Prepare data
@@ -242,7 +240,7 @@ def run_training(args):
 
     test_metrics = trainer.validate(test_loader)
 
-    print(f"\nTest Metrics:")
+    print("\nTest Metrics:")
     print(f"  NLL:        {test_metrics['nll']:.4f}")
     print(f"  MAE px:     {test_metrics['mae_px']:.4f} ft")
     print(f"  MAE pz:     {test_metrics['mae_pz']:.4f} ft")
@@ -270,7 +268,7 @@ def run_training(args):
     targets_list = [test_y[i] for i in example_indices]
     titles = [f"Pitch {i+1}" for i in range(n_examples)]
 
-    fig = plot_multiple_densities(
+    plot_multiple_densities(
         model,
         features_list,
         targets_list,
@@ -316,7 +314,7 @@ def run_training(args):
     print("TRAINING COMPLETE")
     print("=" * 70)
     print(f"\nOutput: {output_dir}")
-    print(f"\nKey Metrics:")
+    print("\nKey Metrics:")
     print(f"  Location NLL:    {test_metrics['nll']:.4f}")
     print(f"  MAE (avg):       {(test_metrics['mae_px'] + test_metrics['mae_pz'])/2:.4f} ft")
     print(f"  Euclidean Error: {test_metrics['euclidean']:.4f} ft")
@@ -329,8 +327,22 @@ def main():
         description="Train MDN for pitch location density estimation",
     )
 
-    # Data
-    parser.add_argument("--data-path", default="data/processed/livefeeds")
+    parser.add_argument(
+        "--data-path",
+        default="postgres",
+        help="Training data source: 'postgres' or a parquet path",
+    )
+    parser.add_argument(
+        "--train-seasons",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Optional explicit training seasons; default uses all available pre-validation seasons except 2020",
+    )
+    parser.add_argument("--val-season", type=str, default="2024")
+    parser.add_argument("--test-season", type=str, default="2025")
+    parser.add_argument("--exclude-2020", action="store_true", default=True)
+    parser.add_argument("--include-2020", action="store_true")
 
     # Model
     parser.add_argument("--hidden-dims", nargs="+", type=int, default=[256, 128, 64])
@@ -353,9 +365,18 @@ def main():
 
     args = parser.parse_args()
 
+    if args.include_2020:
+        args.exclude_2020 = False
     if args.quick:
         args.n_epochs = 10
         args.patience = 3
+    if args.train_seasons is None:
+        args.train_seasons = default_data_source_train_seasons(
+            args.data_path,
+            val_season=args.val_season,
+            test_season=args.test_season,
+            exclude_2020=args.exclude_2020,
+        )
 
     run_training(args)
 
