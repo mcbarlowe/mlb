@@ -58,24 +58,52 @@ class LiveGamePredictionService:
         output_dir: str | Path = Path("output/live_cards"),
         post_cadence: str = "at_bat",
         max_posts_per_game: int = 40,
+        random_pitch_ceiling: int = 4,
+        seed: int | None = None,
     ):
-        if post_cadence not in {"at_bat", "pitch"}:
-            raise ValueError("post_cadence must be 'at_bat' or 'pitch'")
+        if post_cadence not in {"at_bat", "pitch", "random_pitch"}:
+            raise ValueError(
+                "post_cadence must be 'at_bat', 'pitch', or 'random_pitch'"
+            )
+        if random_pitch_ceiling < 1:
+            raise ValueError("random_pitch_ceiling must be >= 1")
         self.predictor = predictor
         self.publisher = publisher
         self.output_dir = Path(output_dir)
         self.post_cadence = post_cadence
         self.max_posts_per_game = max_posts_per_game
+        self.random_pitch_ceiling = random_pitch_ceiling
+        self._rng = random.Random(seed)
         self._last_pitch_key: dict[int, tuple[int, int, int, int]] = {}
         self._last_posted_at_bat: dict[int, int] = {}
         self._posts_per_game: dict[int, int] = {}
+        self._ab_target_pitch: dict[tuple[int, int], int] = {}
+
+    def _target_pitch_for(self, snapshot: LiveSnapshot) -> int:
+        """Draw (once per at-bat) the pitch number this at-bat will post on.
+
+        The draw happens the first time we see the at-bat, uniform between
+        the first pitch we can still catch and the ceiling. At-bats that
+        end before the target simply do not post.
+        """
+        key = (snapshot.game_pk, snapshot.at_bat_index)
+        if key not in self._ab_target_pitch:
+            low = min(snapshot.next_pitch_number, self.random_pitch_ceiling)
+            self._ab_target_pitch[key] = self._rng.randint(
+                low, self.random_pitch_ceiling
+            )
+        return self._ab_target_pitch[key]
 
     def should_post(self, snapshot: LiveSnapshot) -> bool:
-        """Posting policy: every pitch, or once per new at-bat."""
+        """Posting policy: every pitch, a random pitch, or first of at-bat."""
         if self._posts_per_game.get(snapshot.game_pk, 0) >= self.max_posts_per_game:
             return False
         if self.post_cadence == "pitch":
             return True
+        if self.post_cadence == "random_pitch":
+            if self._last_posted_at_bat.get(snapshot.game_pk) == snapshot.at_bat_index:
+                return False
+            return snapshot.next_pitch_number == self._target_pitch_for(snapshot)
         return (
             self._last_posted_at_bat.get(snapshot.game_pk) != snapshot.at_bat_index
         )

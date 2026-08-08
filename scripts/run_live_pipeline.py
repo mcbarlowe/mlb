@@ -100,9 +100,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--post-cadence",
         type=str,
-        choices=["at_bat", "pitch"],
+        choices=["at_bat", "pitch", "random_pitch"],
         default="at_bat",
-        help="Post once per at-bat (default) or on every pitch",
+        help=(
+            "Post once per at-bat (default), on every pitch, or on one "
+            "randomly chosen pitch per at-bat"
+        ),
+    )
+    parser.add_argument(
+        "--random-pitch-ceiling",
+        type=int,
+        default=4,
+        help="Highest pitch number the random_pitch cadence can target",
     )
     parser.add_argument(
         "--max-posts-per-game",
@@ -135,6 +144,8 @@ def main() -> None:
         output_dir=args.output_dir,
         post_cadence=args.post_cadence,
         max_posts_per_game=args.max_posts_per_game,
+        random_pitch_ceiling=args.random_pitch_ceiling,
+        seed=args.seed,
     )
 
     if args.game_pk is not None:

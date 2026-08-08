@@ -183,6 +183,51 @@ def test_should_post_respects_at_bat_cadence():
     assert service.should_post(later_same_ab) is False
 
 
+def _bare_service(post_cadence: str, seed: int = 7) -> LiveGamePredictionService:
+    service = LiveGamePredictionService.__new__(LiveGamePredictionService)
+    service.post_cadence = post_cadence
+    service.max_posts_per_game = 40
+    service.random_pitch_ceiling = 4
+    service._rng = random.Random(seed)
+    service._last_posted_at_bat = {}
+    service._posts_per_game = {}
+    service._ab_target_pitch = {}
+    return service
+
+
+def test_should_post_random_pitch_targets_one_pitch_per_at_bat():
+    service = _bare_service("random_pitch")
+
+    first = build_live_snapshot(_live_feed(current_pitches=0, balls=0, strikes=0))
+    assert first is not None
+
+    target = service._target_pitch_for(first)
+    assert 1 <= target <= 4
+    # Redraws are stable for the same at-bat
+    assert service._target_pitch_for(first) == target
+
+    assert service.should_post(first) is (first.next_pitch_number == target)
+
+    mid = build_live_snapshot(_live_feed(current_pitches=1, balls=0, strikes=1))
+    assert mid is not None
+    assert service.should_post(mid) is (mid.next_pitch_number == target)
+
+    # Once the at-bat has posted, later pitches in it never post again
+    service._last_posted_at_bat[first.game_pk] = first.at_bat_index
+    assert service.should_post(mid) is False
+
+
+def test_random_pitch_target_catches_up_when_joining_mid_at_bat():
+    service = _bare_service("random_pitch")
+
+    mid = build_live_snapshot(_live_feed(current_pitches=2, balls=1, strikes=1))
+    assert mid is not None
+    assert mid.next_pitch_number == 3
+
+    target = service._target_pitch_for(mid)
+    assert 3 <= target <= 4
+
+
 def test_mixture_density_grid_peaks_near_component_mean():
     pi = np.array([1.0])
     mu = np.array([[0.5, 2.5]])
