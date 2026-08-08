@@ -14,7 +14,7 @@ from src.live.pipeline import (
     seconds_until_monitoring,
 )
 from src.live.predictor import mixture_density_grid
-from src.live.publisher import DryRunPublisher, PredictionPost
+from src.live.publisher import DryRunPublisher, PredictionPost, ResultPost
 
 
 def _pitch_event(pitch_number: int, balls: int, strikes: int, code: str) -> dict:
@@ -254,8 +254,10 @@ def _bare_service(post_cadence: str, seed: int = 7) -> LiveGamePredictionService
     service.random_pitch_ceiling = 4
     service._rng = random.Random(seed)
     service._last_posted_at_bat = {}
+    service._last_posted_inning = {}
     service._posts_per_game = {}
     service._ab_target_pitch = {}
+    service._pending_posted_predictions = {}
     return service
 
 
@@ -279,6 +281,31 @@ def test_should_post_random_pitch_targets_one_pitch_per_at_bat():
     # Once the at-bat has posted, later pitches in it never post again
     service._last_posted_at_bat[first.game_pk] = first.at_bat_index
     assert service.should_post(mid) is False
+
+def test_should_post_half_inning_only_once_per_half():
+    service = _bare_service("half_inning")
+    service._last_posted_inning = {}
+
+    first = build_live_snapshot(_live_feed(current_pitches=0, balls=0, strikes=0))
+    assert first is not None
+    assert service.should_post(first) is True
+
+    service._last_posted_inning[first.game_pk] = first.inning_key
+    later_same_half = build_live_snapshot(_live_feed(current_pitches=1, balls=0, strikes=1))
+    assert later_same_half is not None
+    assert service.should_post(later_same_half) is False
+
+
+def test_dry_run_publisher_records_result_replies(tmp_path: Path):
+    publisher = DryRunPublisher()
+    card = tmp_path / "result.png"
+    card.write_bytes(b"png")
+
+    result = publisher.publish_result(
+        ResultPost(text="pitch result", image_path=card, reply_to="at://post|cid")
+    )
+    assert result == str(card)
+    assert publisher.published[0].text == "pitch result"
 
 
 def test_random_pitch_target_catches_up_when_joining_mid_at_bat():
@@ -352,3 +379,166 @@ def test_choose_random_game_is_seed_deterministic():
     assert first["gamePk"] == second["gamePk"]
 
     assert choose_random_game([_schedule_game(1, "F")], random.Random(1)) is None
+
+
+
+def _synthetic_prediction():
+    from src.live.predictor import mixture_density_grid
+    from src.ml.pitch_predictor import PitchPrediction
+
+    probs = np.zeros(11)
+    probs[0] = 0.62  # FF
+    probs[4] = 0.30  # SL
+    probs[3] = 0.08  # CH
+    pi = np.array([1.0])
+    mu = np.array([[0.3, 2.6]])
+    sigma = np.array([[0.4, 0.4]])
+    rho = np.array([0.0])
+    px_grid, pz_grid, density = mixture_density_grid(pi, mu, sigma, rho)
+    return PitchPrediction(
+        type_probabilities=probs,
+        predicted_type_idx=0,
+        predicted_type="FF",
+        top_3_types=[("FF", 0.62), ("SL", 0.30), ("CH", 0.08)],
+        location_point=np.array([0.3, 2.6]),
+        location_mode=np.array([0.3, 2.6]),
+        px_grid=px_grid,
+        pz_grid=pz_grid,
+        location_density=density,
+        mixture_weights=pi,
+        mixture_means=mu,
+        mixture_stds=sigma,
+    )
+
+
+def _synthetic_context():
+    from src.ml.pitch_predictor import GameContext
+
+    return GameContext(
+        pitcher_name="Test Pitcher",
+        batter_name="Test Batter",
+        pitcher_hand="R",
+        batter_hand="L",
+        home_team="NYY",
+        away_team="ATL",
+        inning=6,
+        inning_half="Bot",
+        balls=2,
+        strikes=1,
+        outs=1,
+        date="2026-08-08",
+        runner_on_1b=True,
+        score_home=3,
+        score_away=2,
+        pitch_number=4,
+        pitcher_id=None,
+        batter_id=None,
+    )
+
+
+def test_build_card_html_contains_key_fields():
+    from src.live.card_html import build_card_html
+
+    html = build_card_html(_synthetic_prediction(), _synthetic_context(), 0.74)
+
+    assert "Test Pitcher" in html
+    assert "Test Batter" in html
+    assert "Four-Seam Fastball" in html
+    assert "62%" in html
+    assert "IN-ZONE <b>74%</b>" in html
+    assert "BOT 6" in html
+    assert 'class="resultbar"' not in html
+
+
+def test_build_card_html_result_variant_marks_actual():
+    from src.live.card_html import build_card_html
+
+    html = build_card_html(
+        _synthetic_prediction(),
+        _synthetic_context(),
+        0.74,
+        actual_pitch_type="SL",
+        actual_location=(0.1, 2.2),
+        pitch_result="Called Strike",
+    )
+
+    assert 'class="resultbar"' in html
+    assert "ACTUAL: SLIDER" in html
+    assert "CALLED STRIKE" in html
+    assert "MODEL SAID FF" in html
+
+
+def test_panel_xy_keeps_zone_inside_panel():
+    from src.live.card_html import (
+        PANEL_H,
+        PANEL_W,
+        ZONE_BOTTOM_FT,
+        ZONE_HALF_W_FT,
+        ZONE_TOP_FT,
+        _panel_xy,
+    )
+
+    for px, pz in [
+        (-ZONE_HALF_W_FT, ZONE_TOP_FT),
+        (ZONE_HALF_W_FT, ZONE_BOTTOM_FT),
+    ]:
+        x, y = _panel_xy(px, pz)
+        assert 0 <= x <= PANEL_W
+        assert 0 <= y <= PANEL_H
+
+
+def test_shrink_below_blob_limit_keeps_small_files(tmp_path: Path):
+    from PIL import Image as PILImage
+
+    from src.live.card_html import _shrink_below_blob_limit
+
+    small = tmp_path / "small.png"
+    PILImage.new("RGB", (100, 100), (20, 30, 40)).save(small, format="PNG")
+
+    out = _shrink_below_blob_limit(small)
+    assert out == small
+    assert out.suffix == ".png"
+
+
+def test_shrink_below_blob_limit_falls_back_to_jpeg(tmp_path: Path):
+    from PIL import Image as PILImage
+
+    from src.live.card_html import _shrink_below_blob_limit
+
+    rng = np.random.default_rng(0)
+    noise = rng.integers(0, 255, size=(1350, 2400, 3), dtype=np.uint8)
+    big = tmp_path / "big.png"
+    PILImage.fromarray(noise).save(big, format="PNG")
+    original_size = big.stat().st_size
+    assert original_size > 900_000
+
+    out = _shrink_below_blob_limit(big)
+    assert out.suffix == ".jpg"
+    assert out.stat().st_size < original_size
+    assert not big.exists()
+
+
+def test_html_renderer_end_to_end(tmp_path: Path):
+    import pytest
+
+    from src.live.card_html import HtmlCardRenderer, render_card_png
+
+    renderer = HtmlCardRenderer()
+    try:
+        try:
+            renderer._ensure_page()
+        except Exception as exc:
+            pytest.skip(f"chromium unavailable: {exc}")
+        out = render_card_png(
+            _synthetic_prediction(),
+            _synthetic_context(),
+            0.74,
+            tmp_path / "card.png",
+            renderer,
+        )
+        assert out.exists()
+        assert out.stat().st_size > 20_000
+        # Real cards must stay under the Bluesky blob ceiling.
+        assert out.stat().st_size <= 900_000
+    finally:
+        renderer.close()

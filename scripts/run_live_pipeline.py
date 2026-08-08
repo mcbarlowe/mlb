@@ -84,7 +84,7 @@ def parse_args() -> argparse.Namespace:
         help="Directory of the conditioned location model ('' disables)",
     )
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--poll-interval", type=float, default=20.0)
+    parser.add_argument("--poll-interval", type=float, default=3.0)
     parser.add_argument(
         "--lead-minutes",
         type=float,
@@ -100,11 +100,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--post-cadence",
         type=str,
-        choices=["at_bat", "pitch", "random_pitch"],
-        default="at_bat",
+        choices=["at_bat", "pitch", "random_pitch", "half_inning"],
+        default="half_inning",
         help=(
-            "Post once per at-bat (default), on every pitch, or on one "
-            "randomly chosen pitch per at-bat"
+            "Post once per half-inning (default), once per at-bat, on every "
+            "pitch, or on one randomly chosen pitch per at-bat"
         ),
     )
     parser.add_argument(
@@ -118,6 +118,16 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=40,
         help="Hard cap on posts per game",
+    )
+    parser.add_argument(
+        "--card-style",
+        type=str,
+        choices=["html", "matplotlib"],
+        default="html",
+        help=(
+            "Card renderer: 'html' (Chromium, broadcast style, default) "
+            "or 'matplotlib' (legacy)"
+        ),
     )
     return parser.parse_args()
 
@@ -146,6 +156,7 @@ def main() -> None:
         max_posts_per_game=args.max_posts_per_game,
         random_pitch_ceiling=args.random_pitch_ceiling,
         seed=args.seed,
+        card_style=args.card_style,
     )
 
     if args.game_pk is not None:
