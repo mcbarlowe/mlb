@@ -33,6 +33,7 @@ class LiveSnapshot:
     pitch_key: tuple[int, int, int, int]
     frame: pl.DataFrame
     context: GameContext
+    inning_key: tuple[str, int]
 
 
 def _team_label(team_node: dict) -> str:
@@ -230,4 +231,5 @@ def build_live_snapshot(feed: dict) -> LiveSnapshot | None:
         ),
         frame=frame,
         context=build_context(feed, pending),
+        inning_key=(str(build_context(feed, pending).inning_half), int(pending["inning"])),
     )

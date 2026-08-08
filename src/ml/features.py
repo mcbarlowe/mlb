@@ -545,16 +545,16 @@ class PitchFeatureEngine:
         df = df.with_columns([
             # Cumulative fastballs in at-bat (before current pitch)
             pl.col("is_fastball")
+            .shift(1)
             .cum_sum()
             .over(["game_pk", "at_bat_index"])
-            .shift(1)
             .fill_null(0)
             .alias("n_fastballs_in_ab"),
             # Cumulative breaking balls (non-fastballs) in at-bat
             (1 - pl.col("is_fastball"))
+            .shift(1)
             .cum_sum()
             .over(["game_pk", "at_bat_index"])
-            .shift(1)
             .fill_null(0)
             .alias("n_breaking_in_ab"),
         ])

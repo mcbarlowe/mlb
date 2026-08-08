@@ -23,6 +23,7 @@ dependencies = [
     "torch>=2.0.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "atproto>=0.0.55",
     "tqdm>=4.67.1",
+    "playwright>=1.62.0",
 ]
 
 [dependency-groups]
