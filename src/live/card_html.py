@@ -236,11 +236,11 @@ def _actual_marker_svg(actual_location: tuple[float, float] | None) -> str:
         return ""
     x, y = _panel_xy(-float(actual_location[0]), float(actual_location[1]))
     return (
-        f'<g transform="translate({x} {y})" stroke="#EF4444" stroke-width="5" '
-        f'stroke-linecap="round">'
-        f'<line x1="-8" y1="-8" x2="8" y2="8"/>'
-        f'<line x1="-8" y1="8" x2="8" y2="-8"/>'
-        f'<line x1="-8" y1="-8" x2="8" y2="8" stroke="#7F1D1D" stroke-width="7" opacity="0.35"/>'
+        f'<g transform="translate({x} {y})" stroke-linecap="round" fill="none">'
+        f'<line x1="-9" y1="-9" x2="9" y2="9" stroke="#FFFFFF" stroke-width="9"/>'
+        f'<line x1="-9" y1="9" x2="9" y2="-9" stroke="#FFFFFF" stroke-width="9"/>'
+        f'<line x1="-9" y1="-9" x2="9" y2="9" stroke="#EF4444" stroke-width="4.5"/>'
+        f'<line x1="-9" y1="9" x2="9" y2="-9" stroke="#EF4444" stroke-width="4.5"/>'
         f"</g>"
     )
 
@@ -391,7 +391,6 @@ def build_card_html(
              margin-top: 10px; }}
   .brand {{ font-size: 14px; font-weight: 800; letter-spacing: 4px; color: #8CA0B8; }}
   .brand b {{ color: #F59E0B; }}
-  .tagline {{ font-size: 12px; color: #55708F; letter-spacing: 1.5px; font-weight: 600; }}
 </style></head>
 <body><div class="card">
   <div class="topbar">
@@ -448,7 +447,6 @@ def build_card_html(
   {_result_bar_html(prediction, actual_pitch_type, pitch_result)}
   <div class="footer">
     <div class="brand">BARLOWE <b>ANALYTICS</b></div>
-    <div class="tagline">NEXT-PITCH MODEL · LSTM + MIXTURE DENSITY · LIVE</div>
   </div>
 </div></body></html>"""
 
