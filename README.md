@@ -345,6 +345,33 @@ You can override the tracking backend with `MLFLOW_TRACKING_URI` or `--mlflow-tr
 
 The regression tests use `example_json_files/example_live_feed.json`; they do not require a populated `data/` checkout.
 
+### Live Next-Pitch Prediction
+
+Predict the next pitch of in-progress games and publish pitch cards to Twitter:
+
+```bash
+# Dry run for today's schedule: waits for first pitch, polls live games,
+# saves cards to output/live_cards/<game_pk>/ without tweeting
+uv run python scripts/run_live_pipeline.py
+
+# Actually post to Twitter (requires credentials, see below)
+uv run python scripts/run_live_pipeline.py --post
+
+# Follow one game only
+uv run python scripts/run_live_pipeline.py --game-pk 823514
+```
+
+How it works:
+
+1. Reads the MLB schedule for the target date and sleeps until `--lead-minutes` before the earliest first pitch.
+2. Polls each game's live feed every `--poll-interval` seconds (via `DailyPipeline.monitor_all_games`), starting each game automatically when it goes live.
+3. On every new pitch state, builds the current at-bat sequence plus a pending-pitch row, predicts the next pitch type and location, and renders a pitch card.
+4. Posts the card once per at-bat by default (`--post-cadence pitch` posts on every pitch; `--max-posts-per-game` caps volume).
+
+Model defaults are the trained pair in `models/attention_full/run_20260119_124719` (pitch type) and `models/pitch_type_location_20260121_003206` (location); override with `--pitch-type-model` / `--location-model` when newer models finish training.
+
+Twitter posting uses these environment variables: `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN`, `TWITTER_ACCESS_TOKEN_SECRET`. Without `--post`, the pipeline runs in dry-run mode and only saves card images.
+
 ## Performance Notes
 
 - **PostgreSQL Performance**: Local relational queries stay fast once indexes are built on key columns
