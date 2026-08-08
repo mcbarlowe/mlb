@@ -14,7 +14,11 @@ import numpy as np
 import polars as pl
 from torch.utils.data import DataLoader
 
-from src.ml.dataset import PitchSequenceDataset, collate_pitch_sequences
+from src.ml.dataset import (
+    PitchSequenceDataset,
+    PitchSequenceIterableDataset,
+    collate_pitch_sequences,
+)
 from src.ml.features import PitchFeatureEngine
 from src.ml.season_splits import discover_available_seasons
 
@@ -97,6 +101,7 @@ class TimeSeriesCrossValidator:
         batch_size: int = 64,
         max_seq_len: int = 20,
         exclude_seasons: list[str] | None = None,
+        low_memory: bool = False,
     ):
         """
         Initialize the cross-validator.
@@ -115,6 +120,8 @@ class TimeSeriesCrossValidator:
         self.use_postgres = data_path == "postgres"
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
+        self.low_memory = low_memory
+
 
         all_seasons = discover_available_seasons(data_path)
 
@@ -132,18 +139,28 @@ class TimeSeriesCrossValidator:
         self.feature_engine: PitchFeatureEngine | None = None
         self._season_data: dict[str, pl.DataFrame] = {}
 
-    def _load_season(self, season: str) -> pl.DataFrame:
-        """Load and cache data for a single season."""
-        if season not in self._season_data:
-            if self.use_postgres:
-                from src.ml.postgres_data import load_pitches_from_postgres
+    def _read_season(self, season: str) -> pl.DataFrame:
+        """Read a season from the configured training source."""
+        if self.use_postgres:
+            from src.ml.postgres_data import load_pitches_from_postgres
 
-                df = load_pitches_from_postgres(seasons=[season])
-            else:
-                pattern = Path(self.data_path) / season / "*.parquet"
-                if not pattern.parent.exists():
-                    raise ValueError(f"Season {season} not found at {pattern.parent}")
-                df = pl.scan_parquet(str(pattern)).collect()
+            return load_pitches_from_postgres(seasons=[season])
+
+        pattern = Path(self.data_path) / season / "*.parquet"
+        if not pattern.parent.exists():
+            raise ValueError(f"Season {season} not found at {pattern.parent}")
+        return pl.scan_parquet(str(pattern)).collect()
+
+
+    def _load_season(self, season: str) -> pl.DataFrame:
+        """Load a single season, caching only in eager mode."""
+        if self.low_memory:
+            df = self._read_season(season)
+            print(f"Loaded season {season}: {len(df):,} pitches")
+            return df
+
+        if season not in self._season_data:
+            df = self._read_season(season)
             self._season_data[season] = df
             print(f"Loaded season {season}: {len(df):,} pitches")
 
@@ -151,19 +168,24 @@ class TimeSeriesCrossValidator:
 
     def _fit_feature_engine(self, seasons: list[str]) -> None:
         """Fit the feature engine on specified seasons."""
-        # Load all seasons for fitting
-        dfs = [self._load_season(s) for s in seasons]
-        # Use how="diagonal" to handle schema differences across seasons
-        combined_df = pl.concat(dfs, how="diagonal")
-
-        # Fit feature engine
         self.feature_engine = PitchFeatureEngine(self.data_path)
-        self.feature_engine.fit(combined_df)
+        self.feature_engine.fit_frames(self._load_season(season) for season in seasons)
         print(
             f"Feature engine fitted on {len(seasons)} seasons: "
             f"{self.feature_engine.n_pitchers:,} pitchers, "
             f"{self.feature_engine.n_batters:,} batters"
         )
+
+    def _transform_sequence_frame(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Transform and filter a season frame for sequence modeling."""
+        assert self.feature_engine is not None
+        transformed_df = self.feature_engine.transform(df)
+        return transformed_df.filter(
+            pl.col("pitch_type_idx").is_not_null()
+            & pl.col("px").is_not_null()
+            & pl.col("pz").is_not_null()
+        )
+
 
     def _create_dataloader(
         self, seasons: list[str], shuffle: bool = True
@@ -171,24 +193,32 @@ class TimeSeriesCrossValidator:
         """Create a DataLoader for specified seasons."""
         assert self.feature_engine is not None
         print(f"  Loading {len(seasons)} season(s): {seasons}")
+
+        if self.low_memory:
+            dataset = PitchSequenceIterableDataset(
+                seasons=seasons,
+                load_season=self._load_season,
+                transform_season=self._transform_sequence_frame,
+                feature_columns=self.feature_engine.get_feature_columns(),
+                target_columns=self.feature_engine.get_target_columns(),
+                max_seq_len=self.max_seq_len,
+                shuffle=shuffle,
+            )
+            loader = DataLoader(
+                dataset,
+                batch_size=self.batch_size,
+                shuffle=False,
+                collate_fn=collate_pitch_sequences,
+                num_workers=0,
+            )
+            return loader, -1
+
         dfs = [self._load_season(s) for s in seasons]
-        # Use how="diagonal" to handle schema differences across seasons
         combined_df = pl.concat(dfs, how="diagonal")
         print(f"  Total pitches: {len(combined_df):,}")
-
-        # Transform features
         print("  Transforming features...")
-        transformed_df = self.feature_engine.transform(combined_df)
-
-        # Filter nulls
-        transformed_df = transformed_df.filter(
-            pl.col("pitch_type_idx").is_not_null()
-            & pl.col("px").is_not_null()
-            & pl.col("pz").is_not_null()
-        )
+        transformed_df = self._transform_sequence_frame(combined_df)
         print(f"  Valid pitches after filtering: {len(transformed_df):,}")
-
-        # Create dataset (this groups pitches into at-bat sequences)
         print("  Creating at-bat sequences...")
         dataset = PitchSequenceDataset(
             transformed_df,

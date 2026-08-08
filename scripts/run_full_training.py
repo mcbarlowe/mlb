@@ -27,6 +27,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import numpy as np
+import polars as pl
 import torch
 
 from src.ml.cross_validation import TimeSeriesCrossValidator
@@ -37,7 +38,11 @@ from src.ml.evaluate import (
     plot_mdn_predictions,
     print_classification_report,
 )
-from src.ml.features import PITCH_TYPE_CODES, compute_class_weights
+from src.ml.features import (
+    PITCH_TYPE_CODES,
+    PITCH_TYPE_TO_IDX,
+    compute_class_weights_from_counts,
+)
 from src.ml.model import create_model
 from src.ml.train import PitchPredictionTrainer
 
@@ -62,6 +67,32 @@ def get_device(device_str: str = "auto") -> torch.device:
         else:
             return torch.device("cpu")
     return torch.device(device_str)
+
+def format_sample_count(count: int) -> str:
+    """Render sample counts, including streaming loaders with unknown length."""
+    return f"{count:,}" if count >= 0 else "unknown (streaming)"
+
+
+def compute_training_class_weights(
+    cv: TimeSeriesCrossValidator,
+    train_seasons: list[str],
+    smoothing: float,
+) -> torch.Tensor:
+    """Compute class weights from raw pitch codes without concatenating all seasons."""
+    count_dict: dict[int, int] = {}
+    for season in train_seasons:
+        season_df = cv._load_season(season)
+        counts = season_df.group_by("pitch_type_code").agg(pl.len().alias("count"))
+        for row in counts.to_dicts():
+            code = row["pitch_type_code"]
+            pitch_type_idx = PITCH_TYPE_TO_IDX.get(code, PITCH_TYPE_TO_IDX["OTHER"])
+            count_dict[pitch_type_idx] = count_dict.get(pitch_type_idx, 0) + int(row["count"])
+
+    return compute_class_weights_from_counts(
+        count_dict,
+        n_classes=len(PITCH_TYPE_CODES),
+        smoothing=smoothing,
+    )
 
 
 def run_training(args) -> dict:
@@ -116,6 +147,7 @@ def run_training(args) -> dict:
         train_seasons=args.train_seasons,
         val_seasons=[args.val_season],
         test_season=args.test_season,
+        low_memory=args.low_memory,
     )
 
     print("Data Split:")
@@ -145,8 +177,8 @@ def run_training(args) -> dict:
         val_season=args.val_season
     )
     assert cv.feature_engine is not None
-    print(f"\nTraining: {n_train:,} at-bats")
-    print(f"Validation: {n_val:,} at-bats")
+    print(f"\nTraining: {format_sample_count(n_train)} at-bats")
+    print(f"Validation: {format_sample_count(n_val)} at-bats")
 
     # Validate feature dimensions
     feature_cols = cv.feature_engine.get_feature_columns()
@@ -168,26 +200,16 @@ def run_training(args) -> dict:
     class_weights = None
     if args.use_class_weights:
         print("Computing class weights from training data...")
-        # Get training seasons (excluding validation)
         train_seasons = [s for s in cv.train_seasons if s != args.val_season]
-        # Access cached season data
-        import polars as pl
-        train_dfs = [cv._season_data[s] for s in train_seasons if s in cv._season_data]
-        if train_dfs:
-            combined_train = pl.concat(train_dfs, how="diagonal")
-            # Transform to get pitch_type_idx
-            transformed = cv.feature_engine.transform(combined_train)
-            # Compute class weights
-            class_weights = compute_class_weights(
-                transformed,
-                pitch_type_col="pitch_type_idx",
-                n_classes=len(PITCH_TYPE_CODES),
-                smoothing=args.class_weight_smoothing,
-            )
-            print(f"Class weights (smoothing={args.class_weight_smoothing}):")
-            for i, code in enumerate(PITCH_TYPE_CODES):
-                print(f"  {code}: {class_weights[i]:.3f}")
-            print()
+        class_weights = compute_training_class_weights(
+            cv,
+            train_seasons,
+            smoothing=args.class_weight_smoothing,
+        )
+        print(f"Class weights (smoothing={args.class_weight_smoothing}):")
+        for i, code in enumerate(PITCH_TYPE_CODES):
+            print(f"  {code}: {class_weights[i]:.3f}")
+        print()
 
     # =========================================================================
     # PHASE 2: Train Model
@@ -268,7 +290,7 @@ def run_training(args) -> dict:
     print()
 
     test_loader, n_test = cv.get_test_loader()
-    print(f"Test set: {n_test:,} at-bats from season {cv.test_season}")
+    print(f"Test set: {format_sample_count(n_test)} at-bats from season {cv.test_season}")
     print()
 
     test_results = evaluate_model(model, test_loader, device=args.device)
@@ -403,6 +425,11 @@ def main():
     parser.add_argument("--test-season", type=str, default="2025")
     parser.add_argument("--exclude-2020", action="store_true", default=True)
     parser.add_argument("--include-2020", action="store_true")
+    parser.add_argument(
+        "--low-memory",
+        action="store_true",
+        help="Stream season-sized chunks instead of materializing the full training window in memory",
+    )
 
     # Model
     parser.add_argument("--model-type", type=str, default="lstm",

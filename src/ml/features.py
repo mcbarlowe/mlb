@@ -4,13 +4,14 @@ Feature engineering for pitch prediction models.
 This module transforms raw pitch data into features suitable for ML models.
 """
 
+from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import polars as pl
 import torch
-
 
 # Pitch type codes and their indices for model encoding
 PITCH_TYPE_CODES = [
@@ -124,39 +125,61 @@ class PitchFeatureEngine:
         Returns:
             self for method chaining.
         """
-        # Build pitcher index mapping
-        unique_pitchers = df.select("pitcher_id").unique().sort("pitcher_id")
-        self.pitcher_to_idx = {
-            pid: idx
-            for idx, pid in enumerate(unique_pitchers["pitcher_id"].to_list())
-        }
+        return self.fit_frames([df])
 
-        # Build batter index mapping
-        unique_batters = df.select("batter_id").unique().sort("batter_id")
-        self.batter_to_idx = {
-            bid: idx
-            for idx, bid in enumerate(unique_batters["batter_id"].to_list())
-        }
+    def fit_frames(self, frames: Iterable[pl.DataFrame]) -> "PitchFeatureEngine":
+        """Fit the feature engine from a stream of season-sized frames."""
+        unique_pitchers: set[int] = set()
+        unique_batters: set[int] = set()
+        pitcher_totals: defaultdict[int, int] = defaultdict(int)
+        pitcher_fastballs: defaultdict[int, int] = defaultdict(int)
+        pitcher_pitch_types: defaultdict[int, set[str]] = defaultdict(set)
 
-        # Compute pitcher fastball percentage and repertoire size
         print("    Computing pitcher tendencies...")
-        pitcher_stats = df.group_by("pitcher_id").agg([
-            pl.count().alias("total_pitches"),
-            pl.col("pitch_type_code").filter(
-                pl.col("pitch_type_code").is_in(self.FASTBALL_TYPES)
-            ).count().alias("fastball_count"),
-            pl.col("pitch_type_code").n_unique().alias("repertoire_size"),
-        ])
+        for df in frames:
+            if df.is_empty():
+                continue
 
-        for row in pitcher_stats.iter_rows(named=True):
-            pid = row["pitcher_id"]
-            total = row["total_pitches"]
-            fb_count = row["fastball_count"]
-            # Fastball percentage (0-1 scale)
-            self.pitcher_ff_pct[pid] = fb_count / total if total > 0 else 0.5
-            # Repertoire size (typically 2-7 pitch types)
-            self.pitcher_repertoire_size[pid] = min(row["repertoire_size"], 10)
+            unique_pitchers.update(int(pid) for pid in df["pitcher_id"].drop_nulls().unique().to_list())
+            unique_batters.update(int(bid) for bid in df["batter_id"].drop_nulls().unique().to_list())
 
+            pitcher_stats = df.group_by("pitcher_id").agg([
+                pl.len().alias("total_pitches"),
+                pl.col("pitch_type_code").filter(
+                    pl.col("pitch_type_code").is_in(self.FASTBALL_TYPES)
+                ).len().alias("fastball_count"),
+                pl.col("pitch_type_code").drop_nulls().unique().alias("pitch_types"),
+            ])
+
+            for row in pitcher_stats.iter_rows(named=True):
+                pitcher_id = row["pitcher_id"]
+                if pitcher_id is None:
+                    continue
+
+                pid = int(pitcher_id)
+                pitcher_totals[pid] += int(row["total_pitches"])
+                pitcher_fastballs[pid] += int(row["fastball_count"])
+                pitch_types = row["pitch_types"] or []
+                pitcher_pitch_types[pid].update(
+                    str(code) for code in pitch_types if code is not None
+                )
+
+        self.pitcher_to_idx = {
+            pid: idx for idx, pid in enumerate(sorted(unique_pitchers))
+        }
+        self.batter_to_idx = {
+            bid: idx for idx, bid in enumerate(sorted(unique_batters))
+        }
+        self.pitcher_ff_pct = {
+            pid: (
+                pitcher_fastballs[pid] / total if total > 0 else 0.5
+            )
+            for pid, total in pitcher_totals.items()
+        }
+        self.pitcher_repertoire_size = {
+            pid: min(len(pitch_types), 10)
+            for pid, pitch_types in pitcher_pitch_types.items()
+        }
         self._fitted = True
         return self
 
@@ -809,6 +832,27 @@ class PitchFeatureEngine:
         return engine
 
 
+def compute_class_weights_from_counts(
+    count_dict: Mapping[int, int],
+    n_classes: int | None = None,
+    smoothing: float = 0.1,
+) -> torch.Tensor:
+    """Compute class weights from pre-aggregated pitch-type counts."""
+    n_classes = n_classes or len(PITCH_TYPE_CODES)
+    total = sum(count_dict.values())
+    if total <= 0:
+        return torch.ones(n_classes, dtype=torch.float32)
+
+    weights = []
+    for i in range(n_classes):
+        count = count_dict.get(i, 1)
+        weight = (total / (n_classes * count)) ** smoothing
+        weights.append(weight)
+
+    normalized = np.array(weights, dtype=np.float32)
+    normalized = normalized / normalized.mean()
+    return torch.tensor(normalized, dtype=torch.float32)
+
 def compute_class_weights(
     df: pl.DataFrame,
     pitch_type_col: str = "pitch_type_idx",
@@ -830,28 +874,13 @@ def compute_class_weights(
     Returns:
         Tensor of class weights for use with CrossEntropyLoss.
     """
-    n_classes = n_classes or len(PITCH_TYPE_CODES)
-
-    # Count occurrences of each pitch type
-    counts = df.group_by(pitch_type_col).agg(pl.count().alias("count"))
+    counts = df.group_by(pitch_type_col).agg(pl.len().alias("count"))
     count_dict = {
-        row[pitch_type_col]: row["count"]
+        int(row[pitch_type_col]): int(row["count"])
         for row in counts.to_dicts()
     }
-
-    # Total samples
-    total = sum(count_dict.values())
-
-    # Compute weights for each class
-    weights = []
-    for i in range(n_classes):
-        count = count_dict.get(i, 1)  # Avoid division by zero
-        # Inverse frequency weight with smoothing
-        weight = (total / (n_classes * count)) ** smoothing
-        weights.append(weight)
-
-    # Normalize so mean weight is 1
-    weights = np.array(weights)
-    weights = weights / weights.mean()
-
-    return torch.tensor(weights, dtype=torch.float32)
+    return compute_class_weights_from_counts(
+        count_dict,
+        n_classes=n_classes,
+        smoothing=smoothing,
+    )

@@ -16,6 +16,13 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
+def _safe_loader_len(loader: DataLoader) -> int | None:
+    """Return loader length when available, else None for streaming loaders."""
+    try:
+        return len(loader)
+    except TypeError:
+        return None
+
 
 class MDNLoss(nn.Module):
     """
@@ -285,12 +292,9 @@ class PitchPredictionTrainer:
         total_location_loss = 0
         n_batches = 0
 
-        loader = (
-            tqdm(self.train_loader, desc="  Train", leave=False)
-            if show_batch_progress
-            else self.train_loader
-        )
-        for batch in loader:
+        progress = tqdm(self.train_loader, desc="  Train", leave=False) if show_batch_progress else None
+        batch_source = progress if progress is not None else self.train_loader
+        for batch in batch_source:
             features = batch["features"].to(self.device)
             targets = batch["targets"].to(self.device)
             lengths = batch["lengths"].to(self.device)
@@ -316,8 +320,8 @@ class PitchPredictionTrainer:
             total_location_loss += loss_dict["location_loss"]
             n_batches += 1
 
-            if show_batch_progress:
-                loader.set_postfix({
+            if progress is not None:
+                progress.set_postfix({
                     "loss": f"{loss_dict['total_loss']:.4f}",
                     "type": f"{loss_dict['type_loss']:.4f}",
                     "loc": f"{loss_dict['location_loss']:.4f}",
@@ -399,9 +403,11 @@ class PitchPredictionTrainer:
         Returns:
             Training history dictionary.
         """
+        train_batches = _safe_loader_len(self.train_loader)
+        val_batches = _safe_loader_len(self.val_loader)
         print(f"Starting training for up to {n_epochs} epochs")
-        print(f"Training batches: {len(self.train_loader)}")
-        print(f"Validation batches: {len(self.val_loader)}")
+        print(f"Training batches: {train_batches if train_batches is not None else 'unknown (streaming)'}")
+        print(f"Validation batches: {val_batches if val_batches is not None else 'unknown (streaming)'}")
         print(f"Early stopping patience: {early_stopping_patience}")
 
         start_time = time.time()
@@ -548,6 +554,9 @@ def train_model(
         dropout=dropout,
     )
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+    assert data_module.train_loader is not None
+    assert data_module.val_loader is not None
 
     # Create trainer
     trainer = PitchPredictionTrainer(

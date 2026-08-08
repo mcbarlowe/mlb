@@ -39,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mlflow-experiment", type=str, default="mlb-model-training")
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--low-memory", action="store_true")
     parser.add_argument("--quick", action="store_true")
     return parser.parse_args()
 
@@ -50,6 +51,7 @@ def build_pitch_type_args(
     train_seasons: list[str],
     quick: bool,
     device: str,
+    low_memory: bool,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         data_path=data_path,
@@ -82,6 +84,8 @@ def build_pitch_type_args(
         device=device,
         seed=42,
         quick=quick,
+        low_memory=low_memory,
+
     )
 
 
@@ -92,6 +96,7 @@ def build_location_args(
     train_seasons: list[str],
     quick: bool,
     device: str,
+    low_memory: bool,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         data_path=data_path,
@@ -109,6 +114,7 @@ def build_location_args(
         output_dir=str(base_output_dir / "pitch_type_location"),
         compare_baseline=not quick,
         quick=quick,
+        low_memory=low_memory,
     )
 
 
@@ -159,7 +165,7 @@ def main() -> None:
 
     if data_path == "postgres":
         available_seasons = set(discover_available_seasons(data_path))
-        required_seasons = set([*train_seasons, VALIDATION_SEASON, TEST_SEASON])
+        required_seasons = {*train_seasons, VALIDATION_SEASON, TEST_SEASON}
         missing_seasons = sorted(required_seasons - available_seasons)
         if missing_seasons:
             raise ValueError(
@@ -170,10 +176,10 @@ def main() -> None:
     tracking_uri = configure_mlflow(args.mlflow_experiment, args.mlflow_tracking_uri)
 
     pitch_args = build_pitch_type_args(
-        output_dir, data_path, train_seasons, args.quick, args.device
+        output_dir, data_path, train_seasons, args.quick, args.device, args.low_memory
     )
     location_args = build_location_args(
-        output_dir, data_path, train_seasons, args.quick, args.device
+        output_dir, data_path, train_seasons, args.quick, args.device, args.low_memory
     )
 
     common_tags = {
@@ -183,6 +189,7 @@ def main() -> None:
         "val_season": location_args.val_season,
         "test_season": location_args.test_season,
         "quick": str(args.quick),
+        "low_memory": str(args.low_memory),
     }
 
     with mlflow.start_run(run_name=f"pitch-type-{datetime.now(tz=UTC).strftime('%Y%m%d_%H%M%S')}"):

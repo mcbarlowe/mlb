@@ -339,6 +339,8 @@ Defaults:
 
 The PostgreSQL training source must already contain the required seasons before this command will run.
 
+Use `--low-memory` for historical retrains on memory-constrained machines; it streams season-sized chunks instead of materializing the entire training window at once.
+
 You can override the tracking backend with `MLFLOW_TRACKING_URI` or `--mlflow-tracking-uri`.
 
 The regression tests use `example_json_files/example_live_feed.json`; they do not require a populated `data/` checkout.
