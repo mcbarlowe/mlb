@@ -987,8 +987,8 @@ class PitchPredictor:
             runner_on_3b: Whether there's a runner on third
             outs: Number of outs (0-2)
         """
-        ax.set_xlim(-1.5, 1.5)
-        ax.set_ylim(-0.5, 2.0)
+        ax.set_xlim(-1.4, 1.4)
+        ax.set_ylim(-0.68, 1.68)
         ax.set_aspect('equal')
         ax.axis('off')
 
@@ -1055,18 +1055,17 @@ class PitchPredictor:
         actual_pitch_type: Optional[str] = None,
         actual_location: Optional[tuple[float, float]] = None,
         save_path: Optional[str] = None,
-        figsize: tuple[float, float] = (14, 10),
+        figsize: tuple[float, float] = (10.5, 8.0),
     ) -> plt.Figure:
         """
-        Create a comprehensive pitch prediction card with full game context.
+        Create a compact pitch prediction card with full game context.
 
-        Includes:
-        - Pitcher and batter names with handedness
-        - Game info (teams, date, inning, score)
-        - Count and outs with baseball diamond
-        - Pitch type probabilities (full names)
-        - Location density heatmap (pitcher's view)
-        - Actual pitch outcome (if provided)
+        Layout (two tight columns, no dead rows):
+        - Navy header band: teams, score, inning, count, pitch number
+        - Matchup row with headshots
+        - Left column: pitch type probabilities, bases/outs diamond below
+        - Right column: strike zone density, in-zone probability below
+        - Optional result band when the actual pitch is provided
 
         Args:
             prediction: PitchPrediction from predict()
@@ -1079,191 +1078,202 @@ class PitchPredictor:
         Returns:
             Matplotlib figure
         """
-        # Create figure with custom layout
+        header_bg = '#14213d'
+        ink = '#1f2937'
+        muted = '#6b7280'
+        track_color = '#e8ecf2'
+        bar_color = '#94a9c9'
+        top_color = '#fca311'
+        actual_color = '#27ae60'
+
         fig = plt.figure(figsize=figsize, facecolor='white')
 
-        # Define grid: header, matchup (with headshots), main content (probs + diamond + zone), footer
+        has_result = bool(actual_pitch_type or actual_location)
+        height_ratios = [0.62, 0.72, 1.55, 1.35, 0.30]
+        n_rows = 5
+        if has_result:
+            height_ratios.append(0.34)
+            n_rows = 6
+
         gs = fig.add_gridspec(
-            4, 3,
-            height_ratios=[0.5, 0.8, 3, 0.5],
-            width_ratios=[1.2, 0.6, 1.4],
-            hspace=0.15,
-            wspace=0.2,
+            n_rows, 2,
+            height_ratios=height_ratios,
+            width_ratios=[1.0, 1.12],
+            hspace=0.30,
+            wspace=0.10,
+            left=0.05, right=0.95, top=0.975, bottom=0.03,
         )
 
         # =====================================================================
-        # Header: Game Info
+        # Header band: scoreboard
         # =====================================================================
         ax_header = fig.add_subplot(gs[0, :])
         ax_header.axis('off')
+        ax_header.add_patch(plt.Rectangle(
+            (0, 0), 1, 1, transform=ax_header.transAxes,
+            facecolor=header_bg, edgecolor='none',
+        ))
 
-        # Build game title - handle missing team names
-        home_team = context.home_team if context.home_team else "HOME"
-        away_team = context.away_team if context.away_team else "AWAY"
-
+        home_team = context.home_team or "HOME"
+        away_team = context.away_team or "AWAY"
         if context.score_home is not None and context.score_away is not None:
-            header_text = f"{away_team} {context.score_away}  @  {home_team} {context.score_home}"
+            score_text = f"{away_team} {context.score_away}  @  {home_team} {context.score_home}"
         else:
-            header_text = f"{away_team}  @  {home_team}"
+            score_text = f"{away_team}  @  {home_team}"
 
+        ax_header.text(
+            0.025, 0.62, score_text,
+            ha='left', va='center', fontsize=17, fontweight='bold',
+            color='white', transform=ax_header.transAxes,
+        )
         if context.date:
-            header_text += f"   •   {context.date}"
+            ax_header.text(
+                0.025, 0.20, context.date,
+                ha='left', va='center', fontsize=9, color='#9fb3c8',
+                transform=ax_header.transAxes,
+            )
 
+        situation = f"{context.inning_half} {context.inning}  •  Count {context.count_str}"
         ax_header.text(
-            0.5, 0.6, header_text,
-            ha='center', va='center',
-            fontsize=18, fontweight='bold',
-            transform=ax_header.transAxes,
+            0.975, 0.62, situation,
+            ha='right', va='center', fontsize=13, fontweight='bold',
+            color='white', transform=ax_header.transAxes,
         )
-
-        # Inning info
-        inning_text = f"{context.inning_half} {context.inning}"
-        ax_header.text(
-            0.5, 0.15, inning_text,
-            ha='center', va='center',
-            fontsize=14, color='#444444',
-            transform=ax_header.transAxes,
-        )
+        if context.pitch_number:
+            ax_header.text(
+                0.975, 0.20, f"Pitch #{context.pitch_number} of at-bat",
+                ha='right', va='center', fontsize=9, color='#9fb3c8',
+                transform=ax_header.transAxes,
+            )
 
         # =====================================================================
-        # Matchup Info with Headshots
+        # Matchup row with headshots
         # =====================================================================
         ax_matchup = fig.add_subplot(gs[1, :])
         ax_matchup.axis('off')
         ax_matchup.set_xlim(0, 1)
         ax_matchup.set_ylim(0, 1)
 
-        # Fetch headshots
         pitcher_headshot = fetch_mlb_headshot(context.pitcher_id, size=80)
         batter_headshot = fetch_mlb_headshot(context.batter_id, size=80)
 
-        # Pitcher section (left side)
+        pitcher_text_x = 0.135
         if pitcher_headshot is not None:
-            # Add headshot image
-            im_pitcher = OffsetImage(pitcher_headshot, zoom=0.5)
-            ab_pitcher = AnnotationBbox(im_pitcher, (0.08, 0.5), frameon=True,
-                                        bboxprops=dict(edgecolor='#cccccc', linewidth=1))
-            ax_matchup.add_artist(ab_pitcher)
-            # Text to the right of image
-            ax_matchup.text(
-                0.20, 0.5, f"P: {context.pitcher_name} ({context.pitcher_hand})",
-                ha='left', va='center',
-                fontsize=12, fontweight='bold',
-                transform=ax_matchup.transAxes,
+            im_pitcher = OffsetImage(pitcher_headshot, zoom=0.52)
+            ax_matchup.add_artist(
+                AnnotationBbox(im_pitcher, (0.06, 0.5), frameon=False)
             )
-        else:
-            # No headshot - just text
-            ax_matchup.text(
-                0.20, 0.5, f"P: {context.pitcher_name} ({context.pitcher_hand})",
-                ha='left', va='center',
-                fontsize=12, fontweight='bold',
-                transform=ax_matchup.transAxes,
-            )
-
-        # VS (centered)
         ax_matchup.text(
-            0.50, 0.5, "vs",
-            ha='center', va='center',
-            fontsize=14, fontweight='bold', color='#666666',
+            pitcher_text_x, 0.62, context.pitcher_name,
+            ha='left', va='center', fontsize=12, fontweight='bold',
+            color=ink, transform=ax_matchup.transAxes,
+        )
+        ax_matchup.text(
+            pitcher_text_x, 0.30, f"{context.pitcher_hand}HP  •  pitching",
+            ha='left', va='center', fontsize=9, color=muted,
             transform=ax_matchup.transAxes,
         )
 
-        # Batter section (right side)
+        ax_matchup.text(
+            0.5, 0.5, "vs",
+            ha='center', va='center', fontsize=12, fontweight='bold',
+            color='#b0b7c3', transform=ax_matchup.transAxes,
+        )
+
+        batter_text_x = 0.865
         if batter_headshot is not None:
-            # Text to the left of image
-            ax_matchup.text(
-                0.80, 0.5, f"B: {context.batter_name} ({context.batter_hand})",
-                ha='right', va='center',
-                fontsize=12, fontweight='bold',
-                transform=ax_matchup.transAxes,
+            im_batter = OffsetImage(batter_headshot, zoom=0.52)
+            ax_matchup.add_artist(
+                AnnotationBbox(im_batter, (0.94, 0.5), frameon=False)
             )
-            # Add headshot image
-            im_batter = OffsetImage(batter_headshot, zoom=0.5)
-            ab_batter = AnnotationBbox(im_batter, (0.92, 0.5), frameon=True,
-                                       bboxprops=dict(edgecolor='#cccccc', linewidth=1))
-            ax_matchup.add_artist(ab_batter)
-        else:
-            # No headshot - just text
-            ax_matchup.text(
-                0.80, 0.5, f"B: {context.batter_name} ({context.batter_hand})",
-                ha='right', va='center',
-                fontsize=12, fontweight='bold',
-                transform=ax_matchup.transAxes,
-            )
+        ax_matchup.text(
+            batter_text_x, 0.62, context.batter_name,
+            ha='right', va='center', fontsize=12, fontweight='bold',
+            color=ink, transform=ax_matchup.transAxes,
+        )
+        ax_matchup.text(
+            batter_text_x, 0.30, f"{context.batter_hand}HB  •  batting",
+            ha='right', va='center', fontsize=9, color=muted,
+            transform=ax_matchup.transAxes,
+        )
 
         # =====================================================================
-        # Left Panel: Pitch Type Probabilities (table format)
+        # Left column, top: pitch type probabilities
         # =====================================================================
         ax_probs = fig.add_subplot(gs[2, 0])
         ax_probs.set_xlim(0, 1)
         ax_probs.set_ylim(0, 1)
         ax_probs.axis('off')
+        ax_probs.text(
+            0.0, 1.04, 'N E X T   P I T C H', ha='left', va='bottom',
+            fontsize=9, fontweight='bold', color=muted,
+            transform=ax_probs.transAxes,
+        )
 
-        # Count display at top
-        count_text = f"Count: {context.count_str}"
-        if context.pitch_number:
-            count_text += f"  (Pitch #{context.pitch_number})"
-        ax_probs.set_title(count_text, fontsize=11, fontweight='bold', pad=8)
-
-        # Sort pitch types by probability
         probs = prediction.type_probabilities
         sorted_idx = np.argsort(probs)[::-1]
         sorted_codes = [PITCH_TYPE_CODES[i] for i in sorted_idx]
         sorted_probs = probs[sorted_idx]
 
-        # Only show types with >1% probability, max 6
         mask = sorted_probs > 0.01
-        n_show = min(sum(mask), 6)
+        n_show = min(int(np.sum(mask)), 5)
 
-        # Table layout parameters
-        table_top = 0.88
-        row_height = 0.12
+        row_top = 0.92
+        row_height = 0.21
+        bar_y_offset = 0.055
 
-        # Draw each row as a single formatted string + bar
         for i in range(n_show):
-            y_pos = table_top - (i * row_height)
+            y_pos = row_top - i * row_height
             pitch_code = sorted_codes[i]
             pitch_name = PITCH_TYPE_FULL_NAMES.get(pitch_code, pitch_code)
-            prob = sorted_probs[i]
+            prob = float(sorted_probs[i])
 
-            # Determine row styling
-            is_actual = actual_pitch_type and pitch_code == actual_pitch_type
+            is_actual = bool(actual_pitch_type and pitch_code == actual_pitch_type)
             if is_actual:
-                text_color = '#27ae60'  # Green for actual pitch
-                font_weight = 'bold'
+                name_color, fill_color, weight = actual_color, actual_color, 'bold'
             elif i == 0:
-                text_color = '#2c3e50'  # Dark for top prediction
-                font_weight = 'bold'
+                name_color, fill_color, weight = ink, top_color, 'bold'
             else:
-                text_color = '#666666'
-                font_weight = 'normal'
+                name_color, fill_color, weight = muted, bar_color, 'normal'
 
-            # Combined row text: "FF  Four-Seam Fastball    45%"
-            row_text = f"{pitch_code:<3} {pitch_name:<20} {prob:>4.0%}"
-            ax_probs.text(0.05, y_pos, row_text, fontsize=10,
-                          color=text_color, fontweight=font_weight,
-                          family='monospace', va='center',
-                          transform=ax_probs.transAxes)
+            ax_probs.text(
+                0.0, y_pos, pitch_name, ha='left', va='bottom',
+                fontsize=10.5, color=name_color, fontweight=weight,
+                transform=ax_probs.transAxes,
+            )
+            ax_probs.text(
+                1.0, y_pos, f"{prob:.0%}", ha='right', va='bottom',
+                fontsize=10.5, color=name_color, fontweight=weight,
+                transform=ax_probs.transAxes,
+            )
+            bar_y = y_pos - bar_y_offset
+            ax_probs.plot(
+                [0.0, 1.0], [bar_y, bar_y], color=track_color,
+                linewidth=5, solid_capstyle='round',
+                transform=ax_probs.transAxes, zorder=1,
+            )
+            ax_probs.plot(
+                [0.0, max(prob, 0.012)], [bar_y, bar_y], color=fill_color,
+                linewidth=5, solid_capstyle='round',
+                transform=ax_probs.transAxes, zorder=2,
+            )
 
-            # Probability bar
-            bar_color = '#27ae60' if is_actual else '#3498db'
-            bar_width = 0.18 * prob
-            ax_probs.plot([0.78, 0.78 + bar_width], [y_pos, y_pos],
-                          color=bar_color, linewidth=5, solid_capstyle='round',
-                          transform=ax_probs.transAxes)
-
-        # Pitch result at bottom of panel
         if context.pitch_result:
-            result_y = table_top - (n_show * row_height) - 0.08
-            ax_probs.text(0.05, result_y, f"Result: {context.pitch_result}",
-                          fontsize=10, va='top',
-                          color='#c0392b', fontweight='bold',
-                          transform=ax_probs.transAxes)
+            ax_probs.text(
+                0.0, -0.08, f"Result: {context.pitch_result}",
+                fontsize=9, va='top', color='#c0392b', fontweight='bold',
+                transform=ax_probs.transAxes,
+            )
 
         # =====================================================================
-        # Center Panel: Baseball Diamond with Runners
+        # Left column, bottom: bases and outs
         # =====================================================================
-        ax_diamond = fig.add_subplot(gs[2, 1])
+        ax_diamond = fig.add_subplot(gs[3, 0])
+        ax_diamond.text(
+            0.0, 1.02, 'S I T U A T I O N', ha='left', va='bottom',
+            fontsize=9, fontweight='bold', color=muted,
+            transform=ax_diamond.transAxes,
+        )
         self._draw_baseball_diamond(
             ax_diamond,
             runner_on_1b=context.runner_on_1b,
@@ -1273,154 +1283,124 @@ class PitchPredictor:
         )
 
         # =====================================================================
-        # Right Panel: Strike Zone with Location Density (Pitcher's View)
+        # Right column: strike zone density (spans probability + diamond rows)
         # =====================================================================
-        ax_zone = fig.add_subplot(gs[2, 2])
+        ax_zone = fig.add_subplot(gs[2:4, 1])
+        ax_zone.text(
+            0.0, 1.015, "P R E D I C T E D   L O C A T I O N   (P I T C H E R ' S   V I E W)",
+            ha='left', va='bottom', fontsize=9, fontweight='bold', color=muted,
+            transform=ax_zone.transAxes,
+        )
 
-        # Create meshgrid for density - FLIP X for pitcher's view
-        # Negate px_grid to flip the horizontal axis (no fliplr needed - meshgrid handles it)
         PX, PZ = np.meshgrid(-prediction.px_grid, prediction.pz_grid)
-
-        # Plot density contours
-        contour = ax_zone.contourf(
+        ax_zone.contourf(
             PX, PZ, prediction.location_density,
-            levels=20,
-            cmap='YlOrRd',
-            alpha=0.85,
+            levels=20, cmap='YlOrRd', alpha=0.85,
         )
         ax_zone.contour(
             PX, PZ, prediction.location_density,
-            levels=8,
-            colors='darkred',
-            alpha=0.3,
-            linewidths=0.5,
+            levels=8, colors='darkred', alpha=0.25, linewidths=0.5,
         )
 
-        # Draw strike zone (standard 17" wide plate)
-        zone_width = 17 / 12  # Convert to feet
-        zone_left = -zone_width / 2
-        zone_bottom = 1.5  # Typical zone bottom
-        zone_height = 2.0  # Typical zone height
-
+        zone_width = 17 / 12
         strike_zone = plt.Rectangle(
-            (zone_left, zone_bottom), zone_width, zone_height,
-            fill=False, edgecolor='black', linewidth=3,
+            (-zone_width / 2, 1.5), zone_width, 2.0,
+            fill=False, edgecolor='black', linewidth=2.4,
         )
         ax_zone.add_patch(strike_zone)
 
-        # Draw home plate (from pitcher's view - point faces pitcher)
-        plate_y = 0.8
+        plate_y = 0.82
         plate = plt.Polygon(
             [[-0.708, plate_y + 0.3], [0.708, plate_y + 0.3],
              [0.708, plate_y + 0.2], [0, plate_y],
              [-0.708, plate_y + 0.2]],
-            fill=True, facecolor='white', edgecolor='black', linewidth=2,
+            fill=True, facecolor='white', edgecolor='black', linewidth=1.6,
         )
         ax_zone.add_patch(plate)
 
-        # Plot predicted EXPECTED VALUE (mean) - FLIP X for pitcher's view
-        pred_exp_px_flipped = -prediction.location_point[0]
         ax_zone.scatter(
-            pred_exp_px_flipped,
+            -prediction.location_point[0],
             prediction.location_point[1],
-            c='#3498db', s=100, marker='D',
-            label='Expected',
-            zorder=9, edgecolors='#2471a3', linewidths=1.5,
+            c='#2e86de', s=90, marker='D', label='Expected',
+            zorder=9, edgecolors='#1b4f8f', linewidths=1.4,
         )
-
-        # Plot actual location if provided (FLIP X for pitcher's view)
         if actual_location is not None:
-            actual_px_flipped = -actual_location[0]
             ax_zone.scatter(
-                actual_px_flipped, actual_location[1],
-                c='#e74c3c', s=200, marker='X',
-                label='Actual',
+                -actual_location[0], actual_location[1],
+                c='#e74c3c', s=180, marker='X', label='Actual',
                 zorder=11, edgecolors='#c0392b', linewidths=2,
             )
 
-        ax_zone.set_xlim(-2.2, 2.2)
-        ax_zone.set_ylim(0.5, 4.5)
-        ax_zone.set_xlabel('Horizontal (ft) - Pitcher\'s View', fontsize=10)
-        ax_zone.set_ylabel('Vertical (ft)', fontsize=10)
-        ax_zone.set_title('Pitch Location Prediction', fontsize=12, fontweight='bold')
+        ax_zone.set_xlim(-1.9, 1.9)
+        ax_zone.set_ylim(0.7, 4.3)
         ax_zone.set_aspect('equal')
+        ax_zone.set_xticks([])
+        ax_zone.set_yticks([])
+        for spine in ax_zone.spines.values():
+            spine.set_color('#d5dbe4')
         ax_zone.legend(
-            loc='upper right',
-            fontsize=10,
-            markerscale=1.2,
-            handletextpad=0.8,
-            labelspacing=1.2,
-            framealpha=0.9,
+            loc='upper right', fontsize=8.5, frameon=False,
+            handletextpad=0.5, borderaxespad=0.2,
+        )
+        ax_zone.text(-1.78, 0.82, '← LHB', fontsize=8, color=muted)
+        ax_zone.text(1.32, 0.82, 'RHB →', fontsize=8, color=muted)
+
+        # =====================================================================
+        # Under the zone: in-zone probability
+        # =====================================================================
+        ax_zone_prob = fig.add_subplot(gs[4, 1])
+        ax_zone_prob.axis('off')
+        strike_prob = self.get_strike_zone_probability(prediction)
+        ax_zone_prob.text(
+            0.5, 0.5, f"In-zone probability: {strike_prob:.0%}",
+            ha='center', va='center', fontsize=11, fontweight='bold',
+            color=ink, transform=ax_zone_prob.transAxes,
         )
 
-        # Add pitcher's perspective labels (flipped from catcher's view)
-        ax_zone.text(-1.8, 0.6, '← LHB', fontsize=8, color='#666666')
-        ax_zone.text(1.4, 0.6, 'RHB →', fontsize=8, color='#666666')
-
         # =====================================================================
-        # Footer: Actual Result (if provided)
+        # Optional result band (only when the actual pitch is known)
         # =====================================================================
-        ax_footer = fig.add_subplot(gs[3, :])
-        ax_footer.axis('off')
+        if has_result:
+            ax_footer = fig.add_subplot(gs[5, :])
+            ax_footer.axis('off')
 
-        if actual_pitch_type or actual_location:
             result_parts = []
             if actual_pitch_type:
                 actual_full_name = PITCH_TYPE_FULL_NAMES.get(actual_pitch_type, actual_pitch_type)
                 result_parts.append(f"Actual: {actual_full_name}")
             if actual_location:
-                result_parts.append(f"Location: ({actual_location[0]:.2f}, {actual_location[1]:.2f})")
-
-                # Calculate prediction errors for both mode and expected value
-                mode_error = np.sqrt(
-                    (prediction.location_mode[0] - actual_location[0])**2 +
-                    (prediction.location_mode[1] - actual_location[1])**2
+                result_parts.append(
+                    f"Location: ({actual_location[0]:.2f}, {actual_location[1]:.2f})"
                 )
                 exp_error = np.sqrt(
                     (prediction.location_point[0] - actual_location[0])**2 +
                     (prediction.location_point[1] - actual_location[1])**2
                 )
-                result_parts.append(f"Mode Err: {mode_error:.2f} ft")
                 result_parts.append(f"Exp Err: {exp_error:.2f} ft")
-
-            # Check if pitch type was correctly predicted
             if actual_pitch_type:
                 if actual_pitch_type == prediction.predicted_type:
                     result_parts.append("✓ Type Correct")
                 else:
-                    predicted_full_name = PITCH_TYPE_FULL_NAMES.get(prediction.predicted_type, prediction.predicted_type)
-                    actual_prob = probs[PITCH_TYPE_CODES.index(actual_pitch_type)] if actual_pitch_type in PITCH_TYPE_CODES else 0
-                    result_parts.append(f"Predicted: {predicted_full_name} (Actual had {actual_prob:.1%})")
+                    actual_prob = (
+                        probs[PITCH_TYPE_CODES.index(actual_pitch_type)]
+                        if actual_pitch_type in PITCH_TYPE_CODES
+                        else 0
+                    )
+                    result_parts.append(
+                        f"Predicted: {prediction.predicted_type} (actual had {actual_prob:.0%})"
+                    )
 
-            result_text = "  •  ".join(result_parts)
-
-            # Color based on prediction accuracy
-            if actual_pitch_type == prediction.predicted_type:
-                text_color = '#27ae60'  # Green
-            else:
-                text_color = '#e74c3c'  # Red
-
+            footer_color = (
+                actual_color
+                if actual_pitch_type == prediction.predicted_type
+                else '#e74c3c'
+            )
             ax_footer.text(
-                0.5, 0.5, result_text,
-                ha='center', va='center',
-                fontsize=11,
-                color=text_color,
-                fontweight='bold',
+                0.5, 0.5, "  •  ".join(result_parts),
+                ha='center', va='center', fontsize=10.5,
+                color=footer_color, fontweight='bold',
                 transform=ax_footer.transAxes,
             )
-        else:
-            # Strike zone probability
-            strike_prob = self.get_strike_zone_probability(prediction)
-            ax_footer.text(
-                0.5, 0.5,
-                f"Strike Zone Probability: {strike_prob:.1%}",
-                ha='center', va='center',
-                fontsize=11,
-                color='#2c3e50',
-                transform=ax_footer.transAxes,
-            )
-
-        plt.tight_layout()
 
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
