@@ -1,4 +1,4 @@
-"""Publishing predicted-pitch graphics to Twitter (or a local dry run)."""
+"""Publishing predicted-pitch graphics to Bluesky (or a local dry run)."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from typing import Protocol
 from src.live.game_state import LiveSnapshot
 from src.ml.pitch_predictor import PitchPrediction
 
-REQUIRED_TWITTER_ENV_VARS = (
-    "TWITTER_API_KEY",
-    "TWITTER_API_SECRET",
-    "TWITTER_ACCESS_TOKEN",
-    "TWITTER_ACCESS_TOKEN_SECRET",
-)
+REQUIRED_BLUESKY_ENV_VARS = ("BLUESKY_HANDLE", "BLUESKY_APP_PASSWORD")
+DEFAULT_PDS_URL = "https://bsky.social"
+
+# Bluesky rejects blobs larger than ~976 KB and posts over 300 graphemes.
+MAX_IMAGE_BYTES = 950_000
+MAX_POST_CHARS = 300
 
 
 @dataclass(frozen=True)
@@ -27,12 +27,12 @@ class PredictionPost:
 
 
 def build_post_text(snapshot: LiveSnapshot, prediction: PitchPrediction) -> str:
-    """Build the tweet caption for a next-pitch prediction."""
+    """Build the post caption for a next-pitch prediction."""
     context = snapshot.context
     top = prediction.top_3_types[:2]
     top_text = " | ".join(f"{code} {prob:.0%}" for code, prob in top)
     location = prediction.location_point
-    return (
+    text = (
         f"Next pitch: {context.pitcher_name} to {context.batter_name}\n"
         f"{top_text}\n"
         f"Expected location: ({location[0]:.2f}, {location[1]:.2f}) ft\n"
@@ -40,13 +40,19 @@ def build_post_text(snapshot: LiveSnapshot, prediction: PitchPrediction) -> str:
         f"{context.outs} out\n"
         f"{context.game_str}"
     )
+    return text[:MAX_POST_CHARS]
+
+
+def build_image_alt_text(post_text: str) -> str:
+    """Alt text for the card image, derived from the caption."""
+    return "Pitch prediction card. " + post_text.replace("\n", " ")
 
 
 class Publisher(Protocol):
     """Anything that can publish one prediction post."""
 
     def publish(self, post: PredictionPost) -> str:
-        """Publish and return an identifier (tweet id or file path)."""
+        """Publish and return an identifier (post URI or file path)."""
         ...
 
 
@@ -58,49 +64,50 @@ class DryRunPublisher:
 
     def publish(self, post: PredictionPost) -> str:
         self.published.append(post)
-        print(f"[dry-run] would tweet card {post.image_path}")
+        print(f"[dry-run] would post card {post.image_path}")
         print(post.text)
         return str(post.image_path)
 
 
-class TwitterPublisher:
-    """Posts the card image plus caption to Twitter/X.
+class BlueskyPublisher:
+    """Posts the card image plus caption to Bluesky via the AT Protocol.
 
-    Requires TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN,
-    and TWITTER_ACCESS_TOKEN_SECRET in the environment. Media upload uses
-    the v1.1 endpoint; the tweet itself is created through the v2 API.
+    Requires BLUESKY_HANDLE and BLUESKY_APP_PASSWORD in the environment.
+    BLUESKY_PDS_URL optionally overrides the default https://bsky.social
+    endpoint for self-hosted PDS setups.
     """
 
     def __init__(self) -> None:
-        missing = [name for name in REQUIRED_TWITTER_ENV_VARS if not os.getenv(name)]
+        missing = [name for name in REQUIRED_BLUESKY_ENV_VARS if not os.getenv(name)]
         if missing:
             raise RuntimeError(
-                "Missing Twitter credentials in environment: " + ", ".join(missing)
+                "Missing Bluesky credentials in environment: "
+                + ", ".join(missing)
+                + ". Create an app password at bsky.app -> Settings -> App Passwords."
             )
 
-        import tweepy
+        from atproto import Client
 
-        auth = tweepy.OAuth1UserHandler(
-            os.environ["TWITTER_API_KEY"],
-            os.environ["TWITTER_API_SECRET"],
-            os.environ["TWITTER_ACCESS_TOKEN"],
-            os.environ["TWITTER_ACCESS_TOKEN_SECRET"],
-        )
-        self._media_api = tweepy.API(auth)
-        self._client = tweepy.Client(
-            consumer_key=os.environ["TWITTER_API_KEY"],
-            consumer_secret=os.environ["TWITTER_API_SECRET"],
-            access_token=os.environ["TWITTER_ACCESS_TOKEN"],
-            access_token_secret=os.environ["TWITTER_ACCESS_TOKEN_SECRET"],
+        self._client = Client(os.getenv("BLUESKY_PDS_URL", DEFAULT_PDS_URL))
+        self._client.login(
+            os.environ["BLUESKY_HANDLE"],
+            os.environ["BLUESKY_APP_PASSWORD"],
         )
 
     def publish(self, post: PredictionPost) -> str:
-        media = self._media_api.media_upload(str(post.image_path))
-        response = self._client.create_tweet(
+        image_bytes = post.image_path.read_bytes()
+        if len(image_bytes) > MAX_IMAGE_BYTES:
+            raise RuntimeError(
+                f"Card image {post.image_path} is {len(image_bytes):,} bytes; "
+                f"Bluesky blobs must stay under {MAX_IMAGE_BYTES:,} bytes. "
+                "Lower the card DPI or figure size."
+            )
+
+        response = self._client.send_image(
             text=post.text,
-            media_ids=[media.media_id],
+            image=image_bytes,
+            image_alt=build_image_alt_text(post.text),
         )
-        response_data = getattr(response, "data", None) or {}
-        tweet_id = str(response_data.get("id", ""))
-        print(f"Posted tweet {tweet_id} with card {post.image_path}")
-        return tweet_id
+        post_uri = str(getattr(response, "uri", ""))
+        print(f"Posted to Bluesky {post_uri} with card {post.image_path}")
+        return post_uri

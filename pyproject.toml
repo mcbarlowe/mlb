@@ -21,7 +21,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "torch>=2.0.0,<2.3.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "torch>=2.0.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
-    "tweepy>=4.14.0",
+    "atproto>=0.0.55",
     "tqdm>=4.67.1",
 ]
 

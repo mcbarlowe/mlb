@@ -347,14 +347,14 @@ The regression tests use `example_json_files/example_live_feed.json`; they do no
 
 ### Live Next-Pitch Prediction
 
-Predict the next pitch of in-progress games and publish pitch cards to Twitter:
+Predict the next pitch of in-progress games and publish pitch cards to Bluesky:
 
 ```bash
 # Dry run for today's schedule: waits for first pitch, polls live games,
-# saves cards to output/live_cards/<game_pk>/ without tweeting
+# saves cards to output/live_cards/<game_pk>/ without posting
 uv run python scripts/run_live_pipeline.py
 
-# Actually post to Twitter (requires credentials, see below)
+# Actually post to Bluesky (requires credentials, see below)
 uv run python scripts/run_live_pipeline.py --post
 
 # Follow one game only
@@ -370,7 +370,7 @@ How it works:
 
 Model defaults are the trained pair in `models/attention_full/run_20260119_124719` (pitch type) and `models/pitch_type_location_20260121_003206` (location); override with `--pitch-type-model` / `--location-model` when newer models finish training.
 
-Twitter posting uses these environment variables: `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN`, `TWITTER_ACCESS_TOKEN_SECRET`. Without `--post`, the pipeline runs in dry-run mode and only saves card images.
+Bluesky posting uses these environment variables: `BLUESKY_HANDLE` (e.g. `pitchbot.bsky.social`) and `BLUESKY_APP_PASSWORD` (create one at bsky.app -> Settings -> App Passwords; never use the main account password). Set `BLUESKY_PDS_URL` only for a self-hosted PDS. Without `--post`, the pipeline runs in dry-run mode and only saves card images.
 
 ## Performance Notes
 

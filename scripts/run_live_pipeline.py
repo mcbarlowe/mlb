@@ -2,14 +2,14 @@
 
 Waits for game start using the MLB schedule, polls live feeds while
 games are in progress, predicts the next pitch before it happens,
-renders a pitch card, and posts it to Twitter (or saves locally in
+renders a pitch card, and posts it to Bluesky (or saves locally in
 dry-run mode).
 
 Usage:
-    # Monitor all of today's games (dry run, no tweets)
+    # Monitor all of today's games (dry run, no posts)
     uv run python scripts/run_live_pipeline.py
 
-    # Monitor a specific date and actually post to Twitter
+    # Monitor a specific date and actually post to Bluesky
     uv run python scripts/run_live_pipeline.py --date 2026-08-09 --post
 
     # Follow a single game
@@ -37,7 +37,7 @@ from src.live.pipeline import (
     run_live_game,
 )
 from src.live.predictor import LiveNextPitchPredictor
-from src.live.publisher import DryRunPublisher, TwitterPublisher
+from src.live.publisher import BlueskyPublisher, DryRunPublisher
 
 DEFAULT_PITCH_TYPE_MODEL = "models/attention_full/run_20260119_124719"
 DEFAULT_LOCATION_MODEL = "models/pitch_type_location_20260121_003206"
@@ -83,20 +83,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--post",
         action="store_true",
-        help="Actually post to Twitter (default: dry run that saves cards)",
+        help="Actually post to Bluesky (default: dry run that saves cards)",
     )
     parser.add_argument(
         "--post-cadence",
         type=str,
         choices=["at_bat", "pitch"],
         default="at_bat",
-        help="Tweet once per at-bat (default) or on every pitch",
+        help="Post once per at-bat (default) or on every pitch",
     )
     parser.add_argument(
         "--max-posts-per-game",
         type=int,
         default=40,
-        help="Hard cap on tweets per game to respect API limits",
+        help="Hard cap on posts per game",
     )
     return parser.parse_args()
 
@@ -116,7 +116,7 @@ def main() -> None:
         location_model_dir=args.location_model or None,
         device=args.device,
     )
-    publisher = TwitterPublisher() if args.post else DryRunPublisher()
+    publisher = BlueskyPublisher() if args.post else DryRunPublisher()
     service = LiveGamePredictionService(
         predictor=predictor,
         publisher=publisher,
