@@ -83,9 +83,13 @@ def build_pending_row(
     )
     if ab_pitches.is_empty():
         next_pitch_number = 1
+        last_pitch_speed = None
     else:
-        max_pitch_number = ab_pitches["pitch_number"].max()
+        ordered = ab_pitches.sort("pitch_number")
+        max_pitch_number = ordered["pitch_number"].max()
         next_pitch_number = int(str(max_pitch_number)) + 1
+        raw_speed = ordered["pitch_start_speed"][-1]
+        last_pitch_speed = float(raw_speed) if raw_speed is not None else None
 
     teams = linescore.get("teams", {})
     home_score = teams.get("home", {}).get("runs", 0) or 0
@@ -127,7 +131,9 @@ def build_pending_row(
         "pitch_type": None,
         "px": None,
         "pz": None,
-        "pitch_start_speed": None,
+        # Carry the previous pitch speed so velocity_delta stays neutral (0)
+        # instead of implying a phantom speed drop from the 90 mph fill.
+        "pitch_start_speed": last_pitch_speed,
         "pitch_strike_zone_top": None,
         "pitch_strike_zone_bottom": None,
         "is_strike": False,
@@ -177,6 +183,10 @@ def build_live_snapshot(feed: dict) -> LiveSnapshot | None:
 
     current_play = feed.get("liveData", {}).get("plays", {}).get("currentPlay")
     if not current_play:
+        return None
+    if current_play.get("about", {}).get("isComplete"):
+        # The at-bat just ended; there is no upcoming pitch to predict until
+        # the feed rolls over to the next batter.
         return None
 
     game_info = _transformer._process_game_data(feed)

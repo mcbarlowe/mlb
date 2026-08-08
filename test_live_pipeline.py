@@ -129,6 +129,27 @@ def test_build_live_snapshot_appends_pending_pitch():
     assert context.home_team == "BOS"
 
 
+def test_pending_row_carries_previous_pitch_speed():
+    snapshot = build_live_snapshot(_live_feed(current_pitches=2, balls=1, strikes=2))
+
+    assert snapshot is not None
+    pending = (
+        snapshot.frame.filter(snapshot.frame["at_bat_index"] == 12)
+        .sort("pitch_number")
+        .row(-1, named=True)
+    )
+    # Fixture pitches all have startSpeed 94.2; the pending (unthrown) pitch
+    # must inherit it so velocity_delta is 0 instead of a phantom 90-fill drop.
+    assert pending["pitch_start_speed"] == 94.2
+
+
+def test_build_live_snapshot_skips_completed_at_bat():
+    feed = _live_feed(current_pitches=1, balls=0, strikes=1)
+    feed["liveData"]["plays"]["currentPlay"]["about"]["isComplete"] = True
+
+    assert build_live_snapshot(feed) is None
+
+
 def test_build_live_snapshot_handles_first_pitch_of_at_bat():
     snapshot = build_live_snapshot(_live_feed(current_pitches=0, balls=0, strikes=0))
 
@@ -136,6 +157,49 @@ def test_build_live_snapshot_handles_first_pitch_of_at_bat():
     assert snapshot.next_pitch_number == 1
     assert snapshot.pitch_key == (12, 0, 0, 0)
 
+
+def test_pending_row_feature_engineering_uses_prior_pitches_in_ab():
+    from src.live.predictor import LiveNextPitchPredictor
+
+    predictor = LiveNextPitchPredictor(
+        "models/attention_full/run_20260119_124719",
+        "models/pitch_type_location_20260121_003206",
+    )
+
+    snapshot = build_live_snapshot(_live_feed(current_pitches=2, balls=1, strikes=2))
+    assert snapshot is not None
+
+    at_bat = predictor._at_bat_features(snapshot).sort("pitch_number")
+    pending = at_bat.row(-1, named=True)
+
+    assert pending["pitch_number"] == 3
+    assert pending["first_pitch"] == 0
+    assert pending["prev_pitch_type_idx"] == 0  # FF
+    assert pending["n_fastballs_in_ab"] == 2
+    assert pending["n_breaking_in_ab"] == 0
+    assert pending["same_pitch_streak"] == 1
+
+
+def test_pending_row_feature_engineering_handles_first_pitch_without_history():
+    from src.live.predictor import LiveNextPitchPredictor
+
+    predictor = LiveNextPitchPredictor(
+        "models/attention_full/run_20260119_124719",
+        "models/pitch_type_location_20260121_003206",
+    )
+
+    snapshot = build_live_snapshot(_live_feed(current_pitches=0, balls=0, strikes=0))
+    assert snapshot is not None
+
+    at_bat = predictor._at_bat_features(snapshot).sort("pitch_number")
+    pending = at_bat.row(-1, named=True)
+
+    assert pending["pitch_number"] == 1
+    assert pending["first_pitch"] == 1
+    assert pending["prev_pitch_type_idx"] == -1
+    assert pending["n_fastballs_in_ab"] == 0
+    assert pending["n_breaking_in_ab"] == 0
+    assert pending["same_pitch_streak"] == 0
 
 def test_build_live_snapshot_returns_none_for_final_game():
     feed = _live_feed(current_pitches=1, balls=0, strikes=1)
