@@ -7,6 +7,7 @@ building, model prediction, card rendering, and publishing.
 from __future__ import annotations
 
 import asyncio
+import random
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -223,3 +224,69 @@ async def run_live_game(
                 print(f"[game {game_pk}] state {state.value}; waiting for start")
 
             await asyncio.sleep(poll_interval)
+
+
+
+def eligible_games(games: list[dict]) -> list[dict]:
+    """Games that can still be followed today (not final/postponed/cancelled)."""
+    from src.etl.daily_pipeline import classify_game_state
+
+    keep = (GameState.SCHEDULED, GameState.LIVE, GameState.UNKNOWN)
+    return [
+        game
+        for game in games
+        if classify_game_state(game.get("status", {}).get("statusCode", "")) in keep
+    ]
+
+
+def choose_random_game(games: list[dict], rng: random.Random) -> dict | None:
+    """Pick one followable game at random from a day's schedule."""
+    candidates = eligible_games(games)
+    if not candidates:
+        return None
+    return rng.choice(candidates)
+
+
+def describe_game(game: dict) -> str:
+    away = game.get("teams", {}).get("away", {}).get("team", {}).get("name", "?")
+    home = game.get("teams", {}).get("home", {}).get("team", {}).get("name", "?")
+    return f"{away} @ {home} (gamePk {game.get('gamePk')}, start {game.get('gameDate')})"
+
+
+async def run_random_live_game(
+    target_date: date,
+    service: LiveGamePredictionService,
+    poll_interval: float = 20.0,
+    lead_minutes: float = 15.0,
+    seed: int | None = None,
+) -> dict:
+    """Pick one game at random from the schedule and follow only that game.
+
+    Waits until `lead_minutes` before the chosen game's scheduled start,
+    then polls it through completion.
+    """
+    rng = random.Random(seed)
+
+    async with DailyPipeline(concurrency_limit=4) as pipeline:
+        games = await pipeline.get_games_for_date(target_date)
+
+    chosen = choose_random_game(games, rng)
+    if chosen is None:
+        print(f"No followable games on {target_date.isoformat()}")
+        return {"date": target_date.isoformat(), "games": 0}
+
+    print(f"Randomly selected: {describe_game(chosen)}")
+
+    delay = seconds_until_monitoring(
+        [chosen],
+        now=datetime.now(tz=UTC),
+        lead=timedelta(minutes=lead_minutes),
+    )
+    if delay > 0:
+        print(f"Sleeping {delay/60:.1f} minutes until game time...")
+        await asyncio.sleep(delay)
+
+    game_pk = int(chosen["gamePk"])
+    result = await run_live_game(game_pk, service, poll_interval=poll_interval)
+    result["selected_game"] = describe_game(chosen)
+    return result

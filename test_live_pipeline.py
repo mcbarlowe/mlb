@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import random
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 
 from src.live.game_state import build_live_snapshot
-from src.live.pipeline import LiveGamePredictionService, seconds_until_monitoring
+from src.live.pipeline import (
+    LiveGamePredictionService,
+    choose_random_game,
+    eligible_games,
+    seconds_until_monitoring,
+)
 from src.live.predictor import mixture_density_grid
 from src.live.publisher import DryRunPublisher, PredictionPost
 
@@ -197,6 +203,43 @@ def test_dry_run_publisher_records_posts(tmp_path: Path):
     card.write_bytes(b"png")
 
     result = publisher.publish(PredictionPost(text="next pitch", image_path=card))
-
     assert result == str(card)
     assert publisher.published[0].text == "next pitch"
+
+
+
+def _schedule_game(game_pk: int, status_code: str) -> dict:
+    return {
+        "gamePk": game_pk,
+        "gameDate": "2026-08-08T23:10:00Z",
+        "status": {"statusCode": status_code},
+        "teams": {
+            "away": {"team": {"name": "Away"}},
+            "home": {"team": {"name": "Home"}},
+        },
+    }
+
+
+def test_eligible_games_filters_terminal_states():
+    games = [
+        _schedule_game(1, "S"),
+        _schedule_game(2, "PW"),
+        _schedule_game(3, "I"),
+        _schedule_game(4, "F"),
+        _schedule_game(5, "PD"),
+        _schedule_game(6, "C"),
+    ]
+
+    kept = [game["gamePk"] for game in eligible_games(games)]
+    assert kept == [1, 2, 3]
+
+
+def test_choose_random_game_is_seed_deterministic():
+    games = [_schedule_game(pk, "S") for pk in (10, 20, 30, 40)]
+
+    first = choose_random_game(games, random.Random(42))
+    second = choose_random_game(games, random.Random(42))
+    assert first is not None and second is not None
+    assert first["gamePk"] == second["gamePk"]
+
+    assert choose_random_game([_schedule_game(1, "F")], random.Random(1)) is None

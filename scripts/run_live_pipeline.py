@@ -35,6 +35,7 @@ from src.live.pipeline import (
     LiveGamePredictionService,
     run_live_day,
     run_live_game,
+    run_random_live_game,
 )
 from src.live.predictor import LiveNextPitchPredictor
 from src.live.publisher import BlueskyPublisher, DryRunPublisher
@@ -58,6 +59,17 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Follow one specific game instead of the whole schedule",
+    )
+    parser.add_argument(
+        "--random-game",
+        action="store_true",
+        help="Pick one game at random from the schedule and follow only it",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed for --random-game selection",
     )
     parser.add_argument(
         "--pitch-type-model",
@@ -131,6 +143,16 @@ def main() -> None:
                 args.game_pk,
                 service,
                 poll_interval=args.poll_interval,
+            )
+        )
+    elif args.random_game:
+        result = asyncio.run(
+            run_random_live_game(
+                target_date,
+                service,
+                poll_interval=args.poll_interval,
+                lead_minutes=args.lead_minutes,
+                seed=args.seed,
             )
         )
     else:
