@@ -1293,13 +1293,15 @@ class PitchPredictor:
         )
 
         PX, PZ = np.meshgrid(-prediction.px_grid, prediction.pz_grid)
-        ax_zone.contourf(
+        filled = ax_zone.contourf(
             PX, PZ, prediction.location_density,
             levels=20, cmap='YlOrRd', alpha=0.85,
         )
+        # Draw ring lines on the exact fill boundaries so they nest cleanly.
         ax_zone.contour(
             PX, PZ, prediction.location_density,
-            levels=8, colors='darkred', alpha=0.25, linewidths=0.5,
+            levels=np.asarray(filled.levels)[2::3], colors='darkred',
+            alpha=0.25, linewidths=0.5,
         )
 
         zone_width = 17 / 12
