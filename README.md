@@ -341,14 +341,16 @@ Defaults:
 Shared multi-machine setup:
 
 - MLflow metadata lives in the local PostgreSQL `mlflow` schema on the iMac.
-- Model artifacts live in `/Users/matthewbarlowe/mlflow-artifacts/mlb-model-training`.
+- Model artifacts live in `/Users/matthewbarlowe/mlflow-artifacts/`.
+- `mlb-model-training` is the shared production/import experiment for the live stack (pitch type, location, and imported outcome models).
+- Direct outcome training still defaults to experiment name `mlb-outcome-models`; use `scripts/import_outcome_models_to_mlflow.py` to import a chosen run into the shared production experiment.
 - Set `MLFLOW_TRACKING_URI` on the iMac, MacBook Pro, and MacBook Air to the shared Postgres-backed URI before running training or imports.
 - Both training entrypoints now **fail fast** if they would otherwise fall back to a local SQLite `mlflow.db`:
   - `uv run python scripts/train_models_with_mlflow.py ...`
   - `uv run python scripts/train_outcome_models.py ...`
 - If you intentionally want a local SQLite run, pass it explicitly with `--mlflow-tracking-uri sqlite:///...`.
 - `scripts/run_outcome_training.sh` remains available as a convenience helper; it resolves `MLFLOW_TRACKING_URI` from the current shell or `~/.zshrc` and then launches `scripts/train_outcome_models.py`.
-- The current production models have been imported into this experiment as `production_model=true` runs, one for the pitch-type LSTM and one for the conditioned location model.
+- To import a locally trained outcome run into the shared MLflow backend (including artifacts), use `uv run python scripts/import_outcome_models_to_mlflow.py --production-model`.
 
 The PostgreSQL training source must already contain the required seasons before this command will run.
 
