@@ -487,35 +487,6 @@ def test_panel_xy_keeps_zone_inside_panel():
         assert 0 <= y <= PANEL_H
 
 
-def test_shrink_below_blob_limit_keeps_small_files(tmp_path: Path):
-    from PIL import Image as PILImage
-
-    from src.live.card_html import _shrink_below_blob_limit
-
-    small = tmp_path / "small.png"
-    PILImage.new("RGB", (100, 100), (20, 30, 40)).save(small, format="PNG")
-
-    out = _shrink_below_blob_limit(small)
-    assert out == small
-    assert out.suffix == ".png"
-
-
-def test_shrink_below_blob_limit_falls_back_to_jpeg(tmp_path: Path):
-    from PIL import Image as PILImage
-
-    from src.live.card_html import _shrink_below_blob_limit
-
-    rng = np.random.default_rng(0)
-    noise = rng.integers(0, 255, size=(1350, 2400, 3), dtype=np.uint8)
-    big = tmp_path / "big.png"
-    PILImage.fromarray(noise).save(big, format="PNG")
-    original_size = big.stat().st_size
-    assert original_size > 900_000
-
-    out = _shrink_below_blob_limit(big)
-    assert out.suffix == ".jpg"
-    assert out.stat().st_size < original_size
-    assert not big.exists()
 
 
 def test_html_renderer_end_to_end(tmp_path: Path):
@@ -536,9 +507,11 @@ def test_html_renderer_end_to_end(tmp_path: Path):
             tmp_path / "card.png",
             renderer,
         )
+        assert out.suffix == ".jpg"
         assert out.exists()
         assert out.stat().st_size > 20_000
-        # Real cards must stay under the Bluesky blob ceiling.
+        # Live cards now render directly to JPEG and must stay under
+        # the Bluesky blob ceiling.
         assert out.stat().st_size <= 900_000
     finally:
         renderer.close()

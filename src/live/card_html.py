@@ -3,7 +3,7 @@
 Matplotlib caps out on typography and finish; this renderer builds the
 card as a dark-theme HTML page (system SF/Helvetica stack, CSS gradients,
 glow-composited density layer) and screenshots it with Playwright at 2x
-for a crisp social-ready PNG.
+as a fast social-ready JPEG.
 """
 
 from __future__ import annotations
@@ -452,7 +452,7 @@ def build_card_html(
 
 
 class HtmlCardRenderer:
-    """Renders card HTML to PNG with a persistent headless Chromium."""
+    """Renders card HTML to JPEG with a persistent headless Chromium."""
 
     def __init__(self) -> None:
         self._playwright = None
@@ -475,8 +475,21 @@ class HtmlCardRenderer:
     def render(self, html: str, out_path: Path) -> Path:
         page = self._ensure_page()
         page.set_content(html, wait_until="load")
-        page.screenshot(path=str(out_path), full_page=False)
-        return _shrink_below_blob_limit(out_path)
+        jpeg_path = out_path.with_suffix(".jpg")
+        for quality in _JPEG_QUALITY_CANDIDATES:
+            page.screenshot(
+                path=str(jpeg_path),
+                type="jpeg",
+                quality=quality,
+                full_page=False,
+            )
+            if jpeg_path.stat().st_size <= _BLOB_LIMIT_BYTES:
+                return jpeg_path
+        raise RuntimeError(
+            f"Card image {jpeg_path} is {jpeg_path.stat().st_size:,} bytes even "
+            f"at JPEG quality {_JPEG_QUALITY_CANDIDATES[-1]}; Bluesky blobs must "
+            f"stay under {_BLOB_LIMIT_BYTES:,} bytes."
+        )
 
     def close(self) -> None:
         if self._browser is not None:
@@ -491,22 +504,7 @@ class HtmlCardRenderer:
 
 # Bluesky rejects image blobs above ~976 KB; keep comfortable headroom.
 _BLOB_LIMIT_BYTES = 900_000
-
-
-def _shrink_below_blob_limit(path: Path) -> Path:
-    """Re-encode oversized cards; falls back to JPEG when PNG stays large."""
-    if path.stat().st_size <= _BLOB_LIMIT_BYTES:
-        return path
-
-    image = Image.open(path)
-    image.save(path, format="PNG", optimize=True)
-    if path.stat().st_size <= _BLOB_LIMIT_BYTES:
-        return path
-
-    jpeg_path = path.with_suffix(".jpg")
-    image.convert("RGB").save(jpeg_path, format="JPEG", quality=90, optimize=True)
-    path.unlink(missing_ok=True)
-    return jpeg_path
+_JPEG_QUALITY_CANDIDATES = (90, 85, 80, 75)
 
 def render_card_png(
     prediction: PitchPrediction,
