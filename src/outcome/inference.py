@@ -95,14 +95,18 @@ def sample_locations_from_grid(
 def build_feature_frame(
     state: OutcomeGameState,
     type_probabilities: dict[str, float],
-    locations: list[tuple[float, float]],
+    locations: list[tuple[float, float]] | dict[str, list[tuple[float, float]]],
     pitcher_profiles: pl.DataFrame,
     batter_priors: pl.DataFrame,
 ) -> tuple[pl.DataFrame, np.ndarray]:
     """One feature row per (pitch type × location), plus row weights.
 
-    Weights are P(type) / n_locations, so weighted sums marginalize the
-    outcome probabilities over the predicted pitch distribution.
+    ``locations`` is either one shared location sample (live path: they
+    describe the single upcoming pitch) or a per-pitch-type mapping keyed
+    by canonical type (simulation path: each type evaluated where it is
+    actually thrown). Weights are P(type) / n_locations(type), so weighted
+    sums marginalize the outcome probabilities over the predicted pitch
+    distribution.
     """
     canonical: dict[str, float] = {}
     for code, prob in type_probabilities.items():
@@ -116,11 +120,20 @@ def build_feature_frame(
     zone_center = (state.sz_top + state.sz_bottom) / 2.0
     zone_half_height = max((state.sz_top - state.sz_bottom) / 2.0, 1e-3)
 
+    def locations_for(pitch_type: str) -> list[tuple[float, float]]:
+        if isinstance(locations, dict):
+            found = locations.get(pitch_type)
+            if not found:
+                raise KeyError(f"No locations provided for pitch type {pitch_type}")
+            return found
+        return locations
+
     rows: list[dict] = []
     weights: list[float] = []
-    n_locations = max(len(locations), 1)
     for pitch_type, type_prob in canonical.items():
-        for px, pz in locations:
+        type_locations = locations_for(pitch_type)
+        n_locations = len(type_locations)
+        for px, pz in type_locations:
             rows.append(
                 {
                     "pitch_type": pitch_type,
@@ -210,7 +223,7 @@ class PitchOutcomePredictor:
         self,
         state: OutcomeGameState,
         type_probabilities: dict[str, float],
-        locations: list[tuple[float, float]],
+        locations: list[tuple[float, float]] | dict[str, list[tuple[float, float]]],
     ) -> dict:
         """Marginal outcome odds for the upcoming pitch.
 

@@ -78,7 +78,7 @@ def test_build_feature_frame_marginalizes_type_probs_and_joins_profiles():
     assert sorted(set(features["pitch_type"].to_list())) == ["FF", "SL"]
     assert features.filter(pl.col("pitch_type") == "SL")["pitcher_whiff_rate"].to_list() == [0.42, 0.42]
     assert features["batter_chase_rate"].to_list()[0] == 0.32
-    assert all(v == 1 for v in features["runner_on_first"].to_list())
+    assert "runner_on_first" not in features.columns  # leaky column excluded
     sl_weight = weights[features["pitch_type"].to_list().index("SL")]
     ff_weight = weights[features["pitch_type"].to_list().index("FF")]
     assert sl_weight > ff_weight

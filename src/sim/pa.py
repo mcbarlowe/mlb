@@ -14,6 +14,7 @@ simulator itself has no model dependencies:
 from __future__ import annotations
 
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -61,6 +62,23 @@ class FixedDistributionProvider:
         return self._event_probs
 
 
+Locations = list[tuple[float, float]] | dict[str, list[tuple[float, float]]]
+CountInputs = Mapping[tuple[int, int], tuple[dict[str, float], Locations]]
+
+
+def _precompute_count_tables(
+    outcome_predictor, base_state, inputs_by_count: CountInputs
+) -> tuple[dict[tuple[int, int], dict[str, float]], dict[tuple[int, int], dict[str, float]]]:
+    result: dict[tuple[int, int], dict[str, float]] = {}
+    event: dict[tuple[int, int], dict[str, float]] = {}
+    for (balls, strikes), (type_probabilities, locations) in inputs_by_count.items():
+        state = replace(base_state, balls=balls, strikes=strikes)
+        predicted = outcome_predictor.predict(state, type_probabilities, locations)
+        result[(balls, strikes)] = predicted["result"]
+        event[(balls, strikes)] = predicted["event_given_in_play"]
+    return result, event
+
+
 class OutcomeModelProvider:
     """Precomputed per-count outcome distributions for one matchup.
 
@@ -68,8 +86,9 @@ class OutcomeModelProvider:
     ``base_state`` is an ``OutcomeGameState`` describing the matchup/situation;
     ``type_probabilities``/``locations`` come from the upstream pitch models.
     The pitch-type and location distributions are held fixed across counts —
-    a deliberate v1 approximation (count effects still enter through the
-    outcome models' count features).
+    appropriate for live one-pitch use where they describe the next pitch.
+    For full-PA simulation prefer ``MatchupOutcomeProvider`` with
+    count-conditioned inputs.
     """
 
     def __init__(
@@ -79,16 +98,39 @@ class OutcomeModelProvider:
         type_probabilities: dict[str, float],
         locations: list[tuple[float, float]],
     ):
-        self._result: dict[tuple[int, int], dict[str, float]] = {}
-        self._event: dict[tuple[int, int], dict[str, float]] = {}
-        for balls in range(4):
-            for strikes in range(3):
-                state = replace(base_state, balls=balls, strikes=strikes)
-                predicted = outcome_predictor.predict(
-                    state, type_probabilities, locations
-                )
-                self._result[(balls, strikes)] = predicted["result"]
-                self._event[(balls, strikes)] = predicted["event_given_in_play"]
+        inputs: CountInputs = {
+            (balls, strikes): (type_probabilities, locations)
+            for balls in range(4)
+            for strikes in range(3)
+        }
+        self._result, self._event = _precompute_count_tables(
+            outcome_predictor, base_state, inputs
+        )
+
+    def result_probabilities(self, balls: int, strikes: int) -> dict[str, float]:
+        return self._result[(balls, strikes)]
+
+    def event_probabilities(self, balls: int, strikes: int) -> dict[str, float]:
+        return self._event[(balls, strikes)]
+
+
+class MatchupOutcomeProvider:
+    """Per-count outcome distributions from count-conditioned pitch inputs.
+
+    ``inputs_by_count`` maps every (balls, strikes) count to that count's
+    (type distribution, location sample) — see
+    ``src.sim.pitch_mix.PitchMixProfiles.inputs_by_count``.
+    """
+
+    def __init__(self, outcome_predictor, base_state, inputs_by_count: CountInputs):
+        missing = {
+            (b, s) for b in range(4) for s in range(3)
+        } - set(inputs_by_count)
+        if missing:
+            raise ValueError(f"inputs_by_count missing counts: {sorted(missing)}")
+        self._result, self._event = _precompute_count_tables(
+            outcome_predictor, base_state, inputs_by_count
+        )
 
     def result_probabilities(self, balls: int, strikes: int) -> dict[str, float]:
         return self._result[(balls, strikes)]
