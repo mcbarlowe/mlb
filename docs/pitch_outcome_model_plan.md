@@ -259,11 +259,16 @@ Mitigations, in order:
 - Stage B is ~2pp conservative on outs even on real rows (pred 69.2% vs
   actual 67.1% on 2025 contact with the leaky-era model; ~1.3pp with the
   CTR-free retrain); fold into the milestone-6 calibration pass.
-- Milestone-5 validation snapshot (30 random 2025 games x 300 sims, leak-free
-  CTR-free models `run_20260809_143443`): mean simulated total runs 9.87 vs
-  8.50 actual (+16%: K% runs ~3pp low, HBP ~2x, Stage B still ~1.3pp
-  out-conservative, generic bullpen arm too soft), home-win Brier 0.253 with
-  a narrow 0.38-0.62 p(home) spread — no home-field advantage, bullpen
-  identity, or team form modeled yet. Milestone-6 calibration targets:
-  per-stage post-hoc calibrators, a league-average synthetic profile row for
-  the generic bullpen arm (id 0), HBP location handling, and home advantage.
+- Milestone-5 validation snapshot (30 random 2025 games x 300 sims): the
+  promoted full-window model `run_20260809_145546` (train 2015-2023,
+  Stage A val/test 0.9711/0.9734, Stage B 0.9564/0.9542, both leak-free and
+  CTR-free) simulates 9.70 mean total runs vs 8.50 actual (+14%: K% ~3pp
+  low, HBP ~2x, Stage B ~1.2pp out-conservative, generic bullpen arm too
+  soft) with home-win Brier 0.249 and a narrow 0.38-0.62 p(home) spread —
+  no home-field advantage, bullpen identity, or team form modeled yet.
+  It is the shared-MLflow production pair (stage A
+  `eb511a86bade433c99e067aa76fd666e`, stage B
+  `bbdcc4134272408ba9f03d6cf6ede89b`); the leaky-era imports are demoted
+  (`production_model=false`). Milestone-6 calibration targets: per-stage
+  post-hoc calibrators, a league-average synthetic profile row for the
+  generic bullpen arm (id 0), HBP location handling, and home advantage.
