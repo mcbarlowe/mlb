@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--iterations", type=int, default=1000)
     parser.add_argument("--depth", type=int, default=8)
     parser.add_argument("--output-dir", type=str, default="models/outcome")
-    parser.add_argument("--mlflow-experiment", type=str, default="mlb-outcome-models")
+    parser.add_argument("--mlflow-experiment", type=str, default="mlb-model-training")
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     parser.add_argument(
         "--stage",
