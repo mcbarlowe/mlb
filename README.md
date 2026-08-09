@@ -343,13 +343,14 @@ Shared multi-machine setup:
 - MLflow metadata lives in the local PostgreSQL `mlflow` schema on the iMac.
 - Model artifacts live in `/Users/matthewbarlowe/mlflow-artifacts/mlb-model-training`.
 - Set `MLFLOW_TRACKING_URI` on the iMac, MacBook Pro, and MacBook Air to the shared Postgres-backed URI before running training or imports.
+- The safest entrypoint for the outcome models is `scripts/run_outcome_training.sh`; it resolves `MLFLOW_TRACKING_URI` from the current shell or your `~/.zshrc` and then launches `scripts/train_outcome_models.py`, avoiding an accidental fallback to a local SQLite MLflow database.
 - The current production models have been imported into this experiment as `production_model=true` runs, one for the pitch-type LSTM and one for the conditioned location model.
 
 The PostgreSQL training source must already contain the required seasons before this command will run.
 
 Use `--low-memory` for historical retrains on memory-constrained machines; it streams season-sized chunks instead of materializing the entire training window at once.
 
-You can override the tracking backend with `MLFLOW_TRACKING_URI` or `--mlflow-tracking-uri`.
+You can still override the tracking backend with `MLFLOW_TRACKING_URI` or `--mlflow-tracking-uri`, but the wrapper should be the default path for manual outcome-training runs.
 The regression tests use `example_json_files/example_live_feed.json`; they do not require a populated `data/` checkout.
 
 ### Live Next-Pitch Prediction
