@@ -11,6 +11,10 @@ from __future__ import annotations
 import base64
 import io
 from pathlib import Path
+from queue import Queue
+from threading import Event, Thread
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import numpy as np
 from PIL import Image
@@ -109,6 +113,73 @@ def circular_headshot_png(player_id: int | None, size: int = 84) -> str | None:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+_TEAM_LOGO_CACHE: dict[int, str | None] = {}
+
+
+def team_logo_data_url(team_id: int | None) -> str | None:
+    """Fetch and cache a team logo as an inline SVG data URL."""
+    if team_id is None:
+        return None
+    if team_id in _TEAM_LOGO_CACHE:
+        return _TEAM_LOGO_CACHE[team_id]
+
+    url = f"https://www.mlbstatic.com/team-logos/{team_id}.svg"
+    try:
+        request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(request, timeout=5) as response:
+            image_data = response.read()
+        data_url = (
+            "data:image/svg+xml;base64,"
+            + base64.b64encode(image_data).decode("ascii")
+        )
+        _TEAM_LOGO_CACHE[team_id] = data_url
+        return data_url
+    except (URLError, HTTPError, Exception):
+        _TEAM_LOGO_CACHE[team_id] = None
+        return None
+
+
+_BRAND_LOGO_DATA_URL: str | None = None
+
+
+def brand_logo_data_url() -> str | None:
+    """Load the local Barlowe Analytics logo asset as an inline PNG."""
+    global _BRAND_LOGO_DATA_URL
+    if _BRAND_LOGO_DATA_URL is not None:
+        return _BRAND_LOGO_DATA_URL
+
+    asset = Path(__file__).with_name("assets") / "barlowe_analytics_logo.png"
+    if not asset.exists():
+        return None
+
+    _BRAND_LOGO_DATA_URL = (
+        "data:image/png;base64," + base64.b64encode(asset.read_bytes()).decode("ascii")
+    )
+    return _BRAND_LOGO_DATA_URL
+
+
+def _brand_footer_html() -> str:
+    logo = brand_logo_data_url()
+    if logo:
+        return f'<img class="brand-logo" src="{logo}" alt="Barlowe Analytics" />'
+    return '<div class="brand">BARLOWE <b>ANALYTICS</b></div>'
+
+
+def _score_team_html(
+    abbreviation: str,
+    score: int | None,
+    team_id: int | None,
+) -> str:
+    logo = team_logo_data_url(team_id)
+    score_html = f"<b> {score}</b>" if score is not None else ""
+    if logo:
+        return (
+            f'<span class="score"><img class="team-logo" src="{logo}" alt="" />'
+            f"{abbreviation}{score_html}</span>"
+        )
+    return f'<span class="score">{abbreviation}{score_html}</span>'
 
 
 def _headshot_html(b64: str | None, initials: str) -> str:
@@ -286,18 +357,19 @@ def build_card_html(
         circular_headshot_png(context.batter_id), _initials(context.batter_name)
     )
 
-    score = ""
-    if context.score_home is not None and context.score_away is not None:
-        score = (
-            f'<span class="score">{context.away_team}'
-            f'<b> {context.score_away}</b></span><span class="at">@</span>'
-            f'<span class="score">{context.home_team}<b> {context.score_home}</b></span>'
+    score = (
+        _score_team_html(
+            context.away_team,
+            context.score_away,
+            getattr(context, "away_team_id", None),
         )
-    else:
-        score = (
-            f'<span class="score">{context.away_team}</span><span class="at">@</span>'
-            f'<span class="score">{context.home_team}</span>'
+        + '<span class="at">@</span>'
+        + _score_team_html(
+            context.home_team,
+            context.score_home,
+            getattr(context, "home_team_id", None),
         )
+    )
 
     outs_word = "OUT" if context.outs == 1 else "OUTS"
     return f"""<!DOCTYPE html>
@@ -315,6 +387,8 @@ def build_card_html(
 
   .topbar {{ display: flex; align-items: baseline; justify-content: space-between; }}
   .scoreline {{ font-size: 30px; font-weight: 800; letter-spacing: 0.5px; }}
+  .score {{ display: inline-flex; align-items: center; gap: 10px; }}
+  .team-logo {{ width: 30px; height: 30px; object-fit: contain; display: block; }}
   .scoreline .at {{ color: #55708F; font-size: 24px; font-weight: 600; margin: 0 14px; }}
   .scoreline b {{ color: #F59E0B; }}
   .gamestate {{ text-align: right; }}
@@ -387,10 +461,10 @@ def build_card_html(
                 font-size: 14px; font-weight: 800; letter-spacing: 1.5px;
                 text-align: center; }}
   .xmark {{ color: #EF4444; font-weight: 900; }}
-  .footer {{ display: flex; justify-content: space-between; align-items: baseline;
-             margin-top: 10px; }}
+  .footer {{ display: flex; align-items: center; margin-top: 10px; }}
   .brand {{ font-size: 14px; font-weight: 800; letter-spacing: 4px; color: #8CA0B8; }}
   .brand b {{ color: #F59E0B; }}
+  .brand-logo {{ height: 34px; width: auto; display: block; opacity: 0.98; }}
 </style></head>
 <body><div class="card">
   <div class="topbar">
@@ -446,34 +520,65 @@ def build_card_html(
 
   {_result_bar_html(prediction, actual_pitch_type, pitch_result)}
   <div class="footer">
-    <div class="brand">BARLOWE <b>ANALYTICS</b></div>
+    {_brand_footer_html()}
   </div>
 </div></body></html>"""
 
 
 class HtmlCardRenderer:
-    """Renders card HTML to JPEG with a persistent headless Chromium."""
+    """Renders card HTML to JPEG with a persistent Chromium worker thread."""
 
     def __init__(self) -> None:
-        self._playwright = None
-        self._browser = None
-        self._page = None
+        self._thread: Thread | None = None
+        self._requests: Queue | None = None
+        self._ready = Event()
+        self._startup_error: BaseException | None = None
 
-    def _ensure_page(self):
-        if self._page is not None:
-            return self._page
+    def _worker_main(self) -> None:
         from playwright.sync_api import sync_playwright
 
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
-        self._page = self._browser.new_page(
-            viewport={"width": CARD_W, "height": CARD_H},
-            device_scale_factor=SCALE,
-        )
-        return self._page
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True)
+                page = browser.new_page(
+                    viewport={"width": CARD_W, "height": CARD_H},
+                    device_scale_factor=SCALE,
+                )
+                self._ready.set()
+                while True:
+                    assert self._requests is not None
+                    item = self._requests.get()
+                    if item is None:
+                        break
+                    html, out_path, result_q = item
+                    try:
+                        result_q.put(self._render_with_page(page, html, out_path))
+                    except BaseException as exc:
+                        result_q.put(exc)
+                browser.close()
+        except BaseException as exc:
+            self._startup_error = exc
+            self._ready.set()
 
-    def render(self, html: str, out_path: Path) -> Path:
-        page = self._ensure_page()
+    def _ensure_page(self) -> None:
+        if self._thread is not None:
+            return
+        self._requests = Queue()
+        self._ready = Event()
+        self._startup_error = None
+        self._thread = Thread(
+            target=self._worker_main,
+            name="HtmlCardRenderer",
+            daemon=True,
+        )
+        self._thread.start()
+        self._ready.wait()
+        if self._startup_error is not None:
+            self.close()
+            raise RuntimeError("Failed to start Playwright card renderer") from self._startup_error
+
+    @staticmethod
+    def _render_with_page(page, html: str, out_path: Path) -> Path:
         page.set_content(html, wait_until="load")
         jpeg_path = out_path.with_suffix(".jpg")
         for quality in _JPEG_QUALITY_CANDIDATES:
@@ -491,14 +596,26 @@ class HtmlCardRenderer:
             f"stay under {_BLOB_LIMIT_BYTES:,} bytes."
         )
 
+    def render(self, html: str, out_path: Path) -> Path:
+        self._ensure_page()
+        assert self._requests is not None
+        result_q = Queue(maxsize=1)
+        self._requests.put((html, out_path, result_q))
+        result = result_q.get()
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
     def close(self) -> None:
-        if self._browser is not None:
-            self._browser.close()
-            self._browser = None
-            self._page = None
-        if self._playwright is not None:
-            self._playwright.stop()
-            self._playwright = None
+        requests = self._requests
+        thread = self._thread
+        self._requests = None
+        self._thread = None
+        self._startup_error = None
+        if requests is not None:
+            requests.put(None)
+        if thread is not None:
+            thread.join(timeout=5)
 
 
 

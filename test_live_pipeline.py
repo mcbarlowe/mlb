@@ -102,6 +102,26 @@ def _live_feed(current_pitches: int, balls: int, strikes: int) -> dict:
     }
 
 
+def _live_feed_after_at_bat_rollover() -> dict:
+    feed = _live_feed(current_pitches=0, balls=0, strikes=0)
+    finished_ab = _play(
+        12,
+        [
+            _pitch_event(1, 0, 1, "FF"),
+            _pitch_event(2, 0, 2, "SL"),
+            _pitch_event(3, 0, 3, "FF"),
+        ],
+    )
+    finished_ab["about"]["halfInning"] = "bottom"
+    next_ab = _play(13, [])
+    next_ab["about"]["halfInning"] = "bottom"
+    next_ab["count"] = {"balls": 0, "strikes": 0, "outs": 2}
+    feed["liveData"]["plays"]["allPlays"] = [feed["liveData"]["plays"]["allPlays"][0], finished_ab, next_ab]
+    feed["liveData"]["plays"]["currentPlay"] = next_ab
+    return feed
+
+
+
 def test_build_live_snapshot_appends_pending_pitch():
     snapshot = build_live_snapshot(_live_feed(current_pitches=2, balls=1, strikes=2))
 
@@ -308,6 +328,63 @@ def test_dry_run_publisher_records_result_replies(tmp_path: Path):
     assert publisher.published[0].text == "pitch result"
 
 
+def test_publish_result_if_ready_survives_at_bat_rollover(tmp_path: Path):
+    from typing import Any, cast
+
+    from src.live.pipeline import PendingPostedPrediction
+
+    class StubPublisher:
+        def __init__(self) -> None:
+            self.result_post: ResultPost | None = None
+
+        def publish(self, post: PredictionPost) -> str:
+            return "post-id"
+
+        def publish_result(self, post: ResultPost) -> str:
+            self.result_post = post
+            return "reply-id"
+
+    service = _bare_service("at_bat")
+    service.output_dir = tmp_path
+    stub = StubPublisher()
+    service.publisher = cast(Any, stub)
+
+    def fake_render_card(
+        prediction,
+        context,
+        out_path: Path,
+        actual_pitch_type: str | None = None,
+        actual_location: tuple[float, float] | None = None,
+        pitch_result: str | None = None,
+    ) -> Path:
+        return out_path.with_suffix(".jpg")
+
+    service._render_card = cast(Any, fake_render_card)
+
+    posted = build_live_snapshot(_live_feed(current_pitches=2, balls=0, strikes=2))
+    assert posted is not None
+
+    service._pending_posted_predictions[posted.game_pk] = PendingPostedPrediction(
+        game_pk=posted.game_pk,
+        at_bat_index=posted.at_bat_index,
+        pitch_number=posted.next_pitch_number,
+        inning_key=posted.inning_key,
+        prediction=_synthetic_prediction(),
+        prediction_context=posted.context,
+        post_id="at://post|cid",
+        card_path=tmp_path / "card.jpg",
+    )
+
+    rollover = build_live_snapshot(_live_feed_after_at_bat_rollover())
+    assert rollover is not None
+
+    reply_id = service._publish_result_if_ready(posted.game_pk, rollover)
+    assert reply_id == "reply-id"
+    assert stub.result_post is not None
+    assert "Bot 4, count 0-2, 2 out" in stub.result_post.text
+    assert posted.game_pk not in service._pending_posted_predictions
+
+
 def test_random_pitch_target_catches_up_when_joining_mid_at_bat():
     service = _bare_service("random_pitch")
 
@@ -435,12 +512,39 @@ def _synthetic_context():
         batter_id=None,
     )
 
+def test_build_post_text_uses_full_pitch_names_and_percentages():
+    from src.live.publisher import build_post_text
+
+    snapshot = build_live_snapshot(_live_feed(current_pitches=0, balls=0, strikes=0))
+    assert snapshot is not None
+
+    text = build_post_text(snapshot, _synthetic_prediction())
+    assert "Top calls: Four-Seam Fastball 62% | Slider 30%" in text
+
+
+def test_build_card_html_includes_team_logos(monkeypatch):
+    from src.live import card_html
+
+    context = _synthetic_context()
+    context.__dict__["away_team_id"] = 144
+    context.__dict__["home_team_id"] = 147
+    monkeypatch.setattr(
+        card_html,
+        "team_logo_data_url",
+        lambda team_id: f"data:image/svg+xml;base64,{team_id}",
+    )
+
+    html = card_html.build_card_html(_synthetic_prediction(), context, 0.74)
+    assert 'class="team-logo"' in html
+    assert "data:image/svg+xml;base64,144" in html
+    assert "data:image/svg+xml;base64,147" in html
+
+
 
 def test_build_card_html_contains_key_fields():
     from src.live.card_html import build_card_html
 
     html = build_card_html(_synthetic_prediction(), _synthetic_context(), 0.74)
-
     assert "Test Pitcher" in html
     assert "Test Batter" in html
     assert "Four-Seam Fastball" in html
@@ -448,6 +552,7 @@ def test_build_card_html_contains_key_fields():
     assert "IN-ZONE <b>74%</b>" in html
     assert "BOT 6" in html
     assert 'class="resultbar"' not in html
+    assert 'class="brand-logo"' in html
 
 
 def test_build_card_html_result_variant_marks_actual():
@@ -515,3 +620,70 @@ def test_html_renderer_end_to_end(tmp_path: Path):
         assert out.stat().st_size <= 900_000
     finally:
         renderer.close()
+
+
+
+
+def test_bluesky_publisher_sends_explicit_aspect_ratio(tmp_path: Path):
+    from typing import Any, cast
+
+    from PIL import Image as PILImage
+
+    from src.live.publisher import BlueskyPublisher
+
+    class StubClient:
+        def __init__(self) -> None:
+            self.kwargs = None
+
+        def send_image(self, **kwargs):
+            self.kwargs = kwargs
+            return type("Response", (), {"uri": "at://post", "cid": "cid"})()
+
+    card = tmp_path / "card.jpg"
+    PILImage.new("RGB", (2400, 1350), (20, 30, 40)).save(card, format="JPEG")
+
+    publisher = BlueskyPublisher.__new__(BlueskyPublisher)
+    stub_client = StubClient()
+    publisher._client = cast(Any, stub_client)
+
+    result = publisher.publish(PredictionPost(text="next pitch", image_path=card))
+    assert result == "at://post|cid"
+    assert stub_client.kwargs is not None
+
+    aspect = stub_client.kwargs["image_aspect_ratio"]
+    assert aspect.width == 2400
+    assert aspect.height == 1350
+
+
+def test_html_renderer_works_inside_asyncio_loop(tmp_path: Path):
+    import asyncio
+
+    import pytest
+
+    from src.live.card_html import HtmlCardRenderer, render_card_png
+
+    probe = HtmlCardRenderer()
+    try:
+        try:
+            probe._ensure_page()
+        except Exception as exc:
+            pytest.skip(f"chromium unavailable: {exc}")
+    finally:
+        probe.close()
+
+    async def run() -> Path:
+        renderer = HtmlCardRenderer()
+        try:
+            return render_card_png(
+                _synthetic_prediction(),
+                _synthetic_context(),
+                0.74,
+                tmp_path / "card_async.png",
+                renderer,
+            )
+        finally:
+            renderer.close()
+
+    out = asyncio.run(run())
+    assert out.suffix == ".jpg"
+    assert out.exists()

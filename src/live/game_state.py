@@ -149,7 +149,7 @@ def build_context(feed: dict, pending: dict) -> GameContext:
     teams = game_data.get("teams", {})
     half = str(pending.get("half_inning") or "top")
 
-    return GameContext(
+    context = GameContext(
         pitcher_name=pending.get("pitcher_name") or "Unknown Pitcher",
         batter_name=pending.get("batter_name") or "Unknown Batter",
         pitcher_hand=pending.get("throw_side") or "R",
@@ -171,6 +171,9 @@ def build_context(feed: dict, pending: dict) -> GameContext:
         pitcher_id=pending.get("pitcher_id"),
         batter_id=pending.get("batter_id"),
     )
+    context.__dict__["home_team_id"] = teams.get("home", {}).get("id")
+    context.__dict__["away_team_id"] = teams.get("away", {}).get("id")
+    return context
 
 
 def build_live_snapshot(feed: dict) -> LiveSnapshot | None:

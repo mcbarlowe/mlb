@@ -180,12 +180,18 @@ class LiveGamePredictionService:
         )
 
     def _resolve_actual_pitch(
-        self, snapshot: LiveSnapshot
+        self,
+        snapshot: LiveSnapshot,
+        pending: PendingPostedPrediction,
     ) -> tuple[str | None, str | None, tuple[float, float] | None]:
-        at_bat = snapshot.frame.filter(
-            snapshot.frame["at_bat_index"] == snapshot.at_bat_index
-        ).sort("pitch_number")
-        actual_rows = at_bat.filter(at_bat["pitch_type_code"].is_not_null())
+        actual_rows = (
+            snapshot.frame.filter(
+                (snapshot.frame["at_bat_index"] == pending.at_bat_index)
+                & (snapshot.frame["pitch_number"] == pending.pitch_number)
+                & snapshot.frame["pitch_type_code"].is_not_null()
+            )
+            .sort("pitch_number")
+        )
         if actual_rows.is_empty():
             return None, None, None
         actual = actual_rows.row(-1, named=True)
@@ -206,13 +212,10 @@ class LiveGamePredictionService:
         pending = self._pending_posted_predictions.get(game_pk)
         if pending is None:
             return None
-        if pending.at_bat_index != snapshot.at_bat_index:
-            return None
-        if snapshot.next_pitch_number <= pending.pitch_number:
-            return None
 
         actual_pitch_type, pitch_result, actual_location = self._resolve_actual_pitch(
-            snapshot
+            snapshot,
+            pending,
         )
         if actual_pitch_type is None and actual_location is None:
             return None
@@ -236,7 +239,7 @@ class LiveGamePredictionService:
 
         post = ResultPost(
             text=build_result_text(
-                snapshot,
+                result_context,
                 pending.prediction,
                 actual_pitch_type,
                 pitch_result,

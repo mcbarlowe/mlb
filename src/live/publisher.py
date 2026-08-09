@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from src.live.game_state import LiveSnapshot
-from src.ml.pitch_predictor import PITCH_TYPE_FULL_NAMES, PitchPrediction
+from src.ml.pitch_predictor import PITCH_TYPE_FULL_NAMES, GameContext, PitchPrediction
 
 REQUIRED_BLUESKY_ENV_VARS = ("BLUESKY_HANDLE", "BLUESKY_APP_PASSWORD")
 DEFAULT_PDS_URL = "https://bsky.social"
@@ -39,27 +39,29 @@ def build_post_text(snapshot: LiveSnapshot, prediction: PitchPrediction) -> str:
     """Build the post caption for a next-pitch prediction."""
     context = snapshot.context
     top = prediction.top_3_types[:2]
-    top_text = " | ".join(f"{code} {prob:.0%}" for code, prob in top)
+    top_text = " | ".join(
+        f"{PITCH_TYPE_FULL_NAMES.get(code, code)} {prob:.0%}"
+        for code, prob in top
+    )
     location = prediction.location_point
     text = (
         f"Next pitch: {context.pitcher_name} to {context.batter_name}\n"
-        f"{top_text}\n"
+        f"Top calls: {top_text}\n"
         f"Expected location: ({location[0]:.2f}, {location[1]:.2f}) ft\n"
         f"{context.inning_half} {context.inning}, count {context.count_str}, "
         f"{context.outs} out\n"
         f"{context.game_str}"
     )
+
     return text[:MAX_POST_CHARS]
 
-
 def build_result_text(
-    snapshot: LiveSnapshot,
+    context: GameContext,
     prediction: PitchPrediction,
     actual_pitch_type: str | None,
     pitch_result: str | None,
 ) -> str:
     """Build the threaded follow-up text for the actual pitch outcome."""
-    context = snapshot.context
     actual_code = actual_pitch_type or "UNK"
     actual_name = PITCH_TYPE_FULL_NAMES.get(actual_code, actual_code)
     predicted_name = PITCH_TYPE_FULL_NAMES.get(
@@ -75,6 +77,16 @@ def build_result_text(
         f"{context.game_str}"
     )
     return text[:MAX_POST_CHARS]
+
+
+def _image_aspect_ratio(image_path: Path):
+    from atproto import models
+    from PIL import Image
+
+    with Image.open(image_path) as image:
+        width, height = image.size
+    return models.AppBskyEmbedDefs.AspectRatio(width=width, height=height)
+
 
 
 def build_image_alt_text(post_text: str) -> str:
@@ -160,6 +172,7 @@ class BlueskyPublisher:
             text=post.text,
             image=image_bytes,
             image_alt=build_image_alt_text(post.text),
+            image_aspect_ratio=_image_aspect_ratio(post.image_path),
         )
         post_uri = str(getattr(response, "uri", ""))
         post_cid = str(getattr(response, "cid", ""))
@@ -185,6 +198,7 @@ class BlueskyPublisher:
             image=image_bytes,
             image_alt=build_image_alt_text(post.text),
             reply_to=self._reply_ref(post_uri, post_cid),
+            image_aspect_ratio=_image_aspect_ratio(post.image_path),
         )
         reply_uri = str(getattr(response, "uri", ""))
         print(
