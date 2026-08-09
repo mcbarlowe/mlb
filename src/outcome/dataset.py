@@ -69,11 +69,16 @@ _BASE_COLUMNS = [
 ]
 
 CATEGORICAL_FEATURES = [
+    # NOTE: raw `pitcher_id_cat`/`batter_id_cat` are deliberately excluded.
+    # CatBoost's ordered target statistics for those high-cardinality ids
+    # produced a train/apply asymmetry: aggregate P(in_play) was ~2pp low on
+    # training seasons and ~6pp high on every out-of-window season — and all
+    # production inference is out-of-window. Player skill enters through the
+    # numeric physics profiles and batter priors instead. The remaining
+    # categoricals are low-cardinality and trained one-hot (no CTRs).
     "pitch_type",
     "throw_side",
     "bat_side",
-    "pitcher_id_cat",
-    "batter_id_cat",
 ]
 
 NUMERIC_FEATURES = [

@@ -50,6 +50,10 @@ def train_outcome_model(
         early_stopping_rounds=50,
         verbose=100,
         allow_writing_files=False,
+        # One-hot every categorical (max cardinality here is 11 pitch types):
+        # CTR target statistics are banned — their ordered-boosting train/apply
+        # asymmetry systematically shifted predicted marginals off-window.
+        one_hot_max_size=16,
     )
     model.fit(train_pool, eval_set=val_pool)
     return model

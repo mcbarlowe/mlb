@@ -233,11 +233,28 @@ Mitigations, in order:
   only reflected runners who moved during the play. Both are fixed at the
   source (`src/data/base_state.py` reconstruction wired into
   `GameFeedData`), but the database still holds the old values until the
-  next full backfill reload; retrain the outcome models afterwards to pick
-  up the corrected runner/outs features. The sim base-out tables already
-  bypass the DB by reading raw live feed JSONs.
-- The PA simulator's `OutcomeModelProvider` holds the pitch-type/location
-  distribution fixed across counts (taken from one live prediction).
-  Milestone 5 needs count-conditioned type/location inputs — the 0-2-count
-  snapshot smoke produced Sale-after-0-2-level strikeout rates when applied
-  to full PAs, as expected from that approximation.
+  next full backfill reload. The sim base-out tables already bypass the DB
+  by reading raw live feed JSONs.
+- **The mover-only runner flags were a label leak for the outcome models**:
+  `runner_on_first` was set on ~36% of singles vs ~14% of outs (a runner
+  who moves is recorded; runners move on hits). Simulation exposed it as a
+  6pp singles deficit when feeding honest all-false flags. `outs` and
+  `runner_on_*` are removed from `FEATURE_COLUMNS` and the models retrained
+  leak-free; reinstate the (reconstructed) state features only after the DB
+  reload, and expect the leaky-era val/test metrics to have been flattered.
+- **Raw player-ID categoricals caused an off-window calibration cliff**:
+  CatBoost ordered target statistics for `pitcher_id_cat`/`batter_id_cat`
+  made aggregate P(in_play) ~2pp low on training seasons and ~6pp high on
+  every season after the training window (23.2% predicted vs 17.4% actual
+  on 2024/2025) — and all production inference is off-window. IDs are
+  removed from the feature set (skill flows through physics profiles and
+  batter priors) and remaining low-cardinality categoricals train one-hot
+  (`one_hot_max_size=16`, no CTRs). Revisit identity features later as
+  explicit smoothed train-computed encodings if the residual nuance is
+  worth it.
+- Count-conditioned pitch inputs for simulation are in: per-pitcher
+  P(type | count) with league shrinkage plus per-(count, type) location
+  pools (`src/sim/pitch_mix.py`, exported by `scripts/export_pitch_mix.py`).
+  The live one-pitch card path still uses the LSTM/MDN distributions.
+- Stage B is ~2pp conservative on outs even on real rows (pred 69.2% vs
+  actual 67.1% on 2025 contact); fold into the milestone-6 calibration pass.
