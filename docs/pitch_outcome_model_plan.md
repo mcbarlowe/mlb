@@ -305,3 +305,20 @@ Mitigations, in order:
   batter power/contact-quality priors (current priors are swing/whiff/chase
   only). Rerun `scripts/calibrate_sim.py` whenever models, mixes, or
   profiles change.
+- Player-level contact-quality priors (shipped): leak-free expanding
+  `batter_hr_rate`/`batter_xbh_rate`/`batter_hit_rate` and
+  `pitcher_hr_rate` over RESOLVED balls in play only (the final pitch —
+  `label_event` is constant across an at-bat, so unresolved rows would
+  leak the current at-bat's outcome). Judge's HR-per-contact prior is
+  0.139 vs 0.045 league. Production run `run_20260809_175720` (stage A
+  `e4f686b5429e42229cf52b6505b988a9`, stage B
+  `19e93111653c4767b86213aa2510f48e`): Stage A test 0.9724, Stage B test
+  0.9514 (from 0.9542) — both stages improved. 120-game sim validation:
+  totals 9.16 (from 9.24), mean p(home) 0.548 (actual 0.558), pick
+  accuracy 52.5% (from 50.0%); win Brier 0.2499/log loss 0.6929 ticked
+  slightly worse — the wider matchup spread is mildly overconfident at
+  game level. Next lever for win probability: post-hoc Platt calibration
+  of p(home) fitted on val-season (2024) simulated games, never on 2025.
+  No explicit pitcher×batter identity interactions by design: matchup
+  pairs are tiny samples; skill-vs-skill aggregates (platoon + profile ×
+  prior tree interactions) carry the signal.
