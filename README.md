@@ -331,18 +331,25 @@ uv run python scripts/train_models_with_mlflow.py
 Defaults:
 
 - training data source: `postgres`
-- tracking URI: `sqlite:///$(pwd)/mlflow.db`
+- tracking URI: `postgresql+psycopg://...@10.0.0.171:5432/postgres?options=-csearch_path%3Dmlflow`
 - experiment: `mlb-model-training`
+- artifact root: `file:///Users/matthewbarlowe/mlflow-artifacts/mlb-model-training`
 - train seasons: `2018, 2019, 2021, 2022, 2023`
 - validation season: `2024`
 - test season: `2025`
+
+Shared multi-machine setup:
+
+- MLflow metadata lives in the local PostgreSQL `mlflow` schema on the iMac.
+- Model artifacts live in `/Users/matthewbarlowe/mlflow-artifacts/mlb-model-training`.
+- Set `MLFLOW_TRACKING_URI` on the iMac, MacBook Pro, and MacBook Air to the shared Postgres-backed URI before running training or imports.
+- The current production models have been imported into this experiment as `production_model=true` runs, one for the pitch-type LSTM and one for the conditioned location model.
 
 The PostgreSQL training source must already contain the required seasons before this command will run.
 
 Use `--low-memory` for historical retrains on memory-constrained machines; it streams season-sized chunks instead of materializing the entire training window at once.
 
 You can override the tracking backend with `MLFLOW_TRACKING_URI` or `--mlflow-tracking-uri`.
-
 The regression tests use `example_json_files/example_live_feed.json`; they do not require a populated `data/` checkout.
 
 ### Live Next-Pitch Prediction

@@ -31,6 +31,7 @@ import polars as pl
 import torch
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+from matplotlib.patches import Circle, Ellipse
 from PIL import Image
 from catboost import CatBoostClassifier, CatBoostRegressor, Pool
 
@@ -1044,10 +1045,6 @@ class PitchPredictor:
             )
             ax.add_patch(circle)
 
-        # Label for outs
-        ax.text(0, out_y - 0.22, 'OUTS', ha='center', va='center',
-                fontsize=8, color='#666666', fontweight='bold')
-
     def create_pitch_card(
         self,
         prediction: PitchPrediction,
@@ -1310,12 +1307,13 @@ class PitchPredictor:
 
         plate_y = 0.82
         plate = plt.Polygon(
-            [[-0.708, plate_y + 0.3], [0.708, plate_y + 0.3],
-             [0.708, plate_y + 0.2], [0, plate_y],
-             [-0.708, plate_y + 0.2]],
+            [[-0.708, plate_y + 0.24], [0.708, plate_y + 0.24],
+             [0.708, plate_y + 0.14], [0, plate_y],
+             [-0.708, plate_y + 0.14]],
             fill=True, facecolor='white', edgecolor='black', linewidth=1.6,
         )
         ax_zone.add_patch(plate)
+
 
         ax_zone.scatter(
             -prediction.location_point[0],
