@@ -19,12 +19,16 @@ PITCHER_PROFILE_COLUMNS = [
     "profile_release_x",
     "profile_release_z",
     "pitcher_whiff_rate",
+    "pitcher_hr_rate",
 ]
 
 BATTER_PRIOR_COLUMNS = [
     "batter_swing_rate",
     "batter_whiff_rate",
     "batter_chase_rate",
+    "batter_hr_rate",
+    "batter_xbh_rate",
+    "batter_hit_rate",
 ]
 
 PITCHER_PROFILES_FILE = "pitcher_profiles.parquet"

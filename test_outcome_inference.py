@@ -22,6 +22,7 @@ def _profiles() -> tuple[pl.DataFrame, pl.DataFrame]:
             "profile_release_x": [-1.7, -1.8],
             "profile_release_z": [5.8, 5.7],
             "pitcher_whiff_rate": [0.28, 0.42],
+            "pitcher_hr_rate": [0.04, 0.03],
         }
     )
     batter = pl.DataFrame(
@@ -30,6 +31,9 @@ def _profiles() -> tuple[pl.DataFrame, pl.DataFrame]:
             "batter_swing_rate": [0.47],
             "batter_whiff_rate": [0.21],
             "batter_chase_rate": [0.32],
+            "batter_hr_rate": [0.07],
+            "batter_xbh_rate": [0.14],
+            "batter_hit_rate": [0.35],
         }
     )
     return pitcher, batter

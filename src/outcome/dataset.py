@@ -109,10 +109,15 @@ NUMERIC_FEATURES = [
     "profile_release_x",
     "profile_release_z",
     "pitcher_whiff_rate",
-    # Batter priors.
+    "pitcher_hr_rate",
+    # Batter priors: plate discipline + contact quality (a slugger's ball in
+    # play is not an emergency call-up's ball in play).
     "batter_swing_rate",
     "batter_whiff_rate",
     "batter_chase_rate",
+    "batter_hr_rate",
+    "batter_xbh_rate",
+    "batter_hit_rate",
 ]
 
 FEATURE_COLUMNS = CATEGORICAL_FEATURES + NUMERIC_FEATURES
@@ -379,14 +384,28 @@ def add_rolling_profiles(frame: pl.DataFrame) -> pl.DataFrame:
     is_pitch = pl.col("label_result").is_not_null()
     out_of_zone = is_pitch & (pl.col("in_zone") == 0)
 
+    # Contact-quality priors count only RESOLVED balls in play (the final
+    # pitch of the at-bat): `label_event` is constant across an at-bat's
+    # rows, so counting unresolved pitches would leak the current at-bat's
+    # outcome into its own prior and overweight long at-bats.
+    resolved = pl.col("label_result") == "in_play"
+    event = pl.col("label_event")
+    hr = resolved & (event == "home_run")
+    xbh = resolved & event.is_in(["double", "triple", "home_run"])
+    hit = resolved & event.is_in(["single", "double", "triple", "home_run"])
+
     return frame.with_columns(
         *profile_exprs,
         _expanding_rate_prev(whiff, swung, pitcher_type).alias("pitcher_whiff_rate"),
+        _expanding_rate_prev(hr, resolved, ["pitcher_id"]).alias("pitcher_hr_rate"),
         _expanding_rate_prev(swung, is_pitch, ["batter_id"]).alias("batter_swing_rate"),
         _expanding_rate_prev(whiff, swung, ["batter_id"]).alias("batter_whiff_rate"),
         _expanding_rate_prev(swung & out_of_zone, out_of_zone, ["batter_id"]).alias(
             "batter_chase_rate"
         ),
+        _expanding_rate_prev(hr, resolved, ["batter_id"]).alias("batter_hr_rate"),
+        _expanding_rate_prev(xbh, resolved, ["batter_id"]).alias("batter_xbh_rate"),
+        _expanding_rate_prev(hit, resolved, ["batter_id"]).alias("batter_hit_rate"),
     )
 
 
