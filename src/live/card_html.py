@@ -13,7 +13,6 @@ import io
 from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
-from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -119,26 +118,37 @@ _TEAM_LOGO_CACHE: dict[int, str | None] = {}
 
 
 def team_logo_data_url(team_id: int | None) -> str | None:
-    """Fetch and cache a team logo as an inline SVG data URL."""
+    """Fetch and cache a team logo as an inline SVG data URL.
+
+    Prefers MLB's cap-on-dark variant (built for dark backgrounds — the
+    standard marks for teams like SD are near-invisible on our card), then
+    falls back to the primary logo.
+    """
     if team_id is None:
         return None
     if team_id in _TEAM_LOGO_CACHE:
         return _TEAM_LOGO_CACHE[team_id]
 
-    url = f"https://www.mlbstatic.com/team-logos/{team_id}.svg"
-    try:
-        request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urlopen(request, timeout=5) as response:
-            image_data = response.read()
-        data_url = (
-            "data:image/svg+xml;base64,"
-            + base64.b64encode(image_data).decode("ascii")
-        )
-        _TEAM_LOGO_CACHE[team_id] = data_url
-        return data_url
-    except (URLError, HTTPError, Exception):
-        _TEAM_LOGO_CACHE[team_id] = None
-        return None
+    urls = [
+        f"https://www.mlbstatic.com/team-logos/team-cap-on-dark/{team_id}.svg",
+        f"https://www.mlbstatic.com/team-logos/{team_id}.svg",
+    ]
+    for url in urls:
+        try:
+            request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(request, timeout=5) as response:
+                image_data = response.read()
+            data_url = (
+                "data:image/svg+xml;base64,"
+                + base64.b64encode(image_data).decode("ascii")
+            )
+            _TEAM_LOGO_CACHE[team_id] = data_url
+            return data_url
+        except Exception as exc:
+            print(f"Team logo fetch failed ({url}): {exc}")
+            continue
+    _TEAM_LOGO_CACHE[team_id] = None
+    return None
 
 
 _BRAND_LOGO_DATA_URL: str | None = None
