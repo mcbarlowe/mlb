@@ -567,10 +567,10 @@ def test_build_card_html_result_variant_marks_actual():
         pitch_result="Called Strike",
     )
 
-    assert 'class="resultbar"' in html
-    assert "ACTUAL: SLIDER" in html
-    assert "CALLED STRIKE" in html
-    assert "MODEL SAID FF" in html
+    assert 'class="footer-note"' in html
+    assert "ACTUAL SLIDER" in html
+    assert "RESULT CALLED STRIKE" in html
+    assert "PREDICTION MISSED" in html
 
 
 def test_panel_xy_keeps_zone_inside_panel():

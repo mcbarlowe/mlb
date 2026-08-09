@@ -328,21 +328,21 @@ def _result_bar_html(
     actual_pitch_type: str | None,
     pitch_result: str | None,
 ) -> str:
+    """Compact footer note for after-the-fact cards; empty for prediction-only."""
     if not actual_pitch_type and not pitch_result:
         return ""
     parts = []
     correct = actual_pitch_type == prediction.predicted_type
     if actual_pitch_type:
         name = PITCH_TYPE_FULL_NAMES.get(actual_pitch_type, actual_pitch_type)
-        parts.append(f"ACTUAL: {name.upper()}")
+        parts.append(f"ACTUAL {name.upper()}")
     if pitch_result:
-        parts.append(pitch_result.upper())
+        parts.append(f"RESULT {pitch_result.upper()}")
     if actual_pitch_type:
-        parts.append("&#10003; PREDICTED" if correct else
-                     f"MODEL SAID {prediction.predicted_type}")
+        parts.append("PREDICTION MATCHED" if correct else "PREDICTION MISSED")
     color = "#34D399" if correct else "#F87171"
     return (
-        f'<div class="resultbar" style="color:{color};border-color:{color}33">'
+        f'<div class="footer-note" style="color:{color}">'
         + " &nbsp;·&nbsp; ".join(parts)
         + "</div>"
     )
@@ -431,7 +431,7 @@ def build_card_html(
     font-variant-numeric: tabular-nums;
     overflow: hidden;
   }}
-  .card {{ display: flex; flex-direction: column; height: 100%; padding: 22px 40px 14px; }}
+  .card {{ display: flex; flex-direction: column; height: 100%; padding: 18px 34px 10px; }}
 
   .topbar {{ display: flex; align-items: baseline; justify-content: space-between; }}
   .scoreline {{ font-size: 30px; font-weight: 800; letter-spacing: 0.5px; }}
@@ -447,26 +447,26 @@ def build_card_html(
   }}
   .chip b {{ color: #F59E0B; }}
   .subline {{ margin-top: 6px; font-size: 12.5px; color: #55708F; letter-spacing: 1px; }}
-  .rule {{ height: 2px; margin: 13px 0 16px;
+  .rule {{ height: 2px; margin: 10px 0 12px;
            background: linear-gradient(90deg, #F59E0B 0%, #24405F 45%, transparent 100%); }}
 
   .body {{ display: flex; flex: 1; gap: 44px; }}
   .left {{ width: 560px; display: flex; flex-direction: column; }}
 
-  .matchup {{ display: flex; align-items: center; gap: 16px; }}
-  .headshot {{ width: 84px; height: 84px; border-radius: 50%;
+  .matchup {{ display: flex; align-items: center; gap: 14px; }}
+  .headshot {{ width: 78px; height: 78px; border-radius: 50%;
                border: 2.5px solid #24405F; background: #16283F; }}
   .headshot-fallback {{ display: flex; align-items: center; justify-content: center;
                         font-size: 26px; font-weight: 800; color: #55708F; }}
   .who {{ flex: 1; }}
-  .who .name {{ font-size: 23px; font-weight: 800; line-height: 1.15; }}
-  .who .role {{ font-size: 12.5px; letter-spacing: 2px; color: #8CA0B8;
+  .who .name {{ font-size: 21px; font-weight: 800; line-height: 1.1; }}
+  .who .role {{ font-size: 12px; letter-spacing: 2px; color: #8CA0B8;
                 font-weight: 700; margin-top: 4px; }}
   .vs {{ font-size: 15px; font-weight: 800; color: #55708F; padding: 0 2px; }}
 
-  .section-label {{ font-size: 12.5px; font-weight: 800; letter-spacing: 3.5px;
-                    color: #8CA0B8; margin: 22px 0 11px; }}
-  .prob-row {{ margin-bottom: 13px; }}
+  .section-label {{ font-size: 12px; font-weight: 800; letter-spacing: 3.3px;
+                    color: #8CA0B8; margin: 16px 0 8px; }}
+  .prob-row {{ margin-bottom: 10px; }}
   .prob-label {{ display: flex; justify-content: space-between; align-items: baseline;
                  margin-bottom: 5px; }}
   .prob-name {{ font-size: 17.5px; font-weight: 600; color: #B9C7D8; }}
@@ -479,11 +479,11 @@ def build_card_html(
     background: linear-gradient(90deg, #F59E0B, #FBBF24);
     box-shadow: 0 0 14px rgba(245, 158, 11, 0.55); }}
 
-  .outcome-row {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-                  margin-bottom: 7px; font-size: 12.5px; font-weight: 700;
-                  letter-spacing: 0.8px; color: #8CA0B8; }}
+  .outcome-row {{ display: flex; flex-wrap: wrap; gap: 7px; align-items: center;
+                  margin-bottom: 4px; font-size: 11.5px; font-weight: 700;
+                  letter-spacing: 0.7px; color: #8CA0B8; }}
   .ochip {{ background: #16283F; border: 1px solid #24405F; border-radius: 8px;
-            padding: 4px 10px; color: #B9C7D8; white-space: nowrap; }}
+            padding: 3px 9px; color: #B9C7D8; white-space: nowrap; }}
   .ochip b {{ color: #FFFFFF; }}
   .outcome-secondary .ochip {{ background: transparent; }}
 
@@ -512,15 +512,14 @@ def build_card_html(
                      transform: rotate(45deg); display: inline-block;
                      border: 2px solid #0B1622; }}
 
-  .resultbar {{ margin-top: 10px; padding: 8px 16px; border: 1px solid;
-                border-radius: 10px; background: rgba(255, 255, 255, 0.03);
-                font-size: 14px; font-weight: 800; letter-spacing: 1.5px;
-                text-align: center; }}
   .xmark {{ color: #EF4444; font-weight: 900; }}
-  .footer {{ display: flex; align-items: center; margin-top: 10px; }}
+  .footer {{ display: flex; align-items: flex-end; justify-content: space-between;
+             gap: 16px; margin-top: 6px; }}
   .brand {{ font-size: 14px; font-weight: 800; letter-spacing: 4px; color: #8CA0B8; }}
   .brand b {{ color: #F59E0B; }}
-  .brand-logo {{ height: 34px; width: auto; display: block; opacity: 0.98; }}
+  .brand-logo {{ height: 30px; width: auto; display: block; opacity: 0.98; }}
+  .footer-note {{ margin-left: auto; font-size: 12px; font-weight: 800;
+                  letter-spacing: 1px; text-align: right; color: #8CA0B8; }}
 </style></head>
 <body><div class="card">
   <div class="topbar">
@@ -576,9 +575,9 @@ def build_card_html(
     </div>
   </div>
 
-  {_result_bar_html(prediction, actual_pitch_type, pitch_result)}
   <div class="footer">
     {_brand_footer_html()}
+    {_result_bar_html(prediction, actual_pitch_type, pitch_result)}
   </div>
 </div></body></html>"""
 
