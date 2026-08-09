@@ -10,12 +10,22 @@ from typing import Any
 import mlflow
 
 
-def configure_mlflow(experiment_name: str, tracking_uri: str | None = None) -> str:
-    resolved_tracking_uri = (
-        tracking_uri
-        or os.getenv("MLFLOW_TRACKING_URI")
-        or f"sqlite:///{Path('mlflow.db').resolve()}"
-    )
+def configure_mlflow(
+    experiment_name: str,
+    tracking_uri: str | None = None,
+    *,
+    require_tracking_uri: bool = False,
+) -> str:
+    resolved_tracking_uri = tracking_uri or os.getenv("MLFLOW_TRACKING_URI")
+    if require_tracking_uri and not resolved_tracking_uri:
+        raise RuntimeError(
+            "MLFLOW_TRACKING_URI is required for this training script. "
+            "Export the shared Postgres-backed URI or pass "
+            "--mlflow-tracking-uri explicitly. If you really want a local "
+            "SQLite run, pass --mlflow-tracking-uri sqlite:///..."
+        )
+    if not resolved_tracking_uri:
+        resolved_tracking_uri = f"sqlite:///{Path('mlflow.db').resolve()}"
     mlflow.set_tracking_uri(resolved_tracking_uri)
     mlflow.set_experiment(experiment_name)
     return resolved_tracking_uri

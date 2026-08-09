@@ -133,6 +133,13 @@ def main() -> None:
     output_dir = Path(args.output_dir) / time.strftime("run_%Y%m%d_%H%M%S")
     seasons = sorted(set(args.train_seasons + [args.val_season, args.test_season]))
 
+    tracking_uri = configure_mlflow(
+        args.mlflow_experiment,
+        args.mlflow_tracking_uri,
+        require_tracking_uri=True,
+    )
+    print(f"MLflow tracking URI: {tracking_uri}")
+
     print(f"Loading pitches for seasons {seasons}...")
     start = time.perf_counter()
     raw = load_pitches(seasons)
@@ -145,9 +152,6 @@ def main() -> None:
         "val": frame.filter(frame["season"] == args.val_season),
         "test": frame.filter(frame["season"] == args.test_season),
     }
-
-    tracking_uri = configure_mlflow(args.mlflow_experiment, args.mlflow_tracking_uri)
-    print(f"MLflow tracking URI: {tracking_uri}")
 
     with mlflow.start_run(run_name=output_dir.name):
         mlflow.log_params(

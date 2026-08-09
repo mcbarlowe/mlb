@@ -156,6 +156,12 @@ def main() -> None:
     data_path = args.data_path
     output_dir = Path(args.output_dir)
 
+    tracking_uri = configure_mlflow(
+        args.mlflow_experiment,
+        args.mlflow_tracking_uri,
+        require_tracking_uri=True,
+    )
+
     train_seasons = default_data_source_train_seasons(
         data_path,
         val_season=VALIDATION_SEASON,
@@ -172,8 +178,6 @@ def main() -> None:
                 f"PostgreSQL training source is missing required seasons: {missing_seasons}. "
                 f"Available seasons: {sorted(available_seasons)}"
             )
-
-    tracking_uri = configure_mlflow(args.mlflow_experiment, args.mlflow_tracking_uri)
 
     pitch_args = build_pitch_type_args(
         output_dir, data_path, train_seasons, args.quick, args.device, args.low_memory

@@ -10,8 +10,8 @@
 - `pyrightconfig.json` intentionally scopes type-checking to the PostgreSQL ETL surface so OMP diagnostics stay actionable.
 - Resumable backfill command: `uv run python scripts/backfill_postgres.py` (downloads missing schedules/live feeds asynchronously, then resumes the Postgres backfill)
 - Bulk historical mode: `uv run python scripts/backfill_postgres.py --bulk-historical` (batches inserts by season and skips any games already present in `mlb.games`; a season is skipped entirely once all of its game files are already loaded)
-- MLflow training command: `uv run python scripts/train_models_with_mlflow.py` (uses PostgreSQL as the training data source by default and logs to a local SQLite MLflow backend at `mlflow.db`; override the tracking backend with `MLFLOW_TRACKING_URI` or `--mlflow-tracking-uri`)
-- Outcome model training: `uv run python scripts/run_outcome_training.sh` (wrapper that resolves the shared `MLFLOW_TRACKING_URI` from the current shell or `~/.zshrc` before launching `scripts/train_outcome_models.py`; `--quick` trains a 1-season smoke in ~4 minutes)
+- MLflow training command: `uv run python scripts/train_models_with_mlflow.py` (requires the shared `MLFLOW_TRACKING_URI` env or an explicit `--mlflow-tracking-uri`; otherwise it fails fast instead of silently writing to local SQLite)
+- Outcome model training: `uv run python scripts/train_outcome_models.py` (same MLflow rule as above; `scripts/run_outcome_training.sh` is an optional convenience wrapper that resolves `MLFLOW_TRACKING_URI` from the current shell or `~/.zshrc`; `--quick` trains a 1-season smoke in ~4 minutes)
 - Sample-data regression tests use `example_json_files/example_live_feed.json`; they do not require a populated `data/` tree.
 - Treat `data/`, `models/`, `output/`, `catboost_info/`, and executed notebooks as local/generated artifacts unless the task explicitly targets them.
 - ETL/database code lives in `src/endpoints`, `src/data`, `src/database`, and `src/etl`.
