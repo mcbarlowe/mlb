@@ -141,13 +141,27 @@ def load_pitches(seasons: Sequence[int], attempts: int = 5) -> pl.DataFrame:
         "port": config.port,
         "connect_timeout": 15,
     }
+    # Explicit dtypes: early seasons have all-null physics columns (e.g.
+    # induced break pre-2020), which breaks dtype inference on the first rows.
+    schema_overrides = {
+        column: pl.Float64
+        for column in [
+            "px",
+            "pz",
+            "pitch_strike_zone_top",
+            "pitch_strike_zone_bottom",
+            *PHYSICS_COLUMNS,
+        ]
+    }
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             with psycopg.connect(
                 **{key: value for key, value in conninfo.items() if value is not None}
             ) as connection:
-                return pl.read_database(query, connection)
+                return pl.read_database(
+                    query, connection, schema_overrides=schema_overrides
+                )
         except psycopg.OperationalError as exc:
             last_error = exc
             if attempt == attempts:
