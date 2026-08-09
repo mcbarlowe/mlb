@@ -272,3 +272,11 @@ Mitigations, in order:
   (`production_model=false`). Milestone-6 calibration targets: per-stage
   post-hoc calibrators, a league-average synthetic profile row for the
   generic bullpen arm (id 0), HBP location handling, and home advantage.
+- Win-probability baselines (120 random 2025 games x 200 sims, production
+  model): model Brier 0.2487 vs coin 0.2500, constant league home rate
+  (p=0.543) 0.2468, always-home hard pick 0.4417; pick accuracy model 50.8%
+  vs always-home 55.8%. The model beats coin and crushes hard home-picking
+  but does NOT yet beat the constant home-advantage baseline: its mean
+  p(home) is 0.519 vs 0.558 actual because no home-field term exists.
+  Adding the milestone-6 home-advantage term is the cheapest expected win.
+  `scripts/simulate_game.py --validate` now prints these baselines.
