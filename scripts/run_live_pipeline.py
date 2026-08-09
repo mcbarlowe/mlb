@@ -24,6 +24,7 @@ matplotlib.use("Agg", force=True)
 
 import argparse
 import asyncio
+import os
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -161,21 +162,21 @@ def main() -> None:
     outcome_predictor = None
     if args.outcome_run_dir.lower() != "none":
         from src.outcome.inference import PitchOutcomePredictor
+        from src.outcome.mlflow_artifacts import resolve_outcome_artifact_dirs
 
-        outcome_run_dir = args.outcome_run_dir
-        if outcome_run_dir == "auto":
-            pointer = Path("models/outcome/latest_run.txt")
-            if pointer.exists():
-                outcome_run_dir = str(
-                    Path("models/outcome") / pointer.read_text().strip()
-                )
-            else:
-                runs = sorted(Path("models/outcome").glob("run_*"), reverse=True)
-                outcome_run_dir = str(runs[0]) if runs else ""
-        if outcome_run_dir and Path(outcome_run_dir).exists():
-            outcome_predictor = PitchOutcomePredictor(outcome_run_dir)
+        resolved = resolve_outcome_artifact_dirs(
+            args.outcome_run_dir,
+            tracking_uri=os.getenv("MLFLOW_TRACKING_URI"),
+        )
+        if resolved is not None:
+            outcome_run_dir, profiles_dir = resolved
+            outcome_predictor = PitchOutcomePredictor(
+                outcome_run_dir, profiles_dir=profiles_dir
+            )
         else:
-            print("Outcome models not found; rendering without outcome-odds strip")
+            print(
+                "Outcome models not found locally or in shared MLflow; rendering without outcome-odds strip"
+            )
 
     publisher = BlueskyPublisher() if args.post else DryRunPublisher()
     service = LiveGamePredictionService(
