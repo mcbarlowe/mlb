@@ -111,6 +111,47 @@ NUMERIC_FEATURES = [
 FEATURE_COLUMNS = CATEGORICAL_FEATURES + NUMERIC_FEATURES
 
 
+# Exact dtypes for every loaded column (matches the pitches table schema).
+# Row-wise construction with a full schema avoids dtype inference entirely:
+# early seasons have all-null physics columns (e.g. induced break pre-2020)
+# that break inference on the first rows.
+_LOAD_SCHEMA: dict[str, type[pl.DataType]] = {
+    "game_pk": pl.Int64,
+    "season": pl.Int64,
+    "game_date": pl.String,
+    "at_bat_index": pl.Int64,
+    "pitch_number": pl.Int64,
+    "half_inning": pl.String,
+    "inning": pl.Int64,
+    "outs": pl.Int64,
+    "is_runner_on_first": pl.Boolean,
+    "is_runner_on_second": pl.Boolean,
+    "is_runner_on_third": pl.Boolean,
+    "batter_id": pl.Int64,
+    "bat_side": pl.String,
+    "pitcher_id": pl.Int64,
+    "throw_side": pl.String,
+    "pitch_call_description": pl.String,
+    "event_type": pl.String,
+    "count_after_pitch": pl.String,
+    "pitch_type_code": pl.String,
+    "px": pl.Float64,
+    "pz": pl.Float64,
+    "pitch_strike_zone_top": pl.Float64,
+    "pitch_strike_zone_bottom": pl.Float64,
+    "away_score": pl.Int64,
+    "home_score": pl.Int64,
+    "pitch_start_speed": pl.Float64,
+    "spin_rate": pl.Float64,
+    "break_vertical_induced": pl.Float64,
+    "break_horizontal": pl.Float64,
+    "x0": pl.Float64,
+    "z0": pl.Float64,
+}
+
+_LOAD_BATCH_ROWS = 500_000
+
+
 def load_pitches(seasons: Sequence[int], attempts: int = 5) -> pl.DataFrame:
     """Load raw pitch rows for the given seasons from PostgreSQL.
 
@@ -123,6 +164,8 @@ def load_pitches(seasons: Sequence[int], attempts: int = 5) -> pl.DataFrame:
     import psycopg
 
     from src.database import PostgresConfig
+
+    assert list(_LOAD_SCHEMA) == _BASE_COLUMNS, "load schema drifted from columns"
 
     config = PostgresConfig.from_env()
     season_list = ", ".join(str(int(season)) for season in seasons)
@@ -141,27 +184,24 @@ def load_pitches(seasons: Sequence[int], attempts: int = 5) -> pl.DataFrame:
         "port": config.port,
         "connect_timeout": 15,
     }
-    # Explicit dtypes: early seasons have all-null physics columns (e.g.
-    # induced break pre-2020), which breaks dtype inference on the first rows.
-    schema_overrides = {
-        column: pl.Float64
-        for column in [
-            "px",
-            "pz",
-            "pitch_strike_zone_top",
-            "pitch_strike_zone_bottom",
-            *PHYSICS_COLUMNS,
-        ]
-    }
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             with psycopg.connect(
                 **{key: value for key, value in conninfo.items() if value is not None}
-            ) as connection:
-                return pl.read_database(
-                    query, connection, schema_overrides=schema_overrides
-                )
+            ) as connection, connection.cursor() as cursor:
+                cursor.execute(query.encode("utf-8"))
+                frames: list[pl.DataFrame] = []
+                while True:
+                    rows = cursor.fetchmany(_LOAD_BATCH_ROWS)
+                    if not rows:
+                        break
+                    frames.append(
+                        pl.DataFrame(rows, schema=_LOAD_SCHEMA, orient="row")
+                    )
+                if not frames:
+                    return pl.DataFrame(schema=_LOAD_SCHEMA)
+                return pl.concat(frames)
         except psycopg.OperationalError as exc:
             last_error = exc
             if attempt == attempts:
