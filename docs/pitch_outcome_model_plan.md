@@ -286,3 +286,22 @@ Mitigations, in order:
   `scripts/simulate_game.py --validate` logs game-level win Brier/log loss
   with coin, league-home-rate, and always-home baselines when
   `MLFLOW_TRACKING_URI` is set.
+- Milestone-6 calibration pass (shipped): per-side, per-class sim
+  calibration multipliers (`src/sim/calibration.py`, fitted by
+  `scripts/calibrate_sim.py` against 2023-2025 league rates; two passes
+  converge), a league-median synthetic profile for the generic bullpen arm
+  (pitcher_id 0 rows in `pitcher_profiles.parquet`), and empirical
+  home-field tilt via the top/bottom multiplier split. Effects on the
+  120-game validation: HBP fixed (0.0028 vs 0.0028 actual per pitch),
+  in_play 0.176 vs 0.174, mean p(home) 0.519 -> 0.538, totals 9.72 -> 9.24
+  (actual 8.71), Brier 0.2487 -> 0.2471 / log loss 0.6874 — now TIED with
+  the constant league-home baseline (0.2468 / 0.6868) instead of losing.
+  Remaining gaps: (1) totals still +0.5 runs/game — per-pitch marginals are
+  calibrated, so the residual sits in PA->runs conversion (base-out
+  sampling, iid-PA sequencing, ROE boost); (2) matchup skill signal adds no
+  measurable Brier beyond home advantage yet — beating the constant
+  baseline needs sharper identity features: post-DB-reload retrain with
+  reconstructed state, team bullpen quality instead of one league arm, and
+  batter power/contact-quality priors (current priors are swing/whiff/chase
+  only). Rerun `scripts/calibrate_sim.py` whenever models, mixes, or
+  profiles change.
