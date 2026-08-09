@@ -79,12 +79,37 @@ as a small empirical table applied inside the base-out engine.
   - count/state: balls, strikes, outs, runners bitmap, inning, score diff
   - matchup: `pitcher_id`, `batter_id` as categoricals, platoon (throw × bat side)
   - context: season, home/away, times-through-order (derivable from at_bat_index)
+  - **pitch physics profiles** (see below): rolling pitcher × pitch-type stats for
+    velocity, spin rate, spin direction, induced vertical break, horizontal break,
+    and release point (`x0`, `z0`)
   - rolling identity priors (v1.5): batter swing%/whiff%/chase% and pitcher
     whiff%-by-pitch-type computed as leak-free expanding means (shifted, like the
     cumulative features in `src/ml/features.py`)
 - **v2: multi-task head on the existing LSTM encoder** — share the sequence
   representation the pitch-type model already builds; likely the biggest accuracy
   win, but only after the CatBoost baseline sets the bar.
+
+### Pitch physics features
+
+All Statcast physics are already stored per pitch (`pitch_start_speed`,
+`pitch_end_speed`, `spin_rate`, `spin_direction`, `break_vertical_induced`,
+`break_horizontal`, `pfxx/pfxz`, release `x0/z0`, velocity/acceleration vectors).
+They enter the outcome models as **pitcher profiles, not raw measurements**:
+
+- **Why not raw per-pitch physics:** at simulation time the pitch is *generated* —
+  we sample type and location, so there is no measured spin/velo for that pitch.
+  Conditioning on unobservable inputs would break the generative chain.
+- **v1 — profiles:** leak-free rolling means/stds per pitcher × pitch type ×
+  season (shifted expanding windows, same discipline as `features.py`). These are
+  lookups at sim time and capture pitch *quality* — a 97.8 mph / 2380 rpm / +16"
+  IVB four-seam grades differently from a league-average one at the same location.
+  Deltas vs league average per type are the model-friendly form.
+- **v1 bonus:** within-game velocity trend vs profile (fatigue signal) is
+  computable live and in sim (pitch count is tracked).
+- **v2 — physics sampler (stretch):** `P(velo, movement | pitcher, type, count,
+  pitch_count)` so Stage A/B can condition on sampled per-pitch physics, adding
+  within-pitcher variability and fatigue effects. Only worth it if profile
+  features show meaningful lift first.
 
 ### Stage B — in-play event
 
