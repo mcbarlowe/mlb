@@ -72,6 +72,40 @@ def run_single(args: argparse.Namespace) -> None:
     print(f"Mean innings: {stats['mean_innings']:.2f}; tie rate {stats['tie_rate']:.2%}")
     print(f"Actual final: away {away_actual} - home {home_actual}")
 
+    if not args.no_card:
+        card_path = render_card(args, feed, results)
+        print(f"Card: {card_path}")
+
+
+def render_card(args: argparse.Namespace, feed: dict, results) -> Path:
+    from src.live.game_sim_card import card_data_from_results, render_game_sim_card
+
+    game_data = feed["gameData"]
+    teams = game_data["teams"]
+    players = game_data["players"]
+    box = feed["liveData"]["boxscore"]["teams"]
+
+    def starter_name(side: str) -> str:
+        pid = box[side]["pitchers"][0]
+        return players[f"ID{pid}"]["fullName"]
+
+    data = card_data_from_results(
+        results,
+        away_abbrev=teams["away"]["abbreviation"],
+        home_abbrev=teams["home"]["abbreviation"],
+        away_team_id=teams["away"].get("id"),
+        home_team_id=teams["home"].get("id"),
+        away_starter=starter_name("away"),
+        home_starter=starter_name("home"),
+        game_date=game_data.get("datetime", {}).get("officialDate", ""),
+        venue=game_data.get("venue", {}).get("name"),
+    )
+    out_path = Path(args.card_out) if args.card_out else Path(
+        f"output/sim_cards/sim_{args.game_pk}.jpg"
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    return render_game_sim_card(data, out_path)
+
 
 def run_validation(args: argparse.Namespace) -> None:
     season_dir = LIVEFEED_ROOT / str(args.season)
@@ -115,14 +149,25 @@ def run_validation(args: argparse.Namespace) -> None:
     n = len(rows)
     if n == 0:
         raise SystemExit("No usable games found")
-    brier = sum((r["p_home"] - (1.0 if r["home_won"] else 0.0)) ** 2 for r in rows) / n
+    outcomes = [1.0 if r["home_won"] else 0.0 for r in rows]
+    home_rate = sum(outcomes) / n
+    brier = sum((r["p_home"] - y) ** 2 for r, y in zip(rows, outcomes)) / n
+    # League home-field advantage benchmark (long-run MLB home win rate).
+    league_home_rate = 0.543
+    brier_league = sum((league_home_rate - y) ** 2 for y in outcomes) / n
+    brier_always_home = sum((1.0 - y) ** 2 for y in outcomes) / n
+    picks = sum(1 for r, y in zip(rows, outcomes) if (r["p_home"] > 0.5) == bool(y)) / n
     mean_p_home = sum(r["p_home"] for r in rows) / n
     print(f"\nGames: {n}")
     print(f"Mean simulated total runs: {sum(r['sim_total'] for r in rows) / n:.2f}")
     print(f"Mean actual total runs:    {sum(r['actual_total'] for r in rows) / n:.2f}")
-    print(f"Mean p(home): {mean_p_home:.3f}; actual home win rate: "
-          f"{sum(1 for r in rows if r['home_won']) / n:.3f}")
-    print(f"Brier score (home win): {brier:.4f} (0.25 = coin flip)")
+    print(f"Mean p(home): {mean_p_home:.3f}; actual home win rate: {home_rate:.3f}")
+    print("Brier score (home win), lower is better:")
+    print(f"  model:                    {brier:.4f}")
+    print("  coin flip (p=0.5):        0.2500")
+    print(f"  league home rate (p={league_home_rate}): {brier_league:.4f}")
+    print(f"  always-home hard pick:    {brier_always_home:.4f}")
+    print(f"Pick accuracy: model {picks:.1%} vs always-home {home_rate:.1%}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -133,6 +178,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--games", type=int, default=20)
+    parser.add_argument("--no-card", action="store_true")
+    parser.add_argument("--card-out", type=str, default=None)
     return parser.parse_args()
 
 
