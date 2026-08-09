@@ -221,3 +221,23 @@ Mitigations, in order:
   calibration).
 - Training era: 2015+ chosen over 2009+ for Statcast-era consistency; cheap to
   re-run with the full window later since the loader is season-parameterized.
+
+## Operational TODOs
+
+- Shared MLflow metadata alone is not enough for multi-machine live inference:
+  the outcome models currently load artifacts from local disk. Future options:
+  teach the live pipeline to pull the latest artifacts via MLflow, move artifacts
+  to a truly shared backend, or add an explicit sync step for `models/outcome/`.
+- The `mlb.pitches` table's `outs` column is dead (always 0: the ETL read a
+  nonexistent `about.outs` on pitch events) and its `is_runner_on_*` flags
+  only reflected runners who moved during the play. Both are fixed at the
+  source (`src/data/base_state.py` reconstruction wired into
+  `GameFeedData`), but the database still holds the old values until the
+  next full backfill reload; retrain the outcome models afterwards to pick
+  up the corrected runner/outs features. The sim base-out tables already
+  bypass the DB by reading raw live feed JSONs.
+- The PA simulator's `OutcomeModelProvider` holds the pitch-type/location
+  distribution fixed across counts (taken from one live prediction).
+  Milestone 5 needs count-conditioned type/location inputs — the 0-2-count
+  snapshot smoke produced Sale-after-0-2-level strikeout rates when applied
+  to full PAs, as expected from that approximation.

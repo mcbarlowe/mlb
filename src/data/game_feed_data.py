@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.data._type_utils import coerce_dataframe_types
+from src.data.base_state import compute_at_bat_states
 
 
 class GameFeedData:
@@ -173,7 +174,6 @@ class GameFeedData:
         row["is_out"] = pitch_details.get("isOut", False)
 
         row["count_after_pitch"] = f"{count.get('balls', 0)}-{count.get('strikes')}"
-        row["outs"] = pitch.get("about", {}).get("outs", 0)
         row["play_id"] = pitch.get("playId")
         row["pitch_start_time"] = pitch.get("startTime")
         row["pitch_end_time"] = pitch.get("endTime")
@@ -209,7 +209,9 @@ class GameFeedData:
 
         return row
 
-    def _process_play_data(self, play: dict, game_info: dict | None = None) -> list:
+    def _process_play_data(
+        self, play: dict, game_info: dict | None = None, base_state: dict | None = None
+    ) -> list:
         """
         Process individual play data and return pitch-level records.
 
@@ -225,7 +227,6 @@ class GameFeedData:
         ab_result = play.get("result", {})
         ab_about = play.get("about", {})
         ab_matchup = play.get("matchup", {})
-        ab_runners = play.get("runners", [])
 
         play_info = {}
         play_info["event"] = ab_result.get("event")
@@ -245,32 +246,26 @@ class GameFeedData:
         play_info["pitcher_name"] = ab_matchup.get("pitcher", {}).get("fullName")
         play_info["throw_side"] = ab_matchup.get("pitchHand", {}).get("code")
 
-        # Initialize runner columns to False (will be set to True if runner exists)
+        # True at-bat start base/out state, reconstructed by walking the
+        # half-inning (the play's own `runners` array only lists movers).
+        play_info["outs"] = 0
         play_info["is_runner_on_first"] = False
         play_info["runner_on_first_id"] = None
         play_info["is_runner_on_second"] = False
         play_info["runner_on_second_id"] = None
         play_info["is_runner_on_third"] = False
         play_info["runner_on_third_id"] = None
-
-        # Check runners' 'start' field to determine who was on base at the START of the at-bat
-        # The 'start' field shows where each runner was positioned when the play began
-        for runner in ab_runners:
-            movement = runner.get("movement", {})
-            runner_details = runner.get("details", {})
-            runner_info = runner_details.get("runner", {})
-            start_base = movement.get("start")
-            runner_id = runner_info.get("id")
-
-            if start_base == "1B":
-                play_info["is_runner_on_first"] = True
-                play_info["runner_on_first_id"] = runner_id
-            elif start_base == "2B":
-                play_info["is_runner_on_second"] = True
-                play_info["runner_on_second_id"] = runner_id
-            elif start_base == "3B":
-                play_info["is_runner_on_third"] = True
-                play_info["runner_on_third_id"] = runner_id
+        if base_state is not None:
+            play_info["outs"] = base_state["outs_before"]
+            for column in (
+                "is_runner_on_first",
+                "runner_on_first_id",
+                "is_runner_on_second",
+                "runner_on_second_id",
+                "is_runner_on_third",
+                "runner_on_third_id",
+            ):
+                play_info[column] = base_state[column]
 
         pitch_indices = play.get("pitchIndex", [])
         play_events = play.get("playEvents", [])
@@ -302,9 +297,10 @@ class GameFeedData:
         Returns:
             pd.DataFrame: DataFrame with pitch-level records.
         """
+        states = compute_at_bat_states(plays)
         rows = []
-        for play in plays:
-            rows.extend(self._process_play_data(play, game_info))
+        for play, state in zip(plays, states):
+            rows.extend(self._process_play_data(play, game_info, state))
 
         return pd.DataFrame(rows)
 
@@ -336,7 +332,7 @@ class GameFeedData:
         pitches_df = self._process_plays_data(plays, game_info)
 
         if pitches_df.empty:
-            return pd.DataFrame(columns=self.data_types.keys())
+            return pd.DataFrame(columns=list(self.data_types.keys()))
 
         # Handle missing runner columns
         if "is_runner_on_third" not in pitches_df.columns:

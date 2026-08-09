@@ -17,3 +17,4 @@
 - ETL/database code lives in `src/endpoints`, `src/data`, `src/database`, and `src/etl`.
 - ML training code lives in `src/ml` and `scripts/`; it depends on `torch` and `catboost` and is separate from the Postgres ETL path.
 - Pitch outcome models live in `src/outcome` (Stage A/B CatBoost + leak-free dataset builder); deliberately independent of `src/ml` pitch prediction models — shared contract is pitch-type codes + plate coordinates only. Tests: `uv run pytest -q test_outcome_models.py`.
+- Game simulation core lives in `src/sim` (count machine, empirical base-out tables, PA simulator). Rebuild tables with `uv run python scripts/build_base_out_tables.py` (reads raw live feed JSONs under `data/raw/livefeeds/`, not Postgres). Tests: `uv run pytest -q test_sim_engine.py`.
