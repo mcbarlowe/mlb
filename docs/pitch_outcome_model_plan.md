@@ -257,4 +257,13 @@ Mitigations, in order:
   pools (`src/sim/pitch_mix.py`, exported by `scripts/export_pitch_mix.py`).
   The live one-pitch card path still uses the LSTM/MDN distributions.
 - Stage B is ~2pp conservative on outs even on real rows (pred 69.2% vs
-  actual 67.1% on 2025 contact); fold into the milestone-6 calibration pass.
+  actual 67.1% on 2025 contact with the leaky-era model; ~1.3pp with the
+  CTR-free retrain); fold into the milestone-6 calibration pass.
+- Milestone-5 validation snapshot (30 random 2025 games x 300 sims, leak-free
+  CTR-free models `run_20260809_143443`): mean simulated total runs 9.87 vs
+  8.50 actual (+16%: K% runs ~3pp low, HBP ~2x, Stage B still ~1.3pp
+  out-conservative, generic bullpen arm too soft), home-win Brier 0.253 with
+  a narrow 0.38-0.62 p(home) spread — no home-field advantage, bullpen
+  identity, or team form modeled yet. Milestone-6 calibration targets:
+  per-stage post-hoc calibrators, a league-average synthetic profile row for
+  the generic bullpen arm (id 0), HBP location handling, and home advantage.
