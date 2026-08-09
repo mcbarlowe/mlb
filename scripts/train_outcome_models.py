@@ -113,8 +113,10 @@ def run_stage(
     mlflow.log_metrics(
         {
             f"stage_{name}_val_log_loss": metrics["val"]["log_loss"],
+            f"stage_{name}_val_brier": metrics["val"]["brier"],
             f"stage_{name}_val_accuracy": metrics["val"]["accuracy"],
             f"stage_{name}_test_log_loss": metrics["test"]["log_loss"],
+            f"stage_{name}_test_brier": metrics["test"]["brier"],
             f"stage_{name}_test_accuracy": metrics["test"]["accuracy"],
             f"stage_{name}_baseline_val_log_loss": metrics["baseline_val_log_loss"],
             f"stage_{name}_baseline_test_log_loss": metrics["baseline_test_log_loss"],

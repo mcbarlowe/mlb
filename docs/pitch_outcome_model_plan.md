@@ -280,3 +280,9 @@ Mitigations, in order:
   p(home) is 0.519 vs 0.558 actual because no home-field term exists.
   Adding the milestone-6 home-advantage term is the cheapest expected win.
   `scripts/simulate_game.py --validate` now prints these baselines.
+- Evaluation standard (owner request): report BOTH Brier score and log loss
+  for the stage models and for game-level win predictions. The trainer logs
+  stage val/test log loss + multiclass Brier to MLflow;
+  `scripts/simulate_game.py --validate` logs game-level win Brier/log loss
+  with coin, league-home-rate, and always-home baselines when
+  `MLFLOW_TRACKING_URI` is set.

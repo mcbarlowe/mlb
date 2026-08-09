@@ -60,14 +60,21 @@ def train_outcome_model(
 
 
 def evaluate_model(model, frame: pl.DataFrame, label_column: str) -> dict:
-    """Log loss / accuracy for a trained model on a labeled frame."""
+    """Log loss, multiclass Brier score, and accuracy on a labeled frame."""
     from sklearn.metrics import accuracy_score, log_loss
 
     features, labels = _to_catboost_frame(frame, label_column)
     probabilities = model.predict_proba(features)
     classes = [str(c) for c in model.classes_]
+    # Multiclass Brier: mean squared distance between the probability vector
+    # and the one-hot outcome (0 = perfect, 2 = maximally wrong).
+    one_hot = np.zeros_like(probabilities)
+    index_of = {cls: i for i, cls in enumerate(classes)}
+    one_hot[np.arange(len(labels)), [index_of[label] for label in labels]] = 1.0
+    brier = float(((probabilities - one_hot) ** 2).sum(axis=1).mean())
     return {
         "log_loss": float(log_loss(labels, probabilities, labels=classes)),
+        "brier": brier,
         "accuracy": float(
             accuracy_score(labels, np.asarray(classes)[probabilities.argmax(axis=1)])
         ),
