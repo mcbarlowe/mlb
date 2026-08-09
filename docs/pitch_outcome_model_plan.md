@@ -106,10 +106,51 @@ They enter the outcome models as **pitcher profiles, not raw measurements**:
   Deltas vs league average per type are the model-friendly form.
 - **v1 bonus:** within-game velocity trend vs profile (fatigue signal) is
   computable live and in sim (pitch count is tracked).
-- **v2 — physics sampler (stretch):** `P(velo, movement | pitcher, type, count,
-  pitch_count)` so Stage A/B can condition on sampled per-pitch physics, adding
-  within-pitcher variability and fatigue effects. Only worth it if profile
-  features show meaningful lift first.
+- **v1.5 — empirical physics resampler:** to simulate a pitch, draw an actual
+  historical `(velo, spin, IVB, HB, release)` tuple at random from that
+  pitcher's pitches of that type. Whole-tuple resampling preserves the joint
+  structure for free — physics are coupled through arm speed and spin axis, so
+  independent marginal draws would produce impossible pitches (98 mph with
+  curveball break). Training uses measured physics; simulation feeds sampled
+  ones — valid because the empirical distribution matches the real conditional
+  by construction. Details:
+  - *sparsity backoff:* few observations (rookies, new pitches) → shrink toward
+    the league distribution for that pitch type (same philosophy as the
+    unknown-player embedding fallback)
+  - *recency:* sample from a rolling window (current + prior season), not career
+  - *fatigue:* bucket draws by pitch-count band, or shift sampled velo by the
+    pitcher's observed within-game trend
+  - *known approximation:* ignores physics↔location correlation (commanded pitch
+    vs. miss); acceptable v1, revisit if calibration flags it
+- **v2 — learned physics sampler (stretch):** `P(velo, movement | pitcher, type,
+  count, pitch_count)` only if the empirical resampler's calibration falls short.
+
+### Batter swing physics
+
+The batter-side analog, with one hard data constraint: **GUMBO carries no bat
+tracking**. Verified against the feed: `hitData` has `launchSpeed`,
+`launchAngle`, `totalDistance`, `trajectory` per ball in play — but bat speed
+and swing length exist only in Baseball Savant's Statcast exports, and only
+since April 2024.
+
+- **v1 — behavior profiles (existing data):** rolling batter priors already
+  planned for Stage A (swing%, whiff%, chase%, contact% by zone/pitch type).
+  These proxy bat-to-ball skill without any new ETL.
+- **v1.5 — `hitData` ETL extension:** add launch speed/angle to the pitches
+  ETL (columns exist in every stored live feed, just not extracted). Exit
+  velocity is the *product* of bat speed and is available back to 2015. This
+  unlocks:
+  - per-batter **(EV, LA) joint distributions** — the batter equivalent of the
+    pitcher physics resampler, sampled at contact
+  - an alternative **xwOBA-style Stage B**: sample `(EV, LA)` from the batter's
+    distribution (conditioned on pitch type/location bucket), then map
+    `(EV, LA) → event` with a league-wide model. Removes park/defense noise
+    from the batter representation and is likely better calibrated than direct
+    event classification; evaluate both.
+- **v2 — Savant bat-tracking ingestion (stretch):** bat speed / swing length as
+  batter profile features. New ingestion path (pybaseball/Savant CSV), 2024+
+  coverage only, so it needs explicit missingness handling for earlier seasons;
+  justified only if EV/LA profiles leave measurable calibration gaps.
 
 ### Stage B — in-play event
 
