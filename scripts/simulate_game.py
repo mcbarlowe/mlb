@@ -68,10 +68,20 @@ def load_feed(game_pk: int, season: int | None) -> dict:
 
 
 def build_simulator(args: argparse.Namespace, season: int) -> GameSimulator:
+    from src.sim.calibration import DEFAULT_CALIBRATION_PATH, SimCalibration
+
     pointer = Path("models/outcome/latest_run.txt").read_text().strip()
     predictor = PitchOutcomePredictor(Path("models/outcome") / pointer)
     mix = PitchMixProfiles.load(seed=args.seed)
-    factory = MatchupProviderFactory(predictor, mix, season=season, seed=args.seed)
+    calibration = None
+    if DEFAULT_CALIBRATION_PATH.exists():
+        calibration = SimCalibration.load()
+        print(f"Loaded sim calibration from {DEFAULT_CALIBRATION_PATH}")
+    else:
+        print("No sim calibration found (run scripts/calibrate_sim.py); using raw rates")
+    factory = MatchupProviderFactory(
+        predictor, mix, season=season, seed=args.seed, calibration=calibration
+    )
     engine = BaseOutEngine.load(seed=args.seed)
     return GameSimulator(factory, engine, rng=random.Random(args.seed))
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import random
 
 from src.outcome.inference import OutcomeGameState, PitchOutcomePredictor
+from src.sim.calibration import SimCalibration
 from src.sim.game import Batter, Pitcher
 from src.sim.pa import MatchupOutcomeProvider
 from src.sim.pitch_mix import PitchMixProfiles
@@ -34,12 +35,14 @@ class MatchupProviderFactory:
         season: int,
         n_locations: int = 12,
         seed: int = 0,
+        calibration: SimCalibration | None = None,
     ):
         self._predictor = outcome_predictor
         self._mix = mix_profiles
         self._season = season
         self._n_locations = n_locations
         self._rng = random.Random(seed)
+        self._calibration = calibration
         self._cache: dict[tuple[int, int, bool], MatchupOutcomeProvider] = {}
 
     def __call__(
@@ -72,6 +75,18 @@ class MatchupProviderFactory:
         inputs = self._mix.inputs_by_count(
             pitcher.player_id, n_locations=self._n_locations, rng=self._rng
         )
-        provider = MatchupOutcomeProvider(self._predictor, state, inputs)
+        result_multipliers: dict[str, float] | None = None
+        event_multipliers: dict[str, float] | None = None
+        if self._calibration is not None:
+            result_multipliers, event_multipliers = self._calibration.multipliers(
+                is_top_half
+            )
+        provider = MatchupOutcomeProvider(
+            self._predictor,
+            state,
+            inputs,
+            result_multipliers=result_multipliers,
+            event_multipliers=event_multipliers,
+        )
         self._cache[key] = provider
         return provider

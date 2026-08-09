@@ -30,6 +30,12 @@ BATTER_PRIOR_COLUMNS = [
 PITCHER_PROFILES_FILE = "pitcher_profiles.parquet"
 BATTER_PRIORS_FILE = "batter_priors.parquet"
 
+# Synthetic pitcher id used by the game simulator's generic bullpen arm.
+# It gets league-median profile values so the outcome models see a plausible
+# "average arm" instead of all-null features (CatBoost's missing-value
+# routing made the null arm systematically soft).
+LEAGUE_PITCHER_ID = 0
+
 
 def build_profile_stores(
     frame: pl.DataFrame,
@@ -45,6 +51,13 @@ def build_profile_stores(
         .group_by(["pitcher_id", "pitch_type"], maintain_order=True)
         .agg(pl.col(column).last() for column in PITCHER_PROFILE_COLUMNS)
     )
+    league_rows = (
+        pitcher_profiles.group_by("pitch_type")
+        .agg(pl.col(column).median() for column in PITCHER_PROFILE_COLUMNS)
+        .with_columns(pl.lit(LEAGUE_PITCHER_ID, dtype=pl.Int64).alias("pitcher_id"))
+        .select(pitcher_profiles.columns)
+    )
+    pitcher_profiles = pl.concat([pitcher_profiles, league_rows])
     batter_priors = (
         frame.group_by("batter_id", maintain_order=True)
         .agg(pl.col(column).last() for column in BATTER_PRIOR_COLUMNS)

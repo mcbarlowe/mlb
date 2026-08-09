@@ -119,10 +119,21 @@ class MatchupOutcomeProvider:
 
     ``inputs_by_count`` maps every (balls, strikes) count to that count's
     (type distribution, location sample) — see
-    ``src.sim.pitch_mix.PitchMixProfiles.inputs_by_count``.
+    ``src.sim.pitch_mix.PitchMixProfiles.inputs_by_count``. Optional
+    per-class ``result_multipliers``/``event_multipliers`` (see
+    ``src.sim.calibration``) rescale each count's distributions.
     """
 
-    def __init__(self, outcome_predictor, base_state, inputs_by_count: CountInputs):
+    def __init__(
+        self,
+        outcome_predictor,
+        base_state,
+        inputs_by_count: CountInputs,
+        result_multipliers: dict[str, float] | None = None,
+        event_multipliers: dict[str, float] | None = None,
+    ):
+        from src.sim.calibration import apply_multipliers
+
         missing = {
             (b, s) for b in range(4) for s in range(3)
         } - set(inputs_by_count)
@@ -131,6 +142,16 @@ class MatchupOutcomeProvider:
         self._result, self._event = _precompute_count_tables(
             outcome_predictor, base_state, inputs_by_count
         )
+        if result_multipliers:
+            self._result = {
+                count: apply_multipliers(probs, result_multipliers)
+                for count, probs in self._result.items()
+            }
+        if event_multipliers:
+            self._event = {
+                count: apply_multipliers(probs, event_multipliers)
+                for count, probs in self._event.items()
+            }
 
     def result_probabilities(self, balls: int, strikes: int) -> dict[str, float]:
         return self._result[(balls, strikes)]
