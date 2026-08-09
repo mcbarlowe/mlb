@@ -382,7 +382,29 @@ def run_slate(args: argparse.Namespace) -> None:
             )
             out = Path(f"output/sim_cards/slate_{slate_date}_{game['gamePk']}.jpg")
             out.parent.mkdir(parents=True, exist_ok=True)
-            print(f"             card: {render_game_sim_card(data, out)}")
+            card_path = render_game_sim_card(data, out)
+            print(f"             card: {card_path}")
+
+            if args.post:
+                from src.live.publisher import BlueskyPublisher, PredictionPost
+
+                p_home = stats["home_win_probability"]
+                favorite, p_fav = (
+                    (home_abbrev, p_home)
+                    if p_home >= 0.5
+                    else (away_abbrev, 1 - p_home)
+                )
+                # Production caption: plain matchup text, no model internals.
+                caption = (
+                    f"{label}: {favorite} {p_fav:.0%} to win. "
+                    f"Projected score {away_abbrev} {stats['mean_away_runs']:.1f} - "
+                    f"{home_abbrev} {stats['mean_home_runs']:.1f}. "
+                    f"Probables: {starters['away']} vs {starters['home']}."
+                )
+                post_id = BlueskyPublisher().publish(
+                    PredictionPost(text=caption, image_path=card_path)
+                )
+                print(f"             posted: {post_id}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -391,6 +413,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--season", type=int, default=None)
     parser.add_argument("--sims", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--post", action="store_true")
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--slate", action="store_true")
     parser.add_argument("--date", type=str, default=None)
