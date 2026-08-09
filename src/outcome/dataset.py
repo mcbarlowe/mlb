@@ -111,8 +111,15 @@ NUMERIC_FEATURES = [
 FEATURE_COLUMNS = CATEGORICAL_FEATURES + NUMERIC_FEATURES
 
 
-def load_pitches(seasons: Sequence[int]) -> pl.DataFrame:
-    """Load raw pitch rows for the given seasons from PostgreSQL."""
+def load_pitches(seasons: Sequence[int], attempts: int = 5) -> pl.DataFrame:
+    """Load raw pitch rows for the given seasons from PostgreSQL.
+
+    The database may live across a LAN (laptop training against the
+    workstation), so transient connect/read failures are retried with a
+    fixed backoff before giving up.
+    """
+    import time
+
     import psycopg
 
     from src.database import PostgresConfig
@@ -132,11 +139,28 @@ def load_pitches(seasons: Sequence[int]) -> pl.DataFrame:
         "password": config.password,
         "host": config.host,
         "port": config.port,
+        "connect_timeout": 15,
     }
-    with psycopg.connect(
-        **{key: value for key, value in conninfo.items() if value is not None}
-    ) as connection:
-        return pl.read_database(query, connection)
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with psycopg.connect(
+                **{key: value for key, value in conninfo.items() if value is not None}
+            ) as connection:
+                return pl.read_database(query, connection)
+        except psycopg.OperationalError as exc:
+            last_error = exc
+            if attempt == attempts:
+                break
+            wait_seconds = 20 * attempt
+            print(
+                f"Database load attempt {attempt}/{attempts} failed ({exc}); "
+                f"retrying in {wait_seconds}s"
+            )
+            time.sleep(wait_seconds)
+    raise RuntimeError(
+        f"Failed to load pitches after {attempts} attempts"
+    ) from last_error
 
 
 def _canonical_type_expr() -> pl.Expr:
