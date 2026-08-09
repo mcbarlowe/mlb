@@ -81,6 +81,7 @@ class LiveGamePredictionService:
         random_pitch_ceiling: int = 4,
         seed: int | None = None,
         card_style: str = "html",
+        outcome_predictor=None,
     ):
         if post_cadence not in {"at_bat", "pitch", "random_pitch", "half_inning"}:
             raise ValueError(
@@ -97,6 +98,7 @@ class LiveGamePredictionService:
         self.max_posts_per_game = max_posts_per_game
         self.random_pitch_ceiling = random_pitch_ceiling
         self.card_style = card_style
+        self.outcome_predictor = outcome_predictor
         self._rng = random.Random(seed)
         self._html_renderer = None
         self._last_pitch_key: dict[int, tuple[int, int, int, int]] = {}
@@ -106,6 +108,69 @@ class LiveGamePredictionService:
         self._ab_target_pitch: dict[tuple[int, int], int] = {}
         self._pending_posted_predictions: dict[int, PendingPostedPrediction] = {}
 
+    def _predict_outcome(self, snapshot: LiveSnapshot, prediction) -> dict | None:
+        """Marginal outcome odds for the predicted pitch (None on any failure)."""
+        if self.outcome_predictor is None:
+            return None
+        try:
+            from src.ml.features import PITCH_TYPE_CODES
+            from src.outcome.inference import (
+                OutcomeGameState,
+                sample_locations_from_grid,
+            )
+
+            context = snapshot.context
+            frame = snapshot.frame
+
+            pitcher_abs = (
+                frame.filter(frame["pitcher_id"] == context.pitcher_id)
+                .get_column("at_bat_index")
+                .n_unique()
+            )
+            season_value = frame.get_column("season").tail(1).item()
+            sz_top = frame.get_column("pitch_strike_zone_top").drop_nulls()
+            sz_bottom = frame.get_column("pitch_strike_zone_bottom").drop_nulls()
+
+            is_top = context.inning_half == "Top"
+            score_home = context.score_home or 0
+            score_away = context.score_away or 0
+            state = OutcomeGameState(
+                balls=snapshot.balls,
+                strikes=snapshot.strikes,
+                outs=snapshot.outs,
+                runner_on_first=context.runner_on_1b,
+                runner_on_second=context.runner_on_2b,
+                runner_on_third=context.runner_on_3b,
+                inning=context.inning,
+                is_top_half=is_top,
+                score_diff=(score_away - score_home) if is_top else (score_home - score_away),
+                season=int(str(season_value)),
+                times_through_order=((max(pitcher_abs, 1) - 1) // 9) + 1,
+                pitcher_id=context.pitcher_id,
+                batter_id=context.batter_id,
+                throw_side=context.pitcher_hand,
+                bat_side=context.batter_hand,
+                sz_top=float(sz_top.tail(1).item()) if len(sz_top) else 3.4,
+                sz_bottom=float(sz_bottom.tail(1).item()) if len(sz_bottom) else 1.6,
+            )
+            type_probabilities = {
+                code: float(prob)
+                for code, prob in zip(
+                    PITCH_TYPE_CODES, prediction.type_probabilities
+                )
+            }
+            locations = sample_locations_from_grid(
+                prediction.px_grid,
+                prediction.pz_grid,
+                prediction.location_density,
+                n_samples=40,
+                seed=snapshot.pitch_key[0] * 100 + snapshot.pitch_key[1],
+            )
+            return self.outcome_predictor.predict(state, type_probabilities, locations)
+        except Exception as exc:
+            print(f"Outcome prediction failed ({exc}); rendering without it")
+            return None
+
     def _render_card(
         self,
         prediction,
@@ -114,6 +179,7 @@ class LiveGamePredictionService:
         actual_pitch_type: str | None = None,
         actual_location: tuple[float, float] | None = None,
         pitch_result: str | None = None,
+        outcome: dict | None = None,
     ) -> Path:
         """Render a card, preferring the HTML renderer with mpl fallback."""
         if self.card_style == "html":
@@ -134,6 +200,7 @@ class LiveGamePredictionService:
                     actual_pitch_type=actual_pitch_type,
                     actual_location=actual_location,
                     pitch_result=pitch_result,
+                    outcome=outcome,
                 )
             except Exception as exc:
                 print(f"HTML card renderer failed ({exc}); using matplotlib")
@@ -271,7 +338,10 @@ class LiveGamePredictionService:
             f"ab{snapshot.at_bat_index:03d}_pitch{snapshot.next_pitch_number:02d}"
             f"_{snapshot.balls}-{snapshot.strikes}.png"
         )
-        card_path = self._render_card(prediction, snapshot.context, card_path)
+        outcome = self._predict_outcome(snapshot, prediction)
+        card_path = self._render_card(
+            prediction, snapshot.context, card_path, outcome=outcome
+        )
 
         summary = {
             "game_pk": game_pk,

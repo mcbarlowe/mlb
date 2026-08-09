@@ -83,6 +83,17 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_LOCATION_MODEL,
         help="Directory of the conditioned location model ('' disables)",
     )
+    parser.add_argument(
+        "--outcome-run-dir",
+        type=str,
+        default="auto",
+        help=(
+            "Directory of trained outcome models (Stage A/B). "
+            "Default 'auto' uses models/outcome/latest_run.txt or the newest "
+            "models/outcome/run_* directory when present; use 'none' to disable "
+            "the outcome-odds strip."
+        ),
+    )
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--poll-interval", type=float, default=3.0)
     parser.add_argument(
@@ -147,6 +158,25 @@ def main() -> None:
         location_model_dir=args.location_model or None,
         device=args.device,
     )
+    outcome_predictor = None
+    if args.outcome_run_dir.lower() != "none":
+        from src.outcome.inference import PitchOutcomePredictor
+
+        outcome_run_dir = args.outcome_run_dir
+        if outcome_run_dir == "auto":
+            pointer = Path("models/outcome/latest_run.txt")
+            if pointer.exists():
+                outcome_run_dir = str(
+                    Path("models/outcome") / pointer.read_text().strip()
+                )
+            else:
+                runs = sorted(Path("models/outcome").glob("run_*"), reverse=True)
+                outcome_run_dir = str(runs[0]) if runs else ""
+        if outcome_run_dir and Path(outcome_run_dir).exists():
+            outcome_predictor = PitchOutcomePredictor(outcome_run_dir)
+        else:
+            print("Outcome models not found; rendering without outcome-odds strip")
+
     publisher = BlueskyPublisher() if args.post else DryRunPublisher()
     service = LiveGamePredictionService(
         predictor=predictor,
@@ -157,6 +187,7 @@ def main() -> None:
         random_pitch_ceiling=args.random_pitch_ceiling,
         seed=args.seed,
         card_style=args.card_style,
+        outcome_predictor=outcome_predictor,
     )
 
     if args.game_pk is not None:

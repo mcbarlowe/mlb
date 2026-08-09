@@ -255,8 +255,15 @@ def _diamond_svg(context: GameContext) -> str:
     </svg>'''
 
 
+def _batter_stance_image_html(batter_hand: str) -> str:
+    """Placeholder hook for future handed batter stance image assets."""
+    _ = batter_hand
+    return ""
+
+
 def _zone_svg(
     prediction: PitchPrediction,
+    batter_hand: str,
     actual_location: tuple[float, float] | None = None,
 ) -> str:
     zone_left, zone_top = _panel_xy(-ZONE_HALF_W_FT, ZONE_TOP_FT)
@@ -268,11 +275,11 @@ def _zone_svg(
     plate_half = 0.708 * PX_PER_FT
     center_x = PANEL_W / 2
     plate = (
-        f"M {center_x - plate_half} {plate_y} "
-        f"L {center_x + plate_half} {plate_y} "
-        f"L {center_x + plate_half} {plate_y + 10} "
-        f"L {center_x} {plate_y + 24} "
-        f"L {center_x - plate_half} {plate_y + 10} Z"
+        f"M {center_x - plate_half} {plate_y + 24} "
+        f"L {center_x + plate_half} {plate_y + 24} "
+        f"L {center_x + plate_half} {plate_y + 14} "
+        f"L {center_x} {plate_y} "
+        f"L {center_x - plate_half} {plate_y + 14} Z"
     )
 
     exp_x, exp_y = _panel_xy(-float(prediction.location_point[0]),
@@ -340,6 +347,46 @@ def _result_bar_html(
         + "</div>"
     )
 
+_RESULT_LABELS = [
+    ("ball", "BALL"),
+    ("called_strike", "CALLED STRIKE"),
+    ("swinging_strike", "WHIFF"),
+    ("foul", "FOUL"),
+    ("in_play", "IN PLAY"),
+]
+
+_EVENT_LABELS = [
+    ("out", "OUT"),
+    ("single", "1B"),
+    ("double", "2B"),
+    ("triple", "3B"),
+    ("home_run", "HR"),
+]
+
+
+def _outcome_strip_html(outcome: dict | None) -> str:
+    """Compact outcome-odds block under the pitch prediction rows."""
+    if not outcome:
+        return ""
+    result = outcome.get("result") or {}
+    events = outcome.get("event_given_in_play") or {}
+    if not result:
+        return ""
+
+    result_chips = " ".join(
+        f'<span class="ochip">{label} <b>{result.get(key, 0.0):.0%}</b></span>'
+        for key, label in _RESULT_LABELS
+    )
+    event_chips = " ".join(
+        f'<span class="ochip">{label} <b>{events.get(key, 0.0):.0%}</b></span>'
+        for key, label in _EVENT_LABELS
+    )
+    return f"""
+      <div class="section-label" style="margin-top:16px">PITCH OUTCOME ODDS</div>
+      <div class="outcome-row">{result_chips}</div>
+      <div class="outcome-row outcome-secondary">IF IN PLAY &nbsp;&rarr;&nbsp; {event_chips}</div>
+    """
+
 def build_card_html(
     prediction: PitchPrediction,
     context: GameContext,
@@ -347,6 +394,7 @@ def build_card_html(
     actual_pitch_type: str | None = None,
     actual_location: tuple[float, float] | None = None,
     pitch_result: str | None = None,
+    outcome: dict | None = None,
 ) -> str:
     """Assemble the full HTML document for one pitch card."""
     density_b64 = density_glow_png(prediction)
@@ -431,6 +479,14 @@ def build_card_html(
     background: linear-gradient(90deg, #F59E0B, #FBBF24);
     box-shadow: 0 0 14px rgba(245, 158, 11, 0.55); }}
 
+  .outcome-row {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+                  margin-bottom: 7px; font-size: 12.5px; font-weight: 700;
+                  letter-spacing: 0.8px; color: #8CA0B8; }}
+  .ochip {{ background: #16283F; border: 1px solid #24405F; border-radius: 8px;
+            padding: 4px 10px; color: #B9C7D8; white-space: nowrap; }}
+  .ochip b {{ color: #FFFFFF; }}
+  .outcome-secondary .ochip {{ background: transparent; }}
+
   .bottomleft {{ margin-top: auto; display: flex; align-items: flex-end;
                  justify-content: space-between; }}
 
@@ -494,6 +550,7 @@ def build_card_html(
 
       <div class="section-label">NEXT PITCH PREDICTION</div>
       {_probability_rows(prediction)}
+      {_outcome_strip_html(outcome)}
 
       <div class="bottomleft">
         <div>
@@ -507,7 +564,8 @@ def build_card_html(
       <div class="section-label" style="margin-top:0">PREDICTED LOCATION · PITCHER'S VIEW</div>
       <div class="zone-panel">
         <img class="zone-density" src="data:image/png;base64,{density_b64}" alt="" />
-        {_zone_svg(prediction, actual_location)}
+        {_batter_stance_image_html(context.batter_hand)}
+        {_zone_svg(prediction, context.batter_hand, actual_location)}
         <div class="side-hint" style="left:14px">&larr; LHB</div>
         <div class="side-hint" style="right:14px">RHB &rarr;</div>
       </div>
@@ -632,6 +690,7 @@ def render_card_png(
     actual_pitch_type: str | None = None,
     actual_location: tuple[float, float] | None = None,
     pitch_result: str | None = None,
+    outcome: dict | None = None,
 ) -> Path:
     """Render one card (prediction or threaded result) at 2x scale."""
     html = build_card_html(
@@ -641,5 +700,6 @@ def render_card_png(
         actual_pitch_type=actual_pitch_type,
         actual_location=actual_location,
         pitch_result=pitch_result,
+        outcome=outcome,
     )
     return renderer.render(html, out_path)
