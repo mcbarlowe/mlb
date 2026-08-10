@@ -14,6 +14,7 @@ TARGET_DATE="${BARLOWE_DAILY_SIM_DATE:-}"
 SIMS="${BARLOWE_DAILY_SIM_SIMS:-2000}"
 POLL_INTERVAL_MINUTES="${BARLOWE_DAILY_SIM_POLL_INTERVAL_MINUTES:-15}"
 OUTCOME_RUN_DIR="${BARLOWE_DAILY_SIM_OUTCOME_RUN_DIR:-auto}"
+WIN_MODEL_NAME="${BARLOWE_DAILY_SIM_WIN_MODEL:-mlb-team-strength-win}"
 OUTPUT_DIR="${BARLOWE_DAILY_SIM_OUTPUT_DIR:-output/sim_cards/daily}"
 STATE_DIR="${BARLOWE_DAILY_SIM_STATE_DIR:-output/sim_state}"
 
@@ -63,6 +64,7 @@ if [[ "${1:-}" == "--validate" ]]; then
   echo "sims: $SIMS"
   echo "poll interval minutes: $POLL_INTERVAL_MINUTES"
   echo "outcome run dir: $OUTCOME_RUN_DIR"
+  echo "win model name: $WIN_MODEL_NAME"
   echo "output dir: $OUTPUT_DIR"
   echo "state dir: $STATE_DIR"
   echo "bluesky handle present: ${BLUESKY_HANDLE:+yes}"
@@ -78,7 +80,7 @@ if [[ "${1:-}" == "--validate" ]]; then
   echo "x api oauth2 refresh token present: ${X_API_OAUTH2_REFRESH_TOKEN:+yes}"
   echo "x access token secret present: ${X_ACCESS_TOKEN_SECRET:+yes}"
   echo "mlflow uri present: ${MLFLOW_TRACKING_URI:+yes}"
-  validate_args=(run python scripts/run_daily_sim_slate.py --sims "$SIMS" --poll-interval-minutes "$POLL_INTERVAL_MINUTES" --outcome-run-dir "$OUTCOME_RUN_DIR" --output-dir "$OUTPUT_DIR" --state-dir "$STATE_DIR")
+  validate_args=(run python scripts/run_daily_sim_slate.py --sims "$SIMS" --poll-interval-minutes "$POLL_INTERVAL_MINUTES" --outcome-run-dir "$OUTCOME_RUN_DIR" --win-model-name "$WIN_MODEL_NAME" --output-dir "$OUTPUT_DIR" --state-dir "$STATE_DIR")
   if [[ -n "$TARGET_DATE" ]]; then
     validate_args+=(--date "$TARGET_DATE")
   fi
@@ -100,7 +102,7 @@ if pgrep -f "$RUN_PATTERN" >/dev/null; then
   exit 0
 fi
 
-args=(run python scripts/run_daily_sim_slate.py --sims "$SIMS" --poll-interval-minutes "$POLL_INTERVAL_MINUTES" --outcome-run-dir "$OUTCOME_RUN_DIR" --output-dir "$OUTPUT_DIR" --state-dir "$STATE_DIR")
+args=(run python scripts/run_daily_sim_slate.py --sims "$SIMS" --poll-interval-minutes "$POLL_INTERVAL_MINUTES" --outcome-run-dir "$OUTCOME_RUN_DIR" --win-model-name "$WIN_MODEL_NAME" --output-dir "$OUTPUT_DIR" --state-dir "$STATE_DIR")
 if [[ -n "$TARGET_DATE" ]]; then
   args+=(--date "$TARGET_DATE")
 fi

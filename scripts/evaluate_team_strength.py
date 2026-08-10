@@ -21,16 +21,21 @@ from src.ml.mlflow_utils import (
     configure_mlflow,
 )
 from src.sim.team_strength import (
+    DEFAULT_REGISTERED_STRENGTH_MODEL as DEFAULT_REGISTERED_MODEL,
+)
+from src.sim.team_strength import (
     FEATURE_NAMES,
     StrengthModelFit,
     TeamStrengthPredictor,
     load_completed_games,
     train_strength_model,
 )
-
-MODEL_FAMILY = "team_strength_win"
-MODEL_CONTRACT_VERSION = 1
-DEFAULT_REGISTERED_MODEL = "mlb-team-strength-win"
+from src.sim.team_strength import (
+    STRENGTH_MODEL_CONTRACT_VERSION as MODEL_CONTRACT_VERSION,
+)
+from src.sim.team_strength import (
+    STRENGTH_MODEL_FAMILY as MODEL_FAMILY,
+)
 
 
 @dataclass(frozen=True)

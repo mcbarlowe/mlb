@@ -411,10 +411,10 @@ uv run python scripts/run_daily_sim_slate.py --post --post-provider both --watch
 How it works:
 
 1. Resolves the outcome-model artifacts with `--outcome-run-dir auto`: shared MLflow production runs first when `MLFLOW_TRACKING_URI` is set, then `models/outcome/latest_run.txt`, then the newest local `models/outcome/run_*` directory.
-2. Fits the leak-free team-strength win model from PostgreSQL using the four prior seasons, with Elo, recent run form, and Bayesian-shrunk probable-starter quality updated only from games before the slate date.
+2. Loads the gate-passed `champion_version` of the registered MLflow model selected by `--win-model-name` (default `mlb-team-strength-win`), then rebuilds only its chronological Elo, run-form, and starter state from PostgreSQL through games before the slate date. Missing or inconsistent champion metadata stops the job rather than silently fitting another model.
 3. Fetches that day's preview games from the MLB schedule with hydrated probable starters.
 4. Uses the team-strength model for published win odds and the pitch/outcome Monte Carlo chain for score distributions, then renders the combined board to `output/sim_cards/daily/daily_sim_<date>.jpg`.
-5. Stores the probable-starter snapshot in `output/sim_state/daily_sim_<date>.json`; with `--watch-starters`, it posts a fresh one-game card whenever a probable starter changes.
+5. Stores the probable-starter snapshot and published board ID in `output/sim_state/daily_sim_<date>.json`. A same-day restart reuses that post instead of publishing a duplicate; with `--watch-starters`, it resumes polling and posts a fresh one-game card only when a probable starter changes.
 
 The 2025 holdout gate covers all 2,430 regular-season games and must beat the fixed league-home-rate baseline on Brier score, log loss, and pick accuracy:
 
@@ -422,7 +422,7 @@ The 2025 holdout gate covers all 2,430 regular-season games and must beat the fi
 uv run python scripts/evaluate_team_strength.py
 ```
 
-`scripts/run_daily_sim_slate.sh` is the launchd-friendly wrapper; it mirrors the existing live-pipeline helper and reads `BARLOWE_DAILY_SIM_*` environment variables for posting, posting provider, polling cadence, state/output directories, and optional date overrides. The wrapper defaults to `BARLOWE_DAILY_SIM_POST_PROVIDER=both` so scheduled daily game-winner boards post to Bluesky and X unless overridden. `scripts/run_daily_random_live_game.sh` uses the same provider mechanism for `BARLOWE_RANDOM_GAME_*`.
+`scripts/run_daily_sim_slate.sh` is the launchd-friendly wrapper; it reads `BARLOWE_DAILY_SIM_*` environment variables for posting, posting provider, polling cadence, state/output directories, optional date overrides, and `BARLOWE_DAILY_SIM_WIN_MODEL`. The wrapper defaults to `BARLOWE_DAILY_SIM_POST_PROVIDER=both` and `mlb-team-strength-win`. The installed `com.barloweanalytics.daily-sim-slate` LaunchAgent runs at 09:00 local time and uses the shared MLflow HTTP service. `scripts/run_daily_random_live_game.sh` uses the same provider mechanism for `BARLOWE_RANDOM_GAME_*`.
 
 
 ## Performance Notes

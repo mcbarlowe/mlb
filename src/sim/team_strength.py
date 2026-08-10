@@ -15,11 +15,13 @@ coefficients are fit only on seasons before the prediction season.
 
 from __future__ import annotations
 
+import json
 import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pandas as pd
@@ -38,6 +40,10 @@ FEATURE_NAMES = (
     "starter_fip_edge",
     "starter_length_edge",
 )
+
+STRENGTH_MODEL_FAMILY = "team_strength_win"
+STRENGTH_MODEL_CONTRACT_VERSION = 1
+DEFAULT_REGISTERED_STRENGTH_MODEL = "mlb-team-strength-win"
 
 
 @dataclass(frozen=True)
@@ -272,10 +278,18 @@ class StrengthFeatureBuilder:
 
 
 @dataclass(frozen=True)
+class StrengthModelSource:
+    registered_model_name: str
+    version: str
+    run_id: str
+
+
+@dataclass(frozen=True)
 class TeamStrengthPredictor:
     coefficients: tuple[float, ...]
     intercept: float
     feature_builder: StrengthFeatureBuilder
+    source: StrengthModelSource | None = None
 
     def predict_home_probability(
         self,
@@ -309,6 +323,14 @@ class StrengthModelFit:
     feature_frame: pd.DataFrame
     train_seasons: tuple[int, ...]
     config: StrengthConfig
+
+
+@dataclass(frozen=True)
+class _LoadedStrengthModel:
+    estimator: LogisticRegression
+    config: StrengthConfig
+    start_season: int
+    source: StrengthModelSource
 
 
 def _db_int(value: object | None) -> int:
@@ -504,24 +526,170 @@ def fit_strength_predictor(
     return fitted.predictor, fitted.feature_frame
 
 
+def _object_mapping(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) for key in value
+    ):
+        raise ValueError(f"Invalid {label} in MLflow model contract")
+    return cast(dict[str, object], value)
+
+
+def _contract_float(data: dict[str, object], key: str) -> float:
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"Invalid {key!r} in MLflow model contract")
+    return float(value)
+
+
+def _load_champion_strength_model(
+    *,
+    tracking_uri: str | None,
+    registered_model_name: str,
+) -> _LoadedStrengthModel:
+    import mlflow
+    from mlflow import MlflowClient
+    from mlflow.sklearn import load_model
+    from sklearn.linear_model import LogisticRegression
+
+    from src.ml.mlflow_utils import resolve_mlflow_tracking_uri
+
+    resolved_uri = resolve_mlflow_tracking_uri(tracking_uri)
+    if not resolved_uri:
+        raise RuntimeError("A shared MLflow tracking URI is required")
+    mlflow.set_tracking_uri(resolved_uri)
+    client = MlflowClient(tracking_uri=resolved_uri)
+    registered_model = client.get_registered_model(registered_model_name)
+    version = registered_model.tags.get("champion_version")
+    run_id = registered_model.tags.get("champion_run_id")
+    if not version or not run_id:
+        raise RuntimeError(
+            f"Registered model {registered_model_name!r} has no champion"
+        )
+
+    versions = client.search_model_versions(
+        f"name = '{registered_model_name}'"
+    )
+    selected = next(
+        (
+            candidate
+            for candidate in versions
+            if str(candidate.version) == version
+        ),
+        None,
+    )
+    if selected is None or selected.run_id != run_id:
+        raise RuntimeError(
+            f"Champion metadata for {registered_model_name!r} is inconsistent"
+        )
+    run = client.get_run(run_id)
+    if run.data.tags.get("promotion_gate") != "passed":
+        raise RuntimeError(
+            f"Champion run {run_id!r} did not pass the promotion gate"
+        )
+
+    contract_path = Path(
+        client.download_artifacts(run_id, "model_contract.json")
+    )
+    contract = _object_mapping(
+        json.loads(contract_path.read_text()),
+        "model contract",
+    )
+    if contract.get("contract_version") != STRENGTH_MODEL_CONTRACT_VERSION:
+        raise ValueError("Unsupported win-model contract version")
+    if contract.get("model_family") != STRENGTH_MODEL_FAMILY:
+        raise ValueError("Registered MLflow model has the wrong model family")
+    if contract.get("features") != list(FEATURE_NAMES):
+        raise ValueError("Registered MLflow model has incompatible features")
+
+    training = _object_mapping(
+        contract.get("training"),
+        "training metadata",
+    )
+    start_season = training.get("start_season")
+    if not isinstance(start_season, int):
+        raise TypeError("Invalid training start season in MLflow contract")
+    config_data = _object_mapping(
+        contract.get("strength_config"),
+        "strength configuration",
+    )
+    config = StrengthConfig(
+        initial_elo=_contract_float(config_data, "initial_elo"),
+        elo_k=_contract_float(config_data, "elo_k"),
+        elo_home_advantage=_contract_float(
+            config_data, "elo_home_advantage"
+        ),
+        elo_season_regression=_contract_float(
+            config_data, "elo_season_regression"
+        ),
+        initial_runs_per_game=_contract_float(
+            config_data, "initial_runs_per_game"
+        ),
+        run_alpha=_contract_float(config_data, "run_alpha"),
+        run_season_regression=_contract_float(
+            config_data, "run_season_regression"
+        ),
+        starter_prior_ip=_contract_float(config_data, "starter_prior_ip"),
+        starter_season_decay=_contract_float(
+            config_data, "starter_season_decay"
+        ),
+    )
+
+    estimator = load_model(f"runs:/{run_id}/model")
+    if not isinstance(estimator, LogisticRegression):
+        raise TypeError("Registered win model is not logistic regression")
+    if estimator.coef_.size != len(FEATURE_NAMES):
+        raise ValueError("Registered win model has incompatible coefficients")
+    return _LoadedStrengthModel(
+        estimator=estimator,
+        config=config,
+        start_season=start_season,
+        source=StrengthModelSource(
+            registered_model_name=registered_model_name,
+            version=version,
+            run_id=run_id,
+        ),
+    )
+
+
 def build_live_strength_predictor(
     prediction_date: date,
     *,
-    start_season: int = 2015,
+    start_season: int | None = None,
     db_config: PostgresConfig | None = None,
+    tracking_uri: str | None = None,
+    registered_model_name: str = DEFAULT_REGISTERED_STRENGTH_MODEL,
 ) -> TeamStrengthPredictor:
-    """Fit prior-season coefficients and build state strictly before a slate."""
+    """Load champion coefficients and build state strictly before a slate."""
+    loaded = _load_champion_strength_model(
+        tracking_uri=tracking_uri,
+        registered_model_name=registered_model_name,
+    )
+    if start_season is not None and start_season != loaded.start_season:
+        raise ValueError(
+            "start_season must match the registered model contract "
+            f"({loaded.start_season})"
+        )
+
     prediction_season = prediction_date.year
     completed = load_completed_games(
-        start_season=start_season,
+        start_season=loaded.start_season,
         end_season=prediction_season,
         db_config=db_config,
     )
     cutoff = prediction_date.isoformat()
-    available = [game for game in completed if game.game_datetime[:10] < cutoff]
-    predictor, _ = fit_strength_predictor(
-        available,
-        prediction_season=prediction_season,
+    builder = StrengthFeatureBuilder(loaded.config)
+    for game in completed:
+        if game.game_datetime[:10] < cutoff:
+            builder.observe(game)
+    builder.advance_to_season(prediction_season)
+    return TeamStrengthPredictor(
+        coefficients=tuple(
+            float(value)
+            for value in loaded.estimator.coef_.reshape(-1).tolist()
+        ),
+        intercept=float(
+            np.asarray(loaded.estimator.intercept_).reshape(-1)[0]
+        ),
+        feature_builder=builder,
+        source=loaded.source,
     )
-    predictor.feature_builder.advance_to_season(prediction_season)
-    return predictor

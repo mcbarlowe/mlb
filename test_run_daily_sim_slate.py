@@ -5,6 +5,7 @@ from pathlib import Path
 
 import scripts.run_daily_sim_slate as daily_sim
 from src.live.publisher import PredictionPost, ResultPost
+from src.sim.slate import DailySlateState, save_daily_slate_state
 
 
 class _StubPublisher:
@@ -64,3 +65,35 @@ def test_publish_board_uses_thread_for_multiple_pages():
     assert publisher.replies[1].image_path == board_paths[2]
     assert publisher.replies[1].text == "Page 3 of 3."
     assert publisher.replies[1].reply_to == "at://root|cid"
+
+
+
+def test_posted_state_prevents_duplicate_publish(tmp_path: Path):
+    state_path = tmp_path / "daily_sim_2026-08-10.json"
+    save_daily_slate_state(
+        state_path,
+        DailySlateState(
+            slate_date="2026-08-10",
+            saved_at="2026-08-10T12:00:00Z",
+            board_path="board.jpg",
+            board_post_id="at://existing-post",
+            games=[],
+        ),
+    )
+
+    state = daily_sim._posted_state_for_date(
+        state_path,
+        date(2026, 8, 10),
+        post_enabled=True,
+    )
+
+    assert state is not None
+    assert state.board_post_id == "at://existing-post"
+    assert (
+        daily_sim._posted_state_for_date(
+            state_path,
+            date(2026, 8, 10),
+            post_enabled=False,
+        )
+        is None
+    )

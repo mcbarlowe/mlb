@@ -30,12 +30,14 @@ from src.sim.slate import (
     build_update_caption,
     changed_games,
     fetch_slate_games,
+    load_daily_slate_state,
     render_prediction_card,
     save_daily_slate_state,
     simulate_slate_game,
     snapshot_state,
 )
 from src.sim.team_strength import (
+    DEFAULT_REGISTERED_STRENGTH_MODEL,
     TeamStrengthPredictor,
     build_live_strength_predictor,
 )
@@ -106,6 +108,12 @@ def parse_args() -> argparse.Namespace:
             "MLFLOW_TRACKING_URI is set, then falls back to models/outcome/latest_run.txt or the newest local run_* directory."
         ),
     )
+    parser.add_argument(
+        "--win-model-name",
+        type=str,
+        default=DEFAULT_REGISTERED_STRENGTH_MODEL,
+        help="Registered MLflow model containing the champion win estimator.",
+    )
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     return parser.parse_args()
 
@@ -118,6 +126,24 @@ def resolve_target_date(date_arg: str | None) -> date:
 
 def _state_path(state_dir: Path, target_date: date) -> Path:
     return state_dir / f"daily_sim_{target_date.isoformat()}.json"
+
+
+def _posted_state_for_date(
+    state_path: Path,
+    target_date: date,
+    *,
+    post_enabled: bool,
+) -> DailySlateState | None:
+    if not post_enabled:
+        return None
+    state = load_daily_slate_state(state_path)
+    if (
+        state is None
+        or state.slate_date != target_date.isoformat()
+        or not state.board_post_id
+    ):
+        return None
+    return state
 
 
 def _build_board_rows(predictions: list[SlatePrediction]) -> list[SlateSimRow]:
@@ -449,8 +475,48 @@ def main() -> None:
         outcome_run_dir=args.outcome_run_dir,
         tracking_uri=args.mlflow_tracking_uri,
     )
-    win_predictor = build_live_strength_predictor(target_date)
+    win_predictor = build_live_strength_predictor(
+        target_date,
+        tracking_uri=args.mlflow_tracking_uri,
+        registered_model_name=args.win_model_name,
+    )
+    source = win_predictor.source
+    if source is None:
+        raise RuntimeError("Win predictor has no registered-model provenance")
     print(f"Loaded outcome models from {run_dir}")
+    print(
+        f"Loaded win model {source.registered_model_name} "
+        f"v{source.version} from MLflow run {source.run_id}"
+    )
+    posted_state = _posted_state_for_date(
+        state_path,
+        target_date,
+        post_enabled=args.post,
+    )
+    if posted_state is not None:
+        print(
+            f"Board already posted as {posted_state.board_post_id}; "
+            "resuming without a duplicate post."
+        )
+        if args.watch_starters:
+            publisher = build_publisher(
+                post=True,
+                provider=args.post_provider,
+            )
+            _poll_probable_starters(
+                publisher=publisher,
+                target_date=target_date,
+                simulator=simulator,
+                win_predictor=win_predictor,
+                season=season,
+                sims=args.sims,
+                state_path=state_path,
+                board_path=Path(posted_state.board_path),
+                board_post_id=posted_state.board_post_id,
+                previous_games=posted_state.games,
+                poll_interval_minutes=args.poll_interval_minutes,
+            )
+        return
     print(
         f"Simulating {_games_summary(len(slate_games), preview_only=preview_only)} "
         f"for {target_date.isoformat()}..."

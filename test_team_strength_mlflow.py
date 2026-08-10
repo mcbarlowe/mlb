@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import mlflow
 import mlflow.pyfunc
 import numpy as np
 import pandas as pd
+import pytest
 from mlflow import MlflowClient
 from sklearn.linear_model import LogisticRegression
 
+import src.sim.team_strength as team_strength_module
 from scripts.evaluate_team_strength import log_model_version, score
 from src.sim.team_strength import (
     DEFAULT_STRENGTH_CONFIG,
@@ -16,6 +19,7 @@ from src.sim.team_strength import (
     StrengthFeatureBuilder,
     StrengthModelFit,
     TeamStrengthPredictor,
+    build_live_strength_predictor,
 )
 
 
@@ -55,7 +59,10 @@ def _fitted_model() -> tuple[StrengthModelFit, pd.DataFrame, pd.DataFrame]:
     )
 
 
-def test_logs_comparable_registered_model_version(tmp_path: Path) -> None:
+def test_logs_comparable_registered_model_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     tracking_uri = f"sqlite:///{tmp_path / 'tracking.db'}"
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
@@ -146,6 +153,31 @@ def test_logs_comparable_registered_model_version(tmp_path: Path) -> None:
         assert (
             challenger_run.data.tags["promotion_gate"]
             == "failed"
+        )
+
+        def no_completed_games(
+            **_kwargs: object,
+        ) -> list[team_strength_module.CompletedGame]:
+            return []
+
+        monkeypatch.setattr(
+            team_strength_module,
+            "load_completed_games",
+            no_completed_games,
+        )
+        live_predictor = build_live_strength_predictor(
+            date(2024, 4, 1),
+            tracking_uri=tracking_uri,
+            registered_model_name=registered_model_name,
+        )
+
+        assert live_predictor.source is not None
+        assert live_predictor.source.version == logged.version
+        assert live_predictor.source.run_id == logged.run_id
+        assert live_predictor.feature_builder.config == DEFAULT_STRENGTH_CONFIG
+        np.testing.assert_allclose(
+            live_predictor.coefficients,
+            fitted.predictor.coefficients,
         )
     finally:
         mlflow.set_tracking_uri(original_tracking_uri)
