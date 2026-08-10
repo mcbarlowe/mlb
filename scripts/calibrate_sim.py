@@ -54,9 +54,14 @@ def count_key(balls: int, strikes: int) -> str:
     return f"{balls}-{strikes}"
 
 
-def actual_rates(seasons: list[int]) -> tuple[dict, dict, dict]:
-    """Actual league rates: aggregate result, per (side, stretch, count)
-    result, and per (side, stretch) event distributions."""
+def actual_rates(seasons: list[int]) -> tuple[dict, dict, dict, dict, dict]:
+    """Actual league rates.
+
+    Returns aggregate result rates, per (side, stretch, count) result
+    rates, per (side, stretch) event rates, and the stretch-BLIND
+    per (side, count) result and per side event rates used by the
+    default shared-multiplier derivation.
+    """
     frame = build_training_frame(load_pitches(seasons)).with_columns(
         (
             (pl.col("runner_on_first") + pl.col("runner_on_second") + pl.col("runner_on_third")) > 0
@@ -65,6 +70,8 @@ def actual_rates(seasons: list[int]) -> tuple[dict, dict, dict]:
     result_agg: dict[str, dict[str, float]] = {}
     result_cells: dict[str, dict[str, dict[str, dict[str, float]]]] = {}
     event_cells: dict[str, dict[str, dict[str, float]]] = {}
+    combined_cells: dict[str, dict[str, dict[str, float]]] = {}
+    combined_events: dict[str, dict[str, float]] = {}
     for side, is_top in SIDES.items():
         side_rows = frame.filter(
             (pl.col("is_top_half") == int(is_top))
@@ -73,6 +80,23 @@ def actual_rates(seasons: list[int]) -> tuple[dict, dict, dict]:
         counts = side_rows["label_result"].value_counts()
         result_agg[side] = {
             row[0]: row[1] / side_rows.height for row in counts.rows()
+        }
+        combined_cells[side] = {}
+        for balls, strikes in COUNTS:
+            cell = side_rows.filter(
+                (pl.col("balls_before") == balls)
+                & (pl.col("strikes_before") == strikes)
+            )
+            if cell.height == 0:
+                continue
+            counts = cell["label_result"].value_counts()
+            combined_cells[side][count_key(balls, strikes)] = {
+                row[0]: row[1] / cell.height for row in counts.rows()
+            }
+        event_rows = side_rows.filter(pl.col("label_event").is_not_null())
+        counts = event_rows["label_event"].value_counts()
+        combined_events[side] = {
+            row[0]: row[1] / event_rows.height for row in counts.rows()
         }
         result_cells[side] = {}
         event_cells[side] = {}
@@ -95,7 +119,7 @@ def actual_rates(seasons: list[int]) -> tuple[dict, dict, dict]:
             event_cells[side][skey] = {
                 row[0]: row[1] / event_rows.height for row in counts.rows()
             }
-    return result_agg, result_cells, event_cells
+    return result_agg, result_cells, event_cells, combined_cells, combined_events
 
 
 def sample_matchups(season: int, n_games: int, seed: int) -> list[tuple]:
@@ -130,7 +154,7 @@ def simulate_rates(
     matchups: list[tuple],
     pas_per_matchup: int,
     seed: int,
-) -> tuple[dict, dict, dict]:
+) -> tuple[dict, dict, dict, dict, dict]:
     """Simulated aggregate/per-cell result and event rates.
 
     PAs run inside a rolling base-out context so the windup/stretch state
@@ -196,6 +220,16 @@ def simulate_rates(
         total = sum(counts.values())
         return {cls: n / total for cls, n in counts.items()} if total else {}
 
+    combined_counter: dict[str, dict[str, Counter]] = {
+        side: {} for side in SIDES
+    }
+    combined_event_counter: dict[str, Counter] = {side: Counter() for side in SIDES}
+    for side in SIDES:
+        for skey in STRETCHES:
+            for key, counter in result_cells[side][skey].items():
+                combined_counter[side].setdefault(key, Counter()).update(counter)
+            combined_event_counter[side].update(event_cells[side][skey])
+
     return (
         {side: normalize(result_agg[side]) for side in SIDES},
         {
@@ -209,6 +243,11 @@ def simulate_rates(
             side: {skey: normalize(c) for skey, c in event_cells[side].items()}
             for side in SIDES
         },
+        {
+            side: {key: normalize(c) for key, c in combined_counter[side].items()}
+            for side in SIDES
+        },
+        {side: normalize(combined_event_counter[side]) for side in SIDES},
     )
 
 
@@ -221,11 +260,27 @@ def main() -> None:
     parser.add_argument("--passes", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=str, default=str(DEFAULT_CALIBRATION_PATH))
+    parser.add_argument(
+        "--stretch-split",
+        action="store_true",
+        help=(
+            "Derive separate multipliers for windup/stretch cells. Off by "
+            "default: the split measurably regressed game-level accuracy "
+            "(sparser sim cells -> noisier multipliers; stretch-specific "
+            "event boosts compound run value)."
+        ),
+    )
     args = parser.parse_args()
 
     print(f"Computing actual league rates for {args.seasons}...")
     start = time.perf_counter()
-    actual_agg, actual_cells, actual_events = actual_rates(args.seasons)
+    (
+        actual_agg,
+        actual_cells,
+        actual_events,
+        actual_combined,
+        actual_events_combined,
+    ) = actual_rates(args.seasons)
     print(f"...done in {time.perf_counter() - start:.0f}s")
 
     from src.sim.artifacts import ensure_sim_artifacts
@@ -261,8 +316,8 @@ def main() -> None:
             seed=args.seed,
             calibration=calibration,
         )
-        sim_agg, sim_cells, sim_events = simulate_rates(
-            factory, matchups, args.pas, args.seed
+        sim_agg, sim_cells, sim_events, sim_combined, sim_events_combined = (
+            simulate_rates(factory, matchups, args.pas, args.seed)
         )
         print(f"\nPass {pass_index} simulated rates vs actual (aggregate):")
         for side in SIDES:
@@ -276,38 +331,62 @@ def main() -> None:
             side: derive_multipliers(actual_agg[side], sim_agg[side], result_mults[side])
             for side in SIDES
         }
-        cell_mults = {
-            side: {
-                skey: {
-                    key: derive_multipliers(
-                        actual_cells[side][skey].get(key, {}),
-                        sim_cells[side][skey].get(key, {}),
-                        cell_mults[side][skey].get(key, {}),
-                    )
-                    for key in {*actual_cells[side][skey]} | {*cell_mults[side][skey]}
+        if args.stretch_split:
+            cell_mults = {
+                side: {
+                    skey: {
+                        key: derive_multipliers(
+                            actual_cells[side][skey].get(key, {}),
+                            sim_cells[side][skey].get(key, {}),
+                            cell_mults[side][skey].get(key, {}),
+                        )
+                        for key in {*actual_cells[side][skey]} | {*cell_mults[side][skey]}
+                    }
+                    for skey in STRETCHES
                 }
-                for skey in STRETCHES
+                for side in SIDES
             }
-            for side in SIDES
-        }
+            event_stretch_mults = {
+                side: {
+                    skey: derive_multipliers(
+                        actual_events[side][skey],
+                        sim_events[side][skey],
+                        event_stretch_mults[side][skey],
+                    )
+                    for skey in STRETCHES
+                }
+                for side in SIDES
+            }
+        else:
+            # Shared multipliers across stretch states (round-A behavior):
+            # derive from the stretch-blind combined rates, write under
+            # both stretch keys so provider lookups behave identically.
+            shared = {
+                side: {
+                    key: derive_multipliers(
+                        actual_combined[side].get(key, {}),
+                        sim_combined[side].get(key, {}),
+                        cell_mults[side]["windup"].get(key, {}),
+                    )
+                    for key in {
+                        *actual_combined[side],
+                        *cell_mults[side]["windup"],
+                    }
+                }
+                for side in SIDES
+            }
+            cell_mults = {
+                side: {skey: shared[side] for skey in STRETCHES} for side in SIDES
+            }
+            event_stretch_mults = {
+                side: {skey: {} for skey in STRETCHES} for side in SIDES
+            }
         event_mults = {
             side: derive_multipliers(
-                # Aggregate events across stretch states for the fallback.
-                actual_events[side]["windup"],
-                sim_events[side]["windup"],
+                actual_events_combined[side],
+                sim_events_combined[side],
                 event_mults[side],
             )
-            for side in SIDES
-        }
-        event_stretch_mults = {
-            side: {
-                skey: derive_multipliers(
-                    actual_events[side][skey],
-                    sim_events[side][skey],
-                    event_stretch_mults[side][skey],
-                )
-                for skey in STRETCHES
-            }
             for side in SIDES
         }
 
