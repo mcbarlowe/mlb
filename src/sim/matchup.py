@@ -1,9 +1,11 @@
-"""Matchup provider factory: outcome models × count-conditioned pitch mixes.
+"""Matchup provider factory: outcome models × count/stretch pitch mixes.
 
 Builds (and caches) one ``MatchupOutcomeProvider`` per (pitcher, batter,
-half) with situational features frozen at neutral values — bases empty,
-one out, tie score, mid-game inning, second time through the order. Count,
-matchup identity, and profile features carry the signal.
+half, stretch) with situational features frozen at neutral values — one
+out, tie score, mid-game inning, second time through the order. The
+stretch variant flips the models' runner feature and uses the pitcher's
+from-the-stretch pitch mix. Calibration multipliers (per-side, per-count)
+are applied to each provider's distributions.
 """
 
 from __future__ import annotations
@@ -43,12 +45,16 @@ class MatchupProviderFactory:
         self._n_locations = n_locations
         self._rng = random.Random(seed)
         self._calibration = calibration
-        self._cache: dict[tuple[int, int, bool], MatchupOutcomeProvider] = {}
+        self._cache: dict[tuple[int, int, bool, bool], MatchupOutcomeProvider] = {}
 
     def __call__(
-        self, pitcher: Pitcher, batter: Batter, is_top_half: bool
+        self,
+        pitcher: Pitcher,
+        batter: Batter,
+        is_top_half: bool,
+        stretch: bool = False,
     ) -> MatchupOutcomeProvider:
-        key = (pitcher.player_id, batter.player_id, is_top_half)
+        key = (pitcher.player_id, batter.player_id, is_top_half, stretch)
         provider = self._cache.get(key)
         if provider is not None:
             return provider
@@ -57,7 +63,9 @@ class MatchupProviderFactory:
             balls=0,
             strikes=0,
             outs=1,
-            runner_on_first=False,
+            # The stretch variant represents "any runner on"; runner on first
+            # is by far the most common single-runner state.
+            runner_on_first=stretch,
             runner_on_second=False,
             runner_on_third=False,
             inning=5,
@@ -73,14 +81,18 @@ class MatchupProviderFactory:
             sz_bottom=DEFAULT_SZ_BOTTOM,
         )
         inputs = self._mix.inputs_by_count(
-            pitcher.player_id, n_locations=self._n_locations, rng=self._rng
+            pitcher.player_id,
+            n_locations=self._n_locations,
+            rng=self._rng,
+            stretch=stretch,
         )
-        result_multipliers: dict[str, float] | None = None
-        event_multipliers: dict[str, float] | None = None
+        result_multipliers = None
+        event_multipliers = None
         if self._calibration is not None:
-            result_multipliers, event_multipliers = self._calibration.multipliers(
+            result_multipliers = self._calibration.result_multipliers_by_count(
                 is_top_half
             )
+            _, event_multipliers = self._calibration.multipliers(is_top_half)
         provider = MatchupOutcomeProvider(
             self._predictor,
             state,

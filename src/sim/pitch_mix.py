@@ -1,12 +1,17 @@
-"""Count-conditioned pitch mix and location profiles for simulation.
+"""Count- and stretch-conditioned pitch mix and location profiles.
 
 The pitch-type LSTM needs real per-pitch sequence context, which simulated
 plate appearances do not have. For bulk game simulation we instead condition
 the outcome models on empirical per-pitcher inputs at each count:
 
-- P(pitch type | pitcher, count) with league shrinkage
+- P(pitch type | pitcher, count, stretch) with league shrinkage
 - plate locations sampled from that pitcher's actual pitches at that count,
-  topped up from a league pool when the pitcher's sample is thin
+  topped up from league pools when the pitcher's sample is thin
+
+``stretch`` distinguishes pitching from the windup (bases empty) vs the
+stretch (any runner on) — pitch selection differs measurably, and the
+repaired base/out state makes the split trustworthy. Fallback chains walk
+stretch-specific pools first, then stretch-blind, then league.
 
 Built from PostgreSQL pitch rows by ``scripts/export_pitch_mix.py``.
 """
@@ -47,8 +52,9 @@ def build_pitch_mix_tables(
     """Aggregate raw pitch rows into mix counts and location samples.
 
     ``raw`` needs: ``pitcher_id``, ``game_pk``, ``at_bat_index``,
-    ``pitch_number``, ``count_after_pitch`` (post-pitch), ``pitch_type_code``,
-    ``px``, ``pz``.
+    ``pitch_number``, ``count_after_pitch`` (post-pitch),
+    ``pitch_type_code``, ``px``, ``pz``, and the ``is_runner_on_*`` flags
+    (true at-bat start state).
     """
     ab_key = ["game_pk", "at_bat_index"]
     counts = pl.col("count_after_pitch").str.split_exact("-", 1)
@@ -62,6 +68,13 @@ def build_pitch_mix_tables(
             pl.col("balls_after").shift(1).over(ab_key).fill_null(0).alias("balls"),
             pl.col("strikes_after").shift(1).over(ab_key).fill_null(0).alias("strikes"),
             _canonical_type_expr().alias("pitch_type"),
+            (
+                pl.col("is_runner_on_first")
+                | pl.col("is_runner_on_second")
+                | pl.col("is_runner_on_third")
+            )
+            .fill_null(False)
+            .alias("stretch"),
         )
         .filter(
             pl.col("pitch_type").is_not_null()
@@ -73,12 +86,12 @@ def build_pitch_mix_tables(
     )
 
     mix = (
-        frame.group_by(["pitcher_id", "balls", "strikes", "pitch_type"])
+        frame.group_by(["pitcher_id", "balls", "strikes", "stretch", "pitch_type"])
         .agg(pl.len().alias("n"))
-        .sort(["pitcher_id", "balls", "strikes", "pitch_type"])
+        .sort(["pitcher_id", "balls", "strikes", "stretch", "pitch_type"])
     )
 
-    location_group = ["pitcher_id", "balls", "strikes", "pitch_type"]
+    location_group = ["pitcher_id", "balls", "strikes", "stretch", "pitch_type"]
     locations = (
         frame.filter(
             pl.int_range(pl.len()).shuffle(seed=seed).over(location_group)
@@ -91,7 +104,7 @@ def build_pitch_mix_tables(
 
 
 class PitchMixProfiles:
-    """Blended per-pitcher, per-count type distributions and location pools."""
+    """Blended per-pitcher type distributions and location pools."""
 
     def __init__(
         self,
@@ -104,50 +117,67 @@ class PitchMixProfiles:
         self._shrinkage = shrinkage
         rng = random.Random(seed)
 
-        self._pitcher_mix: dict[tuple[int, int, int], dict[str, int]] = {}
-        for key, group in mix.group_by(["pitcher_id", "balls", "strikes"]):
-            pid, balls, strikes = (int(str(part)) for part in key)
-            self._pitcher_mix[(pid, balls, strikes)] = dict(
+        if "stretch" not in mix.columns:
+            raise ValueError(
+                "pitch mix tables lack the stretch column; re-run "
+                "scripts/export_pitch_mix.py"
+            )
+
+        # (pid, balls, strikes, stretch) -> type -> n
+        self._pitcher_mix: dict[tuple[int, int, int, bool], dict[str, int]] = {}
+        for key, group in mix.group_by(["pitcher_id", "balls", "strikes", "stretch"]):
+            pid, balls, strikes = (int(str(part)) for part in key[:3])
+            stretch = bool(key[3])
+            self._pitcher_mix[(pid, balls, strikes, stretch)] = dict(
                 zip(group["pitch_type"].to_list(), group["n"].to_list())
             )
 
-        league = mix.group_by(["balls", "strikes", "pitch_type"]).agg(pl.col("n").sum())
-        self._league_mix: dict[tuple[int, int], dict[str, float]] = {}
-        for key, group in league.group_by(["balls", "strikes"]):
-            balls, strikes = (int(str(part)) for part in key)
+        league = mix.group_by(["balls", "strikes", "stretch", "pitch_type"]).agg(
+            pl.col("n").sum()
+        )
+        self._league_mix: dict[tuple[int, int, bool], dict[str, float]] = {}
+        for key, group in league.group_by(["balls", "strikes", "stretch"]):
+            balls, strikes = int(str(key[0])), int(str(key[1]))
+            stretch = bool(key[2])
             total = float(group["n"].sum())
-            self._league_mix[(balls, strikes)] = {
-                t: n / total for t, n in zip(group["pitch_type"].to_list(), group["n"].to_list())
+            self._league_mix[(balls, strikes, stretch)] = {
+                t: n / total
+                for t, n in zip(group["pitch_type"].to_list(), group["n"].to_list())
             }
 
         self._pitcher_locations: dict[
-            tuple[int, int, int, str], list[tuple[float, float]]
+            tuple[int, int, int, bool, str], list[tuple[float, float]]
         ] = {}
         for key, group in locations.group_by(
-            ["pitcher_id", "balls", "strikes", "pitch_type"]
+            ["pitcher_id", "balls", "strikes", "stretch", "pitch_type"]
         ):
             pid, balls, strikes = (int(str(part)) for part in key[:3])
-            pitch_type = str(key[3])
-            self._pitcher_locations[(pid, balls, strikes, pitch_type)] = list(
+            stretch = bool(key[3])
+            pitch_type = str(key[4])
+            self._pitcher_locations[(pid, balls, strikes, stretch, pitch_type)] = list(
                 zip(group["px"].to_list(), group["pz"].to_list())
             )
 
-        self._league_locations: dict[tuple[int, int, str], list[tuple[float, float]]] = {}
-        for key, group in locations.group_by(["balls", "strikes", "pitch_type"]):
+        self._league_locations: dict[
+            tuple[int, int, bool, str], list[tuple[float, float]]
+        ] = {}
+        for key, group in locations.group_by(["balls", "strikes", "stretch", "pitch_type"]):
             balls, strikes = int(str(key[0])), int(str(key[1]))
-            pitch_type = str(key[2])
+            stretch = bool(key[2])
+            pitch_type = str(key[3])
             pool = list(zip(group["px"].to_list(), group["pz"].to_list()))
             if len(pool) > league_pool_size:
                 pool = rng.sample(pool, league_pool_size)
-            self._league_locations[(balls, strikes, pitch_type)] = pool
+            self._league_locations[(balls, strikes, stretch, pitch_type)] = pool
 
-        self._league_any_type: dict[tuple[int, int], list[tuple[float, float]]] = {}
-        for key, group in locations.group_by(["balls", "strikes"]):
-            balls, strikes = (int(str(part)) for part in key)
+        self._league_any_type: dict[tuple[int, int, bool], list[tuple[float, float]]] = {}
+        for key, group in locations.group_by(["balls", "strikes", "stretch"]):
+            balls, strikes = int(str(key[0])), int(str(key[1]))
+            stretch = bool(key[2])
             pool = list(zip(group["px"].to_list(), group["pz"].to_list()))
             if len(pool) > league_pool_size:
                 pool = rng.sample(pool, league_pool_size)
-            self._league_any_type[(balls, strikes)] = pool
+            self._league_any_type[(balls, strikes, stretch)] = pool
 
     @classmethod
     def load(
@@ -158,12 +188,21 @@ class PitchMixProfiles:
     ) -> PitchMixProfiles:
         return cls(pl.read_parquet(mix_path), pl.read_parquet(location_path), **kwargs)
 
-    def type_distribution(self, pitcher_id: int, balls: int, strikes: int) -> dict[str, float]:
-        """League-shrunk pitch type distribution at a count."""
-        league = self._league_mix.get((balls, strikes))
+    def type_distribution(
+        self, pitcher_id: int, balls: int, strikes: int, stretch: bool = False
+    ) -> dict[str, float]:
+        """League-shrunk pitch type distribution at a count/stretch state."""
+        league = self._league_mix.get((balls, strikes, stretch)) or self._league_mix.get(
+            (balls, strikes, not stretch)
+        )
         if league is None:
             raise KeyError(f"No league mix for count {balls}-{strikes}")
-        own = self._pitcher_mix.get((pitcher_id, balls, strikes))
+        own = self._pitcher_mix.get((pitcher_id, balls, strikes, stretch))
+        if not own:
+            # Stretch-specific sample missing: fall back to the pitcher's
+            # stretch-blind usage at this count before going pure league.
+            other = self._pitcher_mix.get((pitcher_id, balls, strikes, not stretch))
+            own = other or {}
         if not own:
             return dict(league)
         total = sum(own.values())
@@ -183,18 +222,22 @@ class PitchMixProfiles:
         pitch_type: str,
         n: int,
         rng: random.Random,
+        stretch: bool = False,
     ) -> list[tuple[float, float]]:
-        """``n`` locations for one pitch type at one count.
-
-        Preference order: the pitcher's own pitches of that type at that
-        count, league pitches of that type at that count, then any league
-        pitch at that count.
-        """
-        own = self._pitcher_locations.get((pitcher_id, balls, strikes, pitch_type), [])
+        """``n`` locations for one pitch type at one count/stretch state."""
+        own = self._pitcher_locations.get(
+            (pitcher_id, balls, strikes, stretch, pitch_type), []
+        )
+        if len(own) < n:
+            own = own + self._pitcher_locations.get(
+                (pitcher_id, balls, strikes, not stretch, pitch_type), []
+            )
         picked = list(own) if len(own) <= n else rng.sample(own, n)
         for pool in (
-            self._league_locations.get((balls, strikes, pitch_type), []),
-            self._league_any_type.get((balls, strikes), []),
+            self._league_locations.get((balls, strikes, stretch, pitch_type), []),
+            self._league_locations.get((balls, strikes, not stretch, pitch_type), []),
+            self._league_any_type.get((balls, strikes, stretch), []),
+            self._league_any_type.get((balls, strikes, not stretch), []),
         ):
             while len(picked) < n and pool:
                 picked.append(rng.choice(pool))
@@ -209,18 +252,19 @@ class PitchMixProfiles:
         pitcher_id: int,
         n_locations: int = 12,
         rng: random.Random | None = None,
+        stretch: bool = False,
     ) -> dict[
         tuple[int, int],
         tuple[dict[str, float], dict[str, list[tuple[float, float]]]],
     ]:
-        """Provider inputs for every count: type dist + per-type locations."""
+        """Provider inputs for every count, for one pitcher/stretch state."""
         rng = rng or random.Random(0)
         inputs = {}
         for balls, strikes in COUNTS:
-            types = self.type_distribution(pitcher_id, balls, strikes)
+            types = self.type_distribution(pitcher_id, balls, strikes, stretch)
             locations_by_type = {
                 pitch_type: self.sample_locations(
-                    pitcher_id, balls, strikes, pitch_type, n_locations, rng
+                    pitcher_id, balls, strikes, pitch_type, n_locations, rng, stretch
                 )
                 for pitch_type in types
             }

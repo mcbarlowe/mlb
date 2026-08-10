@@ -43,18 +43,33 @@ def apply_multipliers(
 
 @dataclass(frozen=True)
 class SimCalibration:
-    """Per-side, per-class multipliers for result and event distributions."""
+    """Per-side multipliers for result and event distributions.
+
+    ``result_by_count`` (side -> "balls-strikes" -> class -> multiplier)
+    matches each count's per-pitch result distribution to league rates:
+    with the count-machine kernel matched per count, PA outcome rates and
+    run totals follow by construction. ``result`` keeps the side-aggregate
+    multipliers as a fallback for counts missing from the fit; ``event``
+    stays side-aggregate (in-play event mixes were near-calibrated).
+    """
 
     result: dict[str, dict[str, float]]  # side ("top" | "bottom") -> class -> x
     event: dict[str, dict[str, float]]
+    result_by_count: dict[str, dict[str, dict[str, float]]] | None = None
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CALIBRATION_PATH) -> SimCalibration:
         payload = json.loads(Path(path).read_text())
-        return cls(result=payload["result"], event=payload["event"])
+        return cls(
+            result=payload["result"],
+            event=payload["event"],
+            result_by_count=payload.get("result_by_count"),
+        )
 
     def save(self, path: Path = DEFAULT_CALIBRATION_PATH, meta: dict | None = None) -> None:
         payload: dict = {"result": self.result, "event": self.event}
+        if self.result_by_count is not None:
+            payload["result_by_count"] = self.result_by_count
         if meta:
             payload["meta"] = meta
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -65,6 +80,20 @@ class SimCalibration:
     ) -> tuple[dict[str, float], dict[str, float]]:
         side = "top" if is_top_half else "bottom"
         return self.result.get(side, {}), self.event.get(side, {})
+
+    def result_multipliers_by_count(
+        self, is_top_half: bool
+    ) -> dict[tuple[int, int], dict[str, float]]:
+        """Per-count result multipliers; aggregate fill for missing counts."""
+        side = "top" if is_top_half else "bottom"
+        aggregate = self.result.get(side, {})
+        by_count = (self.result_by_count or {}).get(side, {})
+        out: dict[tuple[int, int], dict[str, float]] = {}
+        for balls in range(4):
+            for strikes in range(3):
+                key = f"{balls}-{strikes}"
+                out[(balls, strikes)] = dict(by_count.get(key, aggregate))
+        return out
 
 
 def derive_multipliers(

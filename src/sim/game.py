@@ -34,20 +34,24 @@ class Pitcher:
     throw_side: str  # "L" | "R"
 
 
+BULLPEN_ARM = Pitcher(player_id=0, throw_side="R")
+
+
 @dataclass(frozen=True)
 class Lineup:
     batters: list[Batter]  # 9, in batting order
     starter: Pitcher
+    # Relief corps stand-in used after the starter's pitch limit: a synthetic
+    # per-team aggregate arm when available, else the league-average arm.
+    bullpen: Pitcher = BULLPEN_ARM
 
     def __post_init__(self) -> None:
         if len(self.batters) != 9:
             raise ValueError(f"Lineup needs 9 batters, got {len(self.batters)}")
 
 
-BULLPEN_ARM = Pitcher(player_id=0, throw_side="R")
-
-# provider_factory(pitcher, batter, is_top_half) -> per-count distributions
-ProviderFactory = Callable[[Pitcher, Batter, bool], PitchDistributionProvider]
+# provider_factory(pitcher, batter, is_top_half, stretch) -> distributions
+ProviderFactory = Callable[[Pitcher, Batter, bool, bool], PitchDistributionProvider]
 
 
 @dataclass(frozen=True)
@@ -73,6 +77,7 @@ class GameResult:
 @dataclass
 class _PitchingStaff:
     current: Pitcher
+    bullpen: Pitcher
     is_starter: bool = True
     pitches: int = 0
 
@@ -106,8 +111,8 @@ class GameSimulator:
         cfg = self._config
         away_team = _BattingTeam(away)
         home_team = _BattingTeam(home)
-        home_staff = _PitchingStaff(home.starter)  # faces the away lineup
-        away_staff = _PitchingStaff(away.starter)
+        home_staff = _PitchingStaff(home.starter, home.bullpen)  # faces away
+        away_staff = _PitchingStaff(away.starter, away.bullpen)
 
         inning = 1
         while True:
@@ -143,10 +148,12 @@ class GameSimulator:
         outs = 0
         while outs < 3:
             if staff.is_starter and staff.pitches >= cfg.starter_pitch_limit:
-                staff.current = BULLPEN_ARM
+                staff.current = staff.bullpen
                 staff.is_starter = False
                 staff.pitches = 0
-            provider = self._factory(staff.current, batting.next_batter(), is_top)
+            provider = self._factory(
+                staff.current, batting.next_batter(), is_top, runners != 0
+            )
             pa = simulate_plate_appearance(provider, self._rng)
             staff.pitches += pa.n_pitches
             transition = self._engine.sample(pa.outcome, runners, outs)

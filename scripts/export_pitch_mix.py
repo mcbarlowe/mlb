@@ -15,6 +15,8 @@ import sys
 import time
 from pathlib import Path
 
+import polars as pl
+
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -43,20 +45,30 @@ def main() -> None:
     raw = load_pitches(args.seasons)
     print(f"Loaded {raw.height:,} rows in {time.perf_counter() - start:.1f}s")
 
-    mix, locations = build_pitch_mix_tables(
-        raw.select(
-            [
-                "pitcher_id",
-                "game_pk",
-                "at_bat_index",
-                "pitch_number",
-                "count_after_pitch",
-                "pitch_type_code",
-                "px",
-                "pz",
-            ]
-        )
+    from src.sim.bullpen import (
+        build_team_bullpen_hands,
+        relabel_reliever_rows,
+        save_team_bullpens,
     )
+
+    columns = [
+        "pitcher_id",
+        "game_pk",
+        "at_bat_index",
+        "pitch_number",
+        "count_after_pitch",
+        "pitch_type_code",
+        "px",
+        "pz",
+        "is_runner_on_first",
+        "is_runner_on_second",
+        "is_runner_on_third",
+    ]
+    relabeled = relabel_reliever_rows(raw)
+    save_team_bullpens(build_team_bullpen_hands(relabeled))
+    combined = pl.concat([raw.select(columns), relabeled.select(columns)])
+
+    mix, locations = build_pitch_mix_tables(combined)
 
     mix_path = Path(args.mix_output)
     location_path = Path(args.location_output)
@@ -64,7 +76,11 @@ def main() -> None:
     mix.write_parquet(mix_path)
     locations.write_parquet(location_path)
     n_pitchers = mix["pitcher_id"].n_unique()
-    print(f"Wrote mix for {n_pitchers} pitchers -> {mix_path}")
+    n_teams = mix.filter(pl.col("pitcher_id") < 0)["pitcher_id"].n_unique()
+    print(
+        f"Wrote mix for {n_pitchers} pitchers (incl. {n_teams} team bullpen arms)"
+        f" -> {mix_path}"
+    )
     print(f"Wrote {locations.height:,} location samples -> {location_path}")
 
 

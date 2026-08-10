@@ -65,6 +65,8 @@ _BASE_COLUMNS = [
     "pitch_strike_zone_bottom",
     "away_score",
     "home_score",
+    "away_team_id",
+    "home_team_id",
     *PHYSICS_COLUMNS,
 ]
 
@@ -155,6 +157,8 @@ _LOAD_SCHEMA: dict[str, type[pl.DataType]] = {
     "pitch_strike_zone_bottom": pl.Float64,
     "away_score": pl.Int64,
     "home_score": pl.Int64,
+    "away_team_id": pl.Int64,
+    "home_team_id": pl.Int64,
     "pitch_start_speed": pl.Float64,
     "spin_rate": pl.Float64,
     "break_vertical_induced": pl.Float64,

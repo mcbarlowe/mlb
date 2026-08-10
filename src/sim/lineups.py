@@ -7,6 +7,8 @@ from src.sim.game import Batter, Lineup, Pitcher
 
 def lineup_from_feed(feed: dict, side: str) -> Lineup:
     """Batting order + starting pitcher with handedness for one side."""
+    from src.sim.bullpen import bullpen_for_team
+
     box = feed["liveData"]["boxscore"]["teams"][side]
     players = feed["gameData"]["players"]
     order = box.get("battingOrder", [])
@@ -18,7 +20,10 @@ def lineup_from_feed(feed: dict, side: str) -> Lineup:
     ]
     starter_id = pitchers[0]
     starter = Pitcher(starter_id, players[f"ID{starter_id}"]["pitchHand"]["code"])
-    return Lineup(batters=batters, starter=starter)
+    team_id = feed["gameData"]["teams"][side].get("id")
+    return Lineup(
+        batters=batters, starter=starter, bullpen=bullpen_for_team(team_id)
+    )
 
 
 def describe_game(feed: dict) -> str:

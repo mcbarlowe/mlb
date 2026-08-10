@@ -404,15 +404,19 @@ def build_projected_lineups(
     lineups: dict[str, Lineup] = {}
     starters: dict[str, str] = {}
     for side in ("away", "home"):
+        from src.sim.bullpen import bullpen_for_team
+
         probable = game.probable_for(side)
         if probable.player_id is not None:
             starter = Pitcher(probable.player_id, _pitch_hand(probable.player_id))
         else:
             starter = BULLPEN_ARM
         starters[side] = probable.display_name
+        team_id = game.team_id_for(side)
         lineups[side] = Lineup(
-            batters=_projected_batters(game.team_id_for(side), game.slate_date, season),
+            batters=_projected_batters(team_id, game.slate_date, season),
             starter=starter,
+            bullpen=bullpen_for_team(team_id),
         )
     return lineups, starters
 

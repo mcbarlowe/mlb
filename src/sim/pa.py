@@ -129,8 +129,10 @@ class MatchupOutcomeProvider:
         outcome_predictor,
         base_state,
         inputs_by_count: CountInputs,
-        result_multipliers: dict[str, float] | None = None,
-        event_multipliers: dict[str, float] | None = None,
+        result_multipliers: Mapping[str, float]
+        | Mapping[tuple[int, int], Mapping[str, float]]
+        | None = None,
+        event_multipliers: Mapping[str, float] | None = None,
     ):
         from src.sim.calibration import apply_multipliers
 
@@ -143,13 +145,21 @@ class MatchupOutcomeProvider:
             outcome_predictor, base_state, inputs_by_count
         )
         if result_multipliers:
+            per_count = all(
+                isinstance(key, tuple) for key in result_multipliers
+            )
             self._result = {
-                count: apply_multipliers(probs, result_multipliers)
+                count: apply_multipliers(
+                    probs,
+                    dict(result_multipliers.get(count, {}))  # type: ignore[arg-type]
+                    if per_count
+                    else dict(result_multipliers),  # type: ignore[arg-type]
+                )
                 for count, probs in self._result.items()
             }
         if event_multipliers:
             self._event = {
-                count: apply_multipliers(probs, event_multipliers)
+                count: apply_multipliers(probs, dict(event_multipliers))
                 for count, probs in self._event.items()
             }
 

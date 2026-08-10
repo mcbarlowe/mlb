@@ -30,6 +30,7 @@ def _mix_frames():
             "pitcher_id": [1, 1, 2, 2],
             "balls": [0, 0, 0, 0],
             "strikes": [2, 2, 2, 2],
+            "stretch": [False, False, False, False],
             "pitch_type": ["SL", "FF", "FF", "SI"],
             "n": [45, 15, 1, 1],
         }
@@ -39,6 +40,7 @@ def _mix_frames():
             "pitcher_id": [1] * 5 + [2],
             "balls": [0] * 6,
             "strikes": [2] * 6,
+            "stretch": [False] * 6,
             "pitch_type": ["SL", "SL", "SL", "FF", "FF", "FF"],
             "px": [0.1, 0.2, -0.1, 0.4, -0.3, 0.0],
             "pz": [1.8, 2.0, 2.2, 1.5, 2.6, 2.4],
@@ -52,7 +54,7 @@ def test_type_distribution_shrinks_toward_league():
     profiles = PitchMixProfiles(mix, locations, shrinkage=60.0, seed=0)
 
     heavy = profiles.type_distribution(1, 0, 2)
-    league = profiles._league_mix[(0, 2)]
+    league = profiles._league_mix[(0, 2, False)]
     # Pitcher 1 throws 75% sliders; league is ~74% FF-ish. Blend sits between.
     own_sl = 45 / 60
     assert league["SL"] < heavy["SL"] < own_sl
@@ -105,13 +107,18 @@ def test_build_pitch_mix_tables_counts_and_canonicalizes():
             "pitch_type_code": ["FF", "XX", "SL"],
             "px": [0.0, 0.1, 0.2],
             "pz": [2.0, 2.1, 2.2],
+            "is_runner_on_first": [False, True, True],
+            "is_runner_on_second": [False, False, False],
+            "is_runner_on_third": [False, False, False],
         }
     )
     mix, locations = build_pitch_mix_tables(raw)
     # First pitch of the AB is at 0-0; unknown code XX maps to OTHER.
     first = mix.filter((pl.col("balls") == 0) & (pl.col("strikes") == 0))
     assert first["pitch_type"].to_list() == ["FF"]
+    assert first["stretch"].to_list() == [False]
     assert set(mix["pitch_type"].to_list()) == {"FF", "OTHER", "SL"}
+    assert set(mix.filter(pl.col("stretch"))["pitch_type"].to_list()) == {"OTHER", "SL"}
     assert locations.height == 3
 
 
@@ -188,7 +195,7 @@ def _engine() -> BaseOutEngine:
 def test_all_strikeout_game_reaches_cap_and_ties():
     provider = FixedDistributionProvider({"called_strike": 1.0}, {"out": 1.0})
     sim = GameSimulator(
-        lambda p, b, top: provider,
+        lambda p, b, top, stretch=False: provider,
         _engine(),
         rng=random.Random(0),
         config=GameConfig(max_innings=12),
@@ -208,7 +215,7 @@ def test_home_dominant_game_ends_without_bottom_nine():
         {"called_strike": 0.9, "in_play": 0.1}, {"home_run": 1.0}
     )
 
-    def factory(pitcher: Pitcher, batter: Batter, is_top: bool):
+    def factory(pitcher: Pitcher, batter: Batter, is_top: bool, stretch: bool = False):
         return away_provider if is_top else home_provider
 
     sim = GameSimulator(factory, _engine(), rng=random.Random(1))
@@ -238,7 +245,7 @@ def test_extra_innings_walkoff_with_ghost_runner():
     single_provider = FixedDistributionProvider({"in_play": 1.0}, {"single": 1.0})
     innings_seen: list[int] = []
 
-    def factory(pitcher: Pitcher, batter: Batter, is_top: bool):
+    def factory(pitcher: Pitcher, batter: Batter, is_top: bool, stretch: bool = False):
         # Home team strikes out through regulation, singles in extras.
         if is_top:
             return k_provider
@@ -262,7 +269,7 @@ def test_starter_pitch_limit_hands_off_to_bullpen():
     pitchers_seen: list[int] = []
     provider = FixedDistributionProvider({"called_strike": 1.0}, {"out": 1.0})
 
-    def factory(pitcher: Pitcher, batter: Batter, is_top: bool):
+    def factory(pitcher: Pitcher, batter: Batter, is_top: bool, stretch: bool = False):
         if is_top:
             pitchers_seen.append(pitcher.player_id)
         return provider
