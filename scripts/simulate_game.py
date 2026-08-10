@@ -26,6 +26,11 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.ml.mlflow_utils import (
+    DEFAULT_MLFLOW_EXPERIMENT,
+    configure_mlflow,
+    resolve_mlflow_tracking_uri,
+)
 from src.sim.game import GameSimulator, summarize
 from src.sim.lineups import actual_final, describe_game, lineup_from_feed
 from src.sim.slate import (
@@ -302,18 +307,14 @@ def _log_validation_to_mlflow(
     outcome_run: str,
 ) -> None:
     """Track game-level validation metrics in shared MLflow when configured."""
-    import os
-
-    tracking_uri = args.mlflow_tracking_uri or os.getenv("MLFLOW_TRACKING_URI")
-    if not tracking_uri:
-        print("MLFLOW_TRACKING_URI not set; validation metrics not tracked")
-        return
     import mlflow
 
-    from src.ml.mlflow_utils import configure_mlflow
+    tracking_uri = resolve_mlflow_tracking_uri(args.mlflow_tracking_uri)
 
     configure_mlflow(
-        args.mlflow_experiment, tracking_uri, require_tracking_uri=True
+        args.mlflow_experiment,
+        tracking_uri,
+        require_tracking_uri=True,
     )
     with mlflow.start_run(run_name=f"sim-validation-{time.strftime('%Y%m%d_%H%M%S')}"):
         mlflow.log_params(
@@ -416,7 +417,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--card-out", type=str, default=None)
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     parser.add_argument(
-        "--mlflow-experiment", type=str, default="mlb-model-training"
+        "--mlflow-experiment",
+        type=str,
+        default=DEFAULT_MLFLOW_EXPERIMENT,
     )
     parser.add_argument(
         "--outcome-run-dir",

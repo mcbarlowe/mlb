@@ -24,7 +24,6 @@ matplotlib.use("Agg", force=True)
 
 import argparse
 import asyncio
-import os
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -40,6 +39,7 @@ from src.live.pipeline import (
 )
 from src.live.predictor import LiveNextPitchPredictor
 from src.live.publisher import POST_PROVIDER_CHOICES, build_publisher
+from src.ml.mlflow_utils import resolve_mlflow_tracking_uri
 
 DEFAULT_PITCH_TYPE_MODEL = "models/attention_full/run_20260119_124719"
 DEFAULT_LOCATION_MODEL = "models/pitch_type_location_20260121_003206"
@@ -173,7 +173,7 @@ def main() -> None:
 
         resolved = resolve_outcome_artifact_dirs(
             args.outcome_run_dir,
-            tracking_uri=os.getenv("MLFLOW_TRACKING_URI"),
+            tracking_uri=resolve_mlflow_tracking_uri(),
         )
         if resolved is not None:
             outcome_run_dir, profiles_dir = resolved

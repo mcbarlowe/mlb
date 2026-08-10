@@ -15,7 +15,9 @@ from pathlib import Path
 from mlflow.artifacts import download_artifacts
 from mlflow.tracking import MlflowClient
 
-PRODUCTION_EXPERIMENT = "mlb-model-training"
+from src.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT
+
+PRODUCTION_EXPERIMENT = DEFAULT_MLFLOW_EXPERIMENT
 CACHE_ROOT = Path("models/outcome/mlflow_cache")
 REQUIRED_MODEL_FAMILIES = {
     "stage_a": "pitch_result_stage_a",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+from src.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT
 from src.outcome.mlflow_artifacts import (
     CachedOutcomeArtifacts,
     OutcomeProductionSelection,
@@ -21,7 +22,7 @@ class _StubClient:
         self.tracking_uri = tracking_uri
 
     def get_experiment_by_name(self, name: str):
-        if name != "mlb-model-training":
+        if name != DEFAULT_MLFLOW_EXPERIMENT:
             return None
         return SimpleNamespace(experiment_id="1", name=name)
 
@@ -50,7 +51,7 @@ def test_resolve_outcome_artifact_dirs_prefers_mlflow_cache(monkeypatch, tmp_pat
         cache_dir=tmp_path / "cache",
         selection=OutcomeProductionSelection(
             experiment_id="1",
-            experiment_name="mlb-model-training",
+            experiment_name=DEFAULT_MLFLOW_EXPERIMENT,
             stage_a_run_id="a",
             stage_b_run_id="b",
         ),

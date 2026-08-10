@@ -7,7 +7,6 @@ scheduled daily all-games simulation workflow.
 from __future__ import annotations
 
 import json
-import os
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -17,6 +16,7 @@ from typing import cast
 
 import requests
 
+from src.ml.mlflow_utils import resolve_mlflow_tracking_uri
 from src.outcome.inference import PitchOutcomePredictor
 from src.outcome.mlflow_artifacts import resolve_outcome_artifact_dirs
 from src.sim.base_out import BaseOutEngine
@@ -236,7 +236,7 @@ def resolve_outcome_model_dirs(
 ) -> tuple[Path, Path]:
     resolved = resolve_outcome_artifact_dirs(
         run_dir_arg,
-        tracking_uri=tracking_uri or os.getenv("MLFLOW_TRACKING_URI"),
+        tracking_uri=resolve_mlflow_tracking_uri(tracking_uri),
     )
     if resolved is None:
         raise SlateSimulationError(

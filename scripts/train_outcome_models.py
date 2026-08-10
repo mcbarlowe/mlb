@@ -17,7 +17,7 @@ sys.path.insert(0, str(project_root))
 
 import mlflow
 
-from src.ml.mlflow_utils import configure_mlflow
+from src.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT, configure_mlflow
 from src.outcome.dataset import (
     build_training_frame,
     load_pitches,
@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--iterations", type=int, default=1000)
     parser.add_argument("--depth", type=int, default=8)
     parser.add_argument("--output-dir", type=str, default="models/outcome")
-    parser.add_argument("--mlflow-experiment", type=str, default="mlb-model-training")
+    parser.add_argument("--mlflow-experiment", type=str, default=DEFAULT_MLFLOW_EXPERIMENT)
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     parser.add_argument(
         "--stage",

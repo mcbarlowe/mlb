@@ -9,20 +9,42 @@ from typing import Any
 
 import mlflow
 
+DEFAULT_MLFLOW_TRACKING_URI = "http://10.0.0.171:5001"
+DEFAULT_MLFLOW_EXPERIMENT = "mlb-model-training-shared"
+
+
+def resolve_mlflow_tracking_uri(
+    tracking_uri: str | None = None,
+    *,
+    default_tracking_uri: str | None = DEFAULT_MLFLOW_TRACKING_URI,
+) -> str | None:
+    return (
+        tracking_uri
+        or os.getenv("MLFLOW_TRACKING_URI")
+        or os.getenv("MLFLOW_SHARED_TRACKING_URI")
+        or default_tracking_uri
+    )
+
+
+
 
 def configure_mlflow(
     experiment_name: str,
     tracking_uri: str | None = None,
     *,
     require_tracking_uri: bool = False,
+    default_tracking_uri: str | None = DEFAULT_MLFLOW_TRACKING_URI,
 ) -> str:
-    resolved_tracking_uri = tracking_uri or os.getenv("MLFLOW_TRACKING_URI")
+    resolved_tracking_uri = resolve_mlflow_tracking_uri(
+        tracking_uri,
+        default_tracking_uri=default_tracking_uri,
+    )
     if require_tracking_uri and not resolved_tracking_uri:
         raise RuntimeError(
-            "MLFLOW_TRACKING_URI is required for this training script. "
-            "Export the shared Postgres-backed URI or pass "
-            "--mlflow-tracking-uri explicitly. If you really want a local "
-            "SQLite run, pass --mlflow-tracking-uri sqlite:///..."
+            "MLflow tracking URI is required for this training script. "
+            "Set MLFLOW_TRACKING_URI, MLFLOW_SHARED_TRACKING_URI, or pass "
+            "--mlflow-tracking-uri explicitly. If you intentionally want a "
+            "local SQLite run, pass --mlflow-tracking-uri sqlite:///..."
         )
     if not resolved_tracking_uri:
         resolved_tracking_uri = f"sqlite:///{Path('mlflow.db').resolve()}"

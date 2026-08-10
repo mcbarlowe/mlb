@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from src.ml.mlflow_utils import build_metric_dict, build_param_dict
+from src.ml.mlflow_utils import (
+    DEFAULT_MLFLOW_TRACKING_URI,
+    build_metric_dict,
+    build_param_dict,
+    resolve_mlflow_tracking_uri,
+)
 
 
 def test_build_param_dict_flattens_nested_values():
@@ -38,3 +43,14 @@ def test_build_metric_dict_keeps_numeric_scalars_only():
         "accuracy": 0.9,
         "nested.loss": 1.2,
     }
+
+
+def test_resolve_mlflow_tracking_uri_prefers_explicit_value(monkeypatch):
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://env-server:5001")
+    assert resolve_mlflow_tracking_uri("http://explicit:5001") == "http://explicit:5001"
+
+
+def test_resolve_mlflow_tracking_uri_uses_shared_default(monkeypatch):
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.delenv("MLFLOW_SHARED_TRACKING_URI", raising=False)
+    assert resolve_mlflow_tracking_uri() == DEFAULT_MLFLOW_TRACKING_URI

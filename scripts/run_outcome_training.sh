@@ -3,6 +3,8 @@ set -euo pipefail
 
 REPO_DIR="/Users/matthewbarlowe/code/python/mlb"
 UV_BIN="/usr/local/bin/uv"
+DEFAULT_MLFLOW_TRACKING_URI="http://10.0.0.171:5001"
+
 
 resolve_mlflow_uri() {
   if [[ -n "${MLFLOW_TRACKING_URI:-}" ]]; then
@@ -14,8 +16,7 @@ resolve_mlflow_uri() {
 
 MLFLOW_URI="$(resolve_mlflow_uri)"
 if [[ -z "$MLFLOW_URI" ]]; then
-  echo "MLFLOW_TRACKING_URI is not set in this shell or your zsh config" >&2
-  exit 1
+  MLFLOW_URI="$DEFAULT_MLFLOW_TRACKING_URI"
 fi
 export MLFLOW_TRACKING_URI="$MLFLOW_URI"
 

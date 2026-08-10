@@ -13,6 +13,7 @@ import mlflow
 
 from scripts import run_full_training, train_pitch_type_location_model
 from src.ml.mlflow_utils import (
+    DEFAULT_MLFLOW_EXPERIMENT,
     build_metric_dict,
     build_param_dict,
     configure_mlflow,
@@ -36,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--data-path", type=str, default="postgres")
     parser.add_argument("--output-dir", type=str, default="models")
-    parser.add_argument("--mlflow-experiment", type=str, default="mlb-model-training")
+    parser.add_argument("--mlflow-experiment", type=str, default=DEFAULT_MLFLOW_EXPERIMENT)
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--low-memory", action="store_true")

@@ -20,14 +20,14 @@ sys.path.insert(0, str(project_root))
 import mlflow
 
 from src.ml.mlflow_utils import (
+    DEFAULT_MLFLOW_EXPERIMENT,
     build_metric_dict,
     build_param_dict,
     configure_mlflow,
     log_path_if_exists,
 )
 
-DEFAULT_EXPERIMENT = "mlb-model-training"
-DEFAULT_ARTIFACT_ROOT = "file:///Users/matthewbarlowe/mlflow-artifacts/mlb-model-training"
+DEFAULT_EXPERIMENT = DEFAULT_MLFLOW_EXPERIMENT
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-dir", type=str, default="auto", help="Outcome run directory (default: models/outcome/latest_run.txt)")
     parser.add_argument("--profiles-dir", type=str, default="models/outcome", help="Directory containing pitcher_profiles.parquet and batter_priors.parquet")
     parser.add_argument("--mlflow-experiment", type=str, default=DEFAULT_EXPERIMENT)
-    parser.add_argument("--mlflow-artifact-root", type=str, default=DEFAULT_ARTIFACT_ROOT)
+    parser.add_argument("--mlflow-artifact-root", type=str, default=None)
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     parser.add_argument("--production-model", action="store_true", help="Tag imported runs as production_model=true")
     return parser.parse_args()
@@ -53,11 +53,13 @@ def resolve_run_dir(raw: str) -> Path:
     return runs[0]
 
 
-def ensure_experiment(name: str, artifact_root: str) -> str:
+def ensure_experiment(name: str, artifact_root: str | None) -> str:
     experiment = mlflow.get_experiment_by_name(name)
     if experiment is not None:
         return experiment.experiment_id
-    return mlflow.create_experiment(name, artifact_location=artifact_root)
+    if artifact_root:
+        return mlflow.create_experiment(name, artifact_location=artifact_root)
+    return mlflow.create_experiment(name)
 
 
 def import_stage(

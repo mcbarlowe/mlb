@@ -15,6 +15,7 @@ import polars as pl
 from src.ml.catboost_model import PitchXGBoostModel
 from src.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
 from src.ml.mlflow_utils import (
+    DEFAULT_MLFLOW_EXPERIMENT,
     build_metric_dict,
     build_param_dict,
     configure_mlflow,
@@ -39,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--depth", type=int, default=8)
     parser.add_argument("--early-stopping", type=int, default=20)
     parser.add_argument("--output-dir", type=str, default="models/xgboost")
-    parser.add_argument("--mlflow-experiment", type=str, default="mlb-model-training")
+    parser.add_argument("--mlflow-experiment", type=str, default=DEFAULT_MLFLOW_EXPERIMENT)
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--seed", type=int, default=42)

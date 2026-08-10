@@ -331,26 +331,23 @@ uv run python scripts/train_models_with_mlflow.py
 Defaults:
 
 - training data source: `postgres`
-- tracking URI: `postgresql+psycopg://...@10.0.0.171:5432/postgres?options=-csearch_path%3Dmlflow`
-- experiment: `mlb-model-training`
-- artifact root: `file:///Users/matthewbarlowe/mlflow-artifacts/mlb-model-training`
+- tracking URI: `http://10.0.0.171:5001`
+- experiment: `mlb-model-training-shared`
+- artifact transport: remote clients upload through the iMac MLflow HTTP server
+- artifact storage on iMac: `/Users/matthewbarlowe/mlflow-artifacts/`
 - train seasons: `2018, 2019, 2021, 2022, 2023`
 - validation season: `2024`
 - test season: `2025`
 
 Shared multi-machine setup:
 
-- MLflow metadata lives in the local PostgreSQL `mlflow` schema on the iMac.
-- Model artifacts live in `/Users/matthewbarlowe/mlflow-artifacts/`.
-- `mlb-model-training` is the shared production/import experiment for the live stack (pitch type, location, and outcome models).
-- Outcome training now defaults there as well; `scripts/import_outcome_models_to_mlflow.py` remains available for bringing pre-existing local runs into the shared production experiment.
-- Set `MLFLOW_TRACKING_URI` on the iMac, MacBook Pro, and MacBook Air to the shared Postgres-backed URI before running training or imports.
-- Both training entrypoints now **fail fast** if they would otherwise fall back to a local SQLite `mlflow.db`:
-  - `uv run python scripts/train_models_with_mlflow.py ...`
-  - `uv run python scripts/train_outcome_models.py ...`
-- If you intentionally want a local SQLite run, pass it explicitly with `--mlflow-tracking-uri sqlite:///...`.
+- MLflow metadata lives in the local PostgreSQL `mlflow` schema on the iMac; use the direct Postgres URI only as the iMac server's `--backend-store-uri`.
+- The iMac runs `mlflow server` on `http://10.0.0.171:5001` with artifact serving enabled and `/Users/matthewbarlowe/mlflow-artifacts/` as `--artifacts-destination`.
+- `mlb-model-training-shared` is the production/import experiment for the live stack (pitch type, location, and outcome models).
+- The MacBook Pro and MacBook Air should use `MLFLOW_TRACKING_URI=http://10.0.0.171:5001`, not the direct Postgres URI, so artifact uploads go through the iMac server.
+- Training entrypoints default to the shared HTTP URI and experiment. If you intentionally want a local SQLite run, pass it explicitly with `--mlflow-tracking-uri sqlite:///...`.
 - `scripts/run_outcome_training.sh` remains available as a convenience helper; it resolves `MLFLOW_TRACKING_URI` from the current shell or `~/.zshrc` and then launches `scripts/train_outcome_models.py`.
-- To import a locally trained outcome run into the shared MLflow backend (including artifacts), use `uv run python scripts/import_outcome_models_to_mlflow.py --production-model`.
+- To import a locally trained outcome run into the shared MLflow experiment (including artifacts), use `uv run python scripts/import_outcome_models_to_mlflow.py --production-model`.
 
 The PostgreSQL training source must already contain the required seasons before this command will run.
 
