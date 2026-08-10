@@ -342,12 +342,30 @@ Defaults:
 Shared multi-machine setup:
 
 - MLflow metadata lives in the local PostgreSQL `mlflow` schema on the iMac; use the direct Postgres URI only as the iMac server's `--backend-store-uri`.
+- The server's SQLAlchemy backend URI uses `postgresql+psycopg2`; MLflow 3.14 binds model-version strings incompatibly with the `psycopg` v3 driver and breaks registered-model detail pages.
 - The iMac runs `mlflow server` on `http://10.0.0.171:5001` with artifact serving enabled and `/Users/matthewbarlowe/mlflow-artifacts/` as `--artifacts-destination`.
+- The LaunchAgent allows `http://10.0.0.171:5001` as a CORS origin; without it, browser run searches fail even though direct MLflow client queries succeed.
 - `mlb-model-training-shared` is the production/import experiment for the live stack (pitch type, location, and outcome models).
+- `mlb-model-training` is the legacy direct-database experiment. Keep its historical runs, but do not target it for new multi-machine training.
 - The MacBook Pro and MacBook Air should use `MLFLOW_TRACKING_URI=http://10.0.0.171:5001`, not the direct Postgres URI, so artifact uploads go through the iMac server.
 - Training entrypoints default to the shared HTTP URI and experiment. If you intentionally want a local SQLite run, pass it explicitly with `--mlflow-tracking-uri sqlite:///...`.
 - `scripts/run_outcome_training.sh` remains available as a convenience helper; it resolves `MLFLOW_TRACKING_URI` from the current shell or `~/.zshrc` and then launches `scripts/train_outcome_models.py`.
-- To import a locally trained outcome run into the shared MLflow experiment (including artifacts), use `uv run python scripts/import_outcome_models_to_mlflow.py --production-model`.
+- To register an existing paired outcome run, use `uv run python scripts/import_outcome_models_to_mlflow.py --run-dir <run-dir> --profiles-dir <profiles-dir> --set-champion`.
+
+Outcome-model versioning and promotion:
+
+```bash
+# Train and retain immutable candidate versions.
+uv run python scripts/train_outcome_models.py --register-models
+
+# Train, register, and promote the pair when both stages pass.
+uv run python scripts/train_outcome_models.py --set-champion
+```
+
+- Stage A is registered as `mlb-pitch-result-stage-a`; Stage B is registered as `mlb-in-play-event-stage-b`. Each native CatBoost package includes its model, feature/class contract, metrics, profile stores, input example, signature, and explicit dependencies.
+- Both versions share one `outcome_release_id`, source run, contract version, and pinned `sim_inputs_run_id`. Production resolves the two `champion` aliases and rejects partial or incompatible alias updates.
+- Promotion requires both stages to beat their conditional validation and test log-loss baselines and to carry finite validation/test Brier, log-loss, and accuracy metrics. Failed candidates remain versioned but do not move either alias.
+- The production simulator downloads the immutable registered-model versions into `models/outcome/mlflow_cache/` and loads the exact simulator-input run pinned by that release.
 
 Win-model versioning and comparison:
 
@@ -356,7 +374,8 @@ uv run python scripts/evaluate_team_strength.py --log-mlflow --set-champion
 ```
 
 - Every evaluation logs the fitted estimator, exact feature contract, training and holdout datasets, coefficients, baseline metrics, promotion-gate result, and dependency metadata.
-- Every logged estimator creates an immutable version of the registered model `mlb-team-strength-win`. The registered-model tags `latest_logged_version` / `latest_run_id` identify the newest candidate; `champion_version` / `champion_run_id` identify the benchmark.
+- Win-probability estimators use the logged-model name `win_probability_model` and `model_collection=win_probability_models`; `model_family=team_strength_win` identifies this implementation. The stable registered-model identifier remains `mlb-team-strength-win` so production consumers do not break.
+- Every logged estimator creates an immutable version of the registered model `mlb-team-strength-win`. Version tags preserve its model contract, holdout season, promotion status, and holdout metrics. The `champion` alias and registered-model tags `champion_version` / `champion_run_id` identify the production benchmark; `latest_logged_version` / `latest_run_id` identify the newest candidate.
 - `--set-champion` advances the benchmark only when the candidate beats the league-home-rate baseline on Brier score, log loss, and pick accuracy. Failed candidates remain in MLflow for comparison and the command exits nonzero.
 - Compare future versions in the `mlb-model-training-shared` experiment by registered-model version or run ID. Use each run's `brier_improvement`, `log_loss_improvement`, and `pick_accuracy_improvement` metrics for the promotion decision.
 - `models/`, `output/`, `catboost_info/`, and local MLflow stores are generated working data and are intentionally ignored by Git. Production outcome artifacts bootstrap from shared MLflow when absent; other local model paths must be produced by training or downloaded explicitly.

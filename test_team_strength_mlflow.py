@@ -16,6 +16,8 @@ from scripts.evaluate_team_strength import log_model_version, score
 from src.sim.team_strength import (
     DEFAULT_STRENGTH_CONFIG,
     FEATURE_NAMES,
+    WIN_PROBABILITY_MODEL_COLLECTION,
+    WIN_PROBABILITY_MODEL_TYPE,
     StrengthFeatureBuilder,
     StrengthModelFit,
     TeamStrengthPredictor,
@@ -76,9 +78,7 @@ def test_logs_comparable_registered_model_version(
     )
     fitted, train, test = _fitted_model()
     outcomes = test["home_won"].to_numpy(dtype=float)
-    probabilities = fitted.estimator.predict_proba(
-        test[list(FEATURE_NAMES)]
-    )[:, 1]
+    probabilities = fitted.estimator.predict_proba(test[list(FEATURE_NAMES)])[:, 1]
     model_metrics = score(probabilities, outcomes)
     home_metrics = score(np.full(len(test), 0.543), outcomes)
     coin_metrics = score(np.full(len(test), 0.5), outcomes)
@@ -102,9 +102,7 @@ def test_logs_comparable_registered_model_version(
         )
 
         client = MlflowClient(tracking_uri=tracking_uri)
-        versions = client.search_model_versions(
-            f"name = '{registered_model_name}'"
-        )
+        versions = client.search_model_versions(f"name = '{registered_model_name}'")
         registered_model = client.get_registered_model(registered_model_name)
         run = client.get_run(logged.run_id)
         contract_path = client.download_artifacts(
@@ -112,15 +110,25 @@ def test_logs_comparable_registered_model_version(
             "model_contract.json",
             dst_path=str(tmp_path / "download"),
         )
-        loaded = mlflow.pyfunc.load_model(f"runs:/{logged.run_id}/model")
-        loaded_probabilities = np.asarray(
-            loaded.predict(test[list(FEATURE_NAMES)])
+        loaded = mlflow.pyfunc.load_model(
+            f"models:/{registered_model_name}/{logged.version}"
         )
+        loaded_probabilities = np.asarray(loaded.predict(test[list(FEATURE_NAMES)]))
 
         assert logged.version == "1"
         assert str(versions[0].version) == logged.version
+        assert versions[0].tags["promotion_gate"] == "passed"
+        assert versions[0].tags["model_collection"] == WIN_PROBABILITY_MODEL_COLLECTION
+        assert versions[0].tags["model_type"] == WIN_PROBABILITY_MODEL_TYPE
         assert registered_model.tags["champion_version"] == logged.version
         assert registered_model.tags["champion_run_id"] == logged.run_id
+        assert (
+            registered_model.tags["model_collection"]
+            == WIN_PROBABILITY_MODEL_COLLECTION
+        )
+        assert registered_model.tags["model_type"] == WIN_PROBABILITY_MODEL_TYPE
+        assert run.data.tags["model_collection"] == WIN_PROBABILITY_MODEL_COLLECTION
+        assert run.data.tags["model_type"] == WIN_PROBABILITY_MODEL_TYPE
         assert run.data.metrics["holdout_brier"] == model_metrics.brier
         assert Path(contract_path).exists()
         np.testing.assert_allclose(
@@ -150,10 +158,13 @@ def test_logs_comparable_registered_model_version(
         assert challenger.version == "2"
         assert updated_model.tags["latest_logged_version"] == challenger.version
         assert updated_model.tags["champion_version"] == logged.version
-        assert (
-            challenger_run.data.tags["promotion_gate"]
-            == "failed"
+        champion = client.get_model_version_by_alias(
+            registered_model_name,
+            "champion",
         )
+        assert str(champion.version) == logged.version
+        assert challenger_run.data.tags["production_model"] == "false"
+        assert challenger_run.data.tags["promotion_gate"] == "failed"
 
         def no_completed_games(
             **_kwargs: object,

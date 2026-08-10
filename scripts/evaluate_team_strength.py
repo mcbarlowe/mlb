@@ -25,6 +25,8 @@ from src.sim.team_strength import (
 )
 from src.sim.team_strength import (
     FEATURE_NAMES,
+    WIN_PROBABILITY_MODEL_COLLECTION,
+    WIN_PROBABILITY_MODEL_TYPE,
     StrengthModelFit,
     TeamStrengthPredictor,
     load_completed_games,
@@ -199,6 +201,8 @@ def log_model_version(
     contract = {
         "contract_version": MODEL_CONTRACT_VERSION,
         "model_family": MODEL_FAMILY,
+        "model_type": WIN_PROBABILITY_MODEL_TYPE,
+        "model_collection": WIN_PROBABILITY_MODEL_COLLECTION,
         "registered_model_name": registered_model_name,
         "estimator": "sklearn.linear_model.LogisticRegression",
         "features": feature_columns,
@@ -230,9 +234,11 @@ def log_model_version(
         mlflow.set_tags(
             {
                 "model_family": MODEL_FAMILY,
+                "model_type": WIN_PROBABILITY_MODEL_TYPE,
+                "model_collection": WIN_PROBABILITY_MODEL_COLLECTION,
                 "model_contract_version": str(MODEL_CONTRACT_VERSION),
                 "promotion_gate": "passed" if gate_passed else "failed",
-                "production_model": str(set_champion).lower(),
+                "production_model": str(set_champion and gate_passed).lower(),
                 "registered_model_name": registered_model_name,
             }
         )
@@ -277,13 +283,15 @@ def log_model_version(
         try:
             model_info = log_model(
                 fitted.estimator,
-                name="model",
+                name=WIN_PROBABILITY_MODEL_TYPE,
                 registered_model_name=registered_model_name,
                 signature=signature,
                 input_example=input_example,
                 pyfunc_predict_fn="predict_proba",
                 metadata={
                     "contract_version": MODEL_CONTRACT_VERSION,
+                    "model_type": WIN_PROBABILITY_MODEL_TYPE,
+                    "model_collection": WIN_PROBABILITY_MODEL_COLLECTION,
                     "feature_names": feature_columns,
                     "home_win_probability_column": 1,
                 },
@@ -308,10 +316,36 @@ def log_model_version(
     client.update_registered_model(
         name=registered_model_name,
         description=(
-            "Leak-free MLB pregame home-win model using chronological team Elo, "
-            "run form, and Bayesian-shrunk starting-pitcher quality."
+            "MLB win probability model (`win_probability_model`) using the "
+            "`team_strength_win` implementation: chronological team Elo, run "
+            "form, and Bayesian-shrunk starting-pitcher quality."
         ),
     )
+    classification_tags = {
+        "model_type": WIN_PROBABILITY_MODEL_TYPE,
+        "model_collection": WIN_PROBABILITY_MODEL_COLLECTION,
+        "model_family": MODEL_FAMILY,
+    }
+    for key, value in classification_tags.items():
+        client.set_registered_model_tag(registered_model_name, key, value)
+    version_tags = {
+        "model_family": MODEL_FAMILY,
+        "model_type": WIN_PROBABILITY_MODEL_TYPE,
+        "model_collection": WIN_PROBABILITY_MODEL_COLLECTION,
+        "model_contract_version": str(MODEL_CONTRACT_VERSION),
+        "holdout_season": str(test_season),
+        "promotion_gate": "passed" if gate_passed else "failed",
+        "holdout_brier": f"{model_metrics.brier:.12f}",
+        "holdout_log_loss": f"{model_metrics.log_loss:.12f}",
+        "holdout_pick_accuracy": f"{model_metrics.pick_accuracy:.12f}",
+    }
+    for key, value in version_tags.items():
+        client.set_model_version_tag(
+            name=registered_model_name,
+            version=version,
+            key=key,
+            value=value,
+        )
     client.set_registered_model_tag(
         registered_model_name,
         "latest_logged_version",
@@ -339,6 +373,11 @@ def log_model_version(
                 key,
                 value,
             )
+        client.set_registered_model_alias(
+            name=registered_model_name,
+            alias="champion",
+            version=version,
+        )
     return LoggedModelVersion(
         run_id=run_id,
         registered_model_name=registered_model_name,

@@ -11,6 +11,7 @@ sys.path.insert(0, str(project_root))
 
 import mlflow
 import polars as pl
+from mlflow.exceptions import MlflowException
 
 from src.ml.catboost_model import PitchXGBoostModel
 from src.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
@@ -74,7 +75,7 @@ def log_artifacts_if_available(results: dict, output_dir: Path, model_dir: Path)
         mlflow.log_dict(results, "results.json")
         log_path_if_exists(model_dir, "artifacts")
         log_path_if_exists(output_dir / "results.json", "artifacts")
-    except (OSError, mlflow.exceptions.MlflowException) as exc:
+    except (OSError, MlflowException) as exc:
         message = f"{type(exc).__name__}: {exc}"
         mlflow.set_tag("artifact_logging_failed", "true")
         mlflow.set_tag("artifact_logging_error", message[:500])
@@ -149,7 +150,6 @@ def main() -> None:
     with mlflow.start_run(run_name=f"xgboost-{timestamp}"):
         mlflow.set_tags({
             "model_family": "xgboost_pitch_baseline",
-            "tracking_uri": tracking_uri,
             "data_path": args.data_path,
             "train_seasons": ",".join(train_seasons),
             "val_season": args.val_season,

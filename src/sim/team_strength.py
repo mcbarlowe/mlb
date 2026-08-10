@@ -44,6 +44,8 @@ FEATURE_NAMES = (
 STRENGTH_MODEL_FAMILY = "team_strength_win"
 STRENGTH_MODEL_CONTRACT_VERSION = 1
 DEFAULT_REGISTERED_STRENGTH_MODEL = "mlb-team-strength-win"
+WIN_PROBABILITY_MODEL_TYPE = "win_probability_model"
+WIN_PROBABILITY_MODEL_COLLECTION = "win_probability_models"
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,7 @@ class StrengthConfig:
     run_season_regression: float = 0.25
     starter_prior_ip: float = 120.0
     starter_season_decay: float = 0.4
+
 
 DEFAULT_STRENGTH_CONFIG = StrengthConfig()
 
@@ -205,9 +208,9 @@ class StrengthFeatureBuilder:
     def _regress_for_new_season(self) -> None:
         c = self.config
         for team_id, rating in self._elo.items():
-            self._elo[team_id] = c.initial_elo + (
-                rating - c.initial_elo
-            ) * (1.0 - c.elo_season_regression)
+            self._elo[team_id] = c.initial_elo + (rating - c.initial_elo) * (
+                1.0 - c.elo_season_regression
+            )
         for state in (self._offense, self._defense):
             for team_id, value in state.items():
                 state[team_id] = c.initial_runs_per_game + (
@@ -224,12 +227,7 @@ class StrengthFeatureBuilder:
         era = 9.0 * (state.earned_runs + prior_ip * 0.50) / denominator
         fip = (
             13.0 * (state.home_runs + prior_ip * 0.12)
-            + 3.0
-            * (
-                state.walks
-                + state.hit_batters
-                + prior_ip * 0.405
-            )
+            + 3.0 * (state.walks + state.hit_batters + prior_ip * 0.405)
             - 2.0 * (state.strikeouts + prior_ip * 1.0)
         ) / denominator
         prior_starts = prior_ip / 25.0
@@ -243,38 +241,25 @@ class StrengthFeatureBuilder:
         home_rating = self._elo[game.home_team_id]
         away_rating = self._elo[game.away_team_id]
         expected_home = 1.0 / (
-            1.0
-            + 10.0
-            ** (
-                -(
-                    home_rating
-                    + c.elo_home_advantage
-                    - away_rating
-                )
-                / 400.0
-            )
+            1.0 + 10.0 ** (-(home_rating + c.elo_home_advantage - away_rating) / 400.0)
         )
         delta = c.elo_k * (float(game.home_won) - expected_home)
         self._elo[game.home_team_id] += delta
         self._elo[game.away_team_id] -= delta
 
         alpha = c.run_alpha
-        self._offense[game.home_team_id] = (
-            (1.0 - alpha) * self._offense[game.home_team_id]
-            + alpha * game.home_runs
-        )
-        self._defense[game.home_team_id] = (
-            (1.0 - alpha) * self._defense[game.home_team_id]
-            + alpha * game.away_runs
-        )
-        self._offense[game.away_team_id] = (
-            (1.0 - alpha) * self._offense[game.away_team_id]
-            + alpha * game.away_runs
-        )
-        self._defense[game.away_team_id] = (
-            (1.0 - alpha) * self._defense[game.away_team_id]
-            + alpha * game.home_runs
-        )
+        self._offense[game.home_team_id] = (1.0 - alpha) * self._offense[
+            game.home_team_id
+        ] + alpha * game.home_runs
+        self._defense[game.home_team_id] = (1.0 - alpha) * self._defense[
+            game.home_team_id
+        ] + alpha * game.away_runs
+        self._offense[game.away_team_id] = (1.0 - alpha) * self._offense[
+            game.away_team_id
+        ] + alpha * game.away_runs
+        self._defense[game.away_team_id] = (1.0 - alpha) * self._defense[
+            game.away_team_id
+        ] + alpha * game.home_runs
 
 
 @dataclass(frozen=True)
@@ -527,9 +512,7 @@ def fit_strength_predictor(
 
 
 def _object_mapping(value: object, label: str) -> dict[str, object]:
-    if not isinstance(value, dict) or not all(
-        isinstance(key, str) for key in value
-    ):
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"Invalid {label} in MLflow model contract")
     return cast(dict[str, object], value)
 
@@ -559,37 +542,34 @@ def _load_champion_strength_model(
     mlflow.set_tracking_uri(resolved_uri)
     client = MlflowClient(tracking_uri=resolved_uri)
     registered_model = client.get_registered_model(registered_model_name)
-    version = registered_model.tags.get("champion_version")
-    run_id = registered_model.tags.get("champion_run_id")
-    if not version or not run_id:
+    selected = client.get_model_version_by_alias(
+        registered_model_name,
+        "champion",
+    )
+    version = str(selected.version)
+    run_id = selected.run_id
+    if selected.status != "READY" or not run_id:
         raise RuntimeError(
-            f"Registered model {registered_model_name!r} has no champion"
+            f"Champion version for {registered_model_name!r} is not ready"
         )
-
-    versions = client.search_model_versions(
-        f"name = '{registered_model_name}'"
-    )
-    selected = next(
-        (
-            candidate
-            for candidate in versions
-            if str(candidate.version) == version
-        ),
-        None,
-    )
-    if selected is None or selected.run_id != run_id:
+    if (
+        registered_model.tags.get("champion_version") != version
+        or registered_model.tags.get("champion_run_id") != run_id
+    ):
         raise RuntimeError(
             f"Champion metadata for {registered_model_name!r} is inconsistent"
         )
+    if selected.tags.get("promotion_gate") != "passed":
+        raise RuntimeError(
+            f"Champion version {version!r} did not pass the promotion gate"
+        )
+    if selected.tags.get("model_type") != WIN_PROBABILITY_MODEL_TYPE:
+        raise ValueError("Registered MLflow model has an invalid model type")
     run = client.get_run(run_id)
     if run.data.tags.get("promotion_gate") != "passed":
-        raise RuntimeError(
-            f"Champion run {run_id!r} did not pass the promotion gate"
-        )
+        raise RuntimeError(f"Champion run {run_id!r} did not pass the promotion gate")
 
-    contract_path = Path(
-        client.download_artifacts(run_id, "model_contract.json")
-    )
+    contract_path = Path(client.download_artifacts(run_id, "model_contract.json"))
     contract = _object_mapping(
         json.loads(contract_path.read_text()),
         "model contract",
@@ -615,26 +595,16 @@ def _load_champion_strength_model(
     config = StrengthConfig(
         initial_elo=_contract_float(config_data, "initial_elo"),
         elo_k=_contract_float(config_data, "elo_k"),
-        elo_home_advantage=_contract_float(
-            config_data, "elo_home_advantage"
-        ),
-        elo_season_regression=_contract_float(
-            config_data, "elo_season_regression"
-        ),
-        initial_runs_per_game=_contract_float(
-            config_data, "initial_runs_per_game"
-        ),
+        elo_home_advantage=_contract_float(config_data, "elo_home_advantage"),
+        elo_season_regression=_contract_float(config_data, "elo_season_regression"),
+        initial_runs_per_game=_contract_float(config_data, "initial_runs_per_game"),
         run_alpha=_contract_float(config_data, "run_alpha"),
-        run_season_regression=_contract_float(
-            config_data, "run_season_regression"
-        ),
+        run_season_regression=_contract_float(config_data, "run_season_regression"),
         starter_prior_ip=_contract_float(config_data, "starter_prior_ip"),
-        starter_season_decay=_contract_float(
-            config_data, "starter_season_decay"
-        ),
+        starter_season_decay=_contract_float(config_data, "starter_season_decay"),
     )
 
-    estimator = load_model(f"runs:/{run_id}/model")
+    estimator = load_model(f"models:/{registered_model_name}/{version}")
     if not isinstance(estimator, LogisticRegression):
         raise TypeError("Registered win model is not logistic regression")
     if estimator.coef_.size != len(FEATURE_NAMES):
@@ -684,12 +654,9 @@ def build_live_strength_predictor(
     builder.advance_to_season(prediction_season)
     return TeamStrengthPredictor(
         coefficients=tuple(
-            float(value)
-            for value in loaded.estimator.coef_.reshape(-1).tolist()
+            float(value) for value in loaded.estimator.coef_.reshape(-1).tolist()
         ),
-        intercept=float(
-            np.asarray(loaded.estimator.intercept_).reshape(-1)[0]
-        ),
+        intercept=float(np.asarray(loaded.estimator.intercept_).reshape(-1)[0]),
         feature_builder=builder,
         source=loaded.source,
     )

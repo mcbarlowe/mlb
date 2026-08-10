@@ -24,6 +24,11 @@ from src.outcome.dataset import (
     stage_a_frame,
     stage_b_frame,
 )
+from src.outcome.mlflow_registry import (
+    OutcomeReleaseRegistration,
+    log_outcome_release_models,
+    resolve_sim_inputs_run_id,
+)
 from src.outcome.models import (
     conditional_baseline_log_loss,
     evaluate_model,
@@ -52,8 +57,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--iterations", type=int, default=1000)
     parser.add_argument("--depth", type=int, default=8)
     parser.add_argument("--output-dir", type=str, default="models/outcome")
-    parser.add_argument("--mlflow-experiment", type=str, default=DEFAULT_MLFLOW_EXPERIMENT)
+    parser.add_argument(
+        "--mlflow-experiment", type=str, default=DEFAULT_MLFLOW_EXPERIMENT
+    )
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
+    parser.add_argument(
+        "--profiles-dir",
+        type=str,
+        default="models/outcome",
+        help="Directory containing pitcher and batter profile stores.",
+    )
+    parser.add_argument(
+        "--sim-inputs-run-id",
+        type=str,
+        default="auto",
+        help="Immutable sim-inputs run ID to pin when registering models.",
+    )
+    parser.add_argument(
+        "--register-models",
+        action="store_true",
+        help="Create paired registered-model versions after training both stages.",
+    )
+    parser.add_argument(
+        "--set-champion",
+        action="store_true",
+        help="Register and promote both stages when the release gate passes.",
+    )
     parser.add_argument(
         "--stage",
         choices=["a", "b", "both"],
@@ -105,10 +134,14 @@ def run_stage(
     }
     save_model(model, output_dir, f"stage_{name}", metrics)
 
-    print(f"val   log_loss={metrics['val']['log_loss']:.4f} "
-          f"(baseline {metrics['baseline_val_log_loss']:.4f})")
-    print(f"test  log_loss={metrics['test']['log_loss']:.4f} "
-          f"(baseline {metrics['baseline_test_log_loss']:.4f})")
+    print(
+        f"val   log_loss={metrics['val']['log_loss']:.4f} "
+        f"(baseline {metrics['baseline_val_log_loss']:.4f})"
+    )
+    print(
+        f"test  log_loss={metrics['test']['log_loss']:.4f} "
+        f"(baseline {metrics['baseline_test_log_loss']:.4f})"
+    )
 
     mlflow.log_metrics(
         {
@@ -132,6 +165,8 @@ def main() -> None:
         args.train_seasons = [2023]
         args.iterations = 200
 
+    if (args.register_models or args.set_champion) and args.stage != "both":
+        raise ValueError("Outcome model registration requires --stage both")
     output_dir = Path(args.output_dir) / time.strftime("run_%Y%m%d_%H%M%S")
     seasons = sorted(set(args.train_seasons + [args.val_season, args.test_season]))
 
@@ -141,6 +176,12 @@ def main() -> None:
         require_tracking_uri=True,
     )
     print(f"MLflow tracking URI: {tracking_uri}")
+    sim_inputs_run_id = (
+        resolve_sim_inputs_run_id(tracking_uri, args.sim_inputs_run_id)
+        if args.register_models or args.set_champion
+        else None
+    )
+    registration: OutcomeReleaseRegistration | None = None
 
     print(f"Loading pitches for seasons {seasons}...")
     start = time.perf_counter()
@@ -185,8 +226,25 @@ def main() -> None:
                 args=args,
                 output_dir=output_dir,
             )
+        if sim_inputs_run_id is not None:
+            registration = log_outcome_release_models(
+                run_dir=output_dir,
+                profiles_dir=Path(args.profiles_dir),
+                sim_inputs_run_id=sim_inputs_run_id,
+                set_champion=args.set_champion,
+            )
 
     print(f"\nDone. Models under {output_dir}")
+    if registration is not None:
+        print(
+            f"Registered paired release {registration.release_id}: "
+            f"Stage A v{registration.stage_a.version}, "
+            f"Stage B v{registration.stage_b.version}"
+        )
+        if args.set_champion and not registration.promotion_gate_passed:
+            raise SystemExit(
+                "Outcome release failed promotion gate; champions unchanged"
+            )
 
 
 if __name__ == "__main__":

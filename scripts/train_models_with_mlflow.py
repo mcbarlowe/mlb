@@ -188,7 +188,6 @@ def main() -> None:
     )
 
     common_tags = {
-        "tracking_uri": tracking_uri,
         "data_path": data_path,
         "train_seasons": ",".join(location_args.train_seasons),
         "val_season": location_args.val_season,

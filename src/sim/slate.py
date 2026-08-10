@@ -18,7 +18,11 @@ import requests
 
 from src.ml.mlflow_utils import resolve_mlflow_tracking_uri
 from src.outcome.inference import PitchOutcomePredictor
-from src.outcome.mlflow_artifacts import resolve_outcome_artifact_dirs
+from src.outcome.mlflow_artifacts import (
+    OutcomeProductionSelection,
+    resolve_outcome_artifact_dirs,
+    resolve_production_outcome_selection,
+)
 from src.sim.base_out import BaseOutEngine
 from src.sim.calibration import load_win_calibration
 from src.sim.game import (
@@ -37,6 +41,7 @@ from src.sim.team_strength import TeamStrengthPredictor
 LIVEFEED_ROOT = Path("data/raw/livefeeds")
 STATS_API = "https://statsapi.mlb.com/api/v1"
 _DEFAULT_STARTER_LABEL = "TBD (league-average arm)"
+
 
 def _as_mapping(value: object, context: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
@@ -66,7 +71,6 @@ def _mapping_list(value: object) -> list[Mapping[str, object]]:
     if not isinstance(value, list):
         return []
     return [_as_mapping(item, "list item") for item in value]
-
 
 
 @dataclass(frozen=True)
@@ -176,8 +180,7 @@ class DailySlateState:
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> DailySlateState:
         games = [
-            SlateGame.from_dict(item)
-            for item in _mapping_list(payload.get("games"))
+            SlateGame.from_dict(item) for item in _mapping_list(payload.get("games"))
         ]
         return cls(
             slate_date=str(payload["slate_date"]),
@@ -204,14 +207,15 @@ def _fetch_json(url: str, params: dict | None = None) -> dict:
 
 def _is_final(feed: dict) -> bool:
     return (
-        feed.get("gameData", {}).get("status", {}).get("abstractGameState")
-        == "Final"
+        feed.get("gameData", {}).get("status", {}).get("abstractGameState") == "Final"
     )
 
 
 def load_feed(game_pk: int, season: int | None) -> dict:
     """Archived feed for a game; refresh from the API when the local copy is stale."""
-    seasons = [season] if season else [path.name for path in sorted(LIVEFEED_ROOT.iterdir())]
+    seasons = (
+        [season] if season else [path.name for path in sorted(LIVEFEED_ROOT.iterdir())]
+    )
     local: dict | None = None
     for candidate in seasons:
         path = LIVEFEED_ROOT / str(candidate) / f"{game_pk}.json"
@@ -221,7 +225,9 @@ def load_feed(game_pk: int, season: int | None) -> dict:
     if local is not None and _is_final(local):
         return local
     try:
-        return _fetch_json(f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live")
+        return _fetch_json(
+            f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
+        )
     except Exception:
         if local is not None:
             return local
@@ -234,10 +240,12 @@ def resolve_outcome_model_dirs(
     run_dir_arg: str = "auto",
     *,
     tracking_uri: str | None = None,
+    selection: OutcomeProductionSelection | None = None,
 ) -> tuple[Path, Path]:
     resolved = resolve_outcome_artifact_dirs(
         run_dir_arg,
         tracking_uri=resolve_mlflow_tracking_uri(tracking_uri),
+        selection=selection,
     )
     if resolved is None:
         raise SlateSimulationError(
@@ -257,10 +265,20 @@ def build_day_ahead_simulator(
     from src.sim.artifacts import ensure_sim_artifacts
     from src.sim.calibration import DEFAULT_CALIBRATION_PATH, SimCalibration
 
-    ensure_sim_artifacts(tracking_uri)
+    resolved_tracking_uri = resolve_mlflow_tracking_uri(tracking_uri)
+    selection = (
+        resolve_production_outcome_selection(resolved_tracking_uri)
+        if outcome_run_dir == "auto" and resolved_tracking_uri
+        else None
+    )
+    ensure_sim_artifacts(
+        resolved_tracking_uri,
+        run_id=selection.sim_inputs_run_id if selection else None,
+    )
     run_dir, profiles_dir = resolve_outcome_model_dirs(
         outcome_run_dir,
-        tracking_uri=tracking_uri,
+        tracking_uri=resolved_tracking_uri,
+        selection=selection,
     )
     predictor = PitchOutcomePredictor(run_dir, profiles_dir=profiles_dir)
     mix = PitchMixProfiles.load(seed=seed)
@@ -295,7 +313,9 @@ def _probable_pitcher(team_entry: Mapping[str, object]) -> ProbablePitcher:
     )
 
 
-def slate_game_from_schedule_entry(game: Mapping[str, object], slate_date: str) -> SlateGame:
+def slate_game_from_schedule_entry(
+    game: Mapping[str, object], slate_date: str
+) -> SlateGame:
     teams = _as_mapping(game["teams"], "teams")
     away = _as_mapping(teams["away"], "away team entry")
     home = _as_mapping(teams["home"], "home team entry")
@@ -439,7 +459,9 @@ def simulate_slate_game(
     calibration = load_win_calibration()
     stats["home_win_probability_raw"] = sim_probability
     stats["home_win_probability_sim"] = (
-        calibration.apply(sim_probability) if calibration is not None else sim_probability
+        calibration.apply(sim_probability)
+        if calibration is not None
+        else sim_probability
     )
     stats["home_win_probability"] = win_predictor.predict_home_probability(
         season=season,
