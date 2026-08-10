@@ -253,8 +253,10 @@ def build_day_ahead_simulator(
     tracking_uri: str | None = None,
 ) -> tuple[GameSimulator, Path]:
     """Load the outcome-model chain, pitch-mix tables, and base-out engine."""
+    from src.sim.artifacts import ensure_sim_artifacts
     from src.sim.calibration import DEFAULT_CALIBRATION_PATH, SimCalibration
 
+    ensure_sim_artifacts(tracking_uri)
     run_dir, profiles_dir = resolve_outcome_model_dirs(
         outcome_run_dir,
         tracking_uri=tracking_uri,
