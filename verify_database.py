@@ -1,17 +1,15 @@
-"""Quick verification of mlb.duckdb contents."""
+"""Quick verification of the configured PostgreSQL schema."""
 
-from pathlib import Path
-from src.database.duckdb_handler import DuckDBHandler
+from src.database import PostgresConfig, PostgresHandler
 
-db_path = Path("data/mlb.duckdb")
+db_config = PostgresConfig.from_env()
 
 print("=" * 60)
 print("MLB DATABASE VERIFICATION")
 print("=" * 60)
 
-with DuckDBHandler(db_path) as db:
-    print(f"\nDatabase: {db_path}")
-    print(f"Size: {db_path.stat().st_size / (1024**2):.2f} MB")
+with PostgresHandler(db_config) as db:
+    print(f"\nTarget: {db_config.describe()}")
 
     print("\n" + "=" * 60)
     print("TABLE ROW COUNTS")
@@ -25,7 +23,6 @@ with DuckDBHandler(db_path) as db:
         else:
             print(f"{table:15s}: TABLE NOT FOUND")
 
-    # Sample query to verify relationships
     if db.table_exists("games") and db.table_exists("teams") and db.table_exists("venues"):
         print("\n" + "=" * 60)
         print("SAMPLE GAMES WITH RELATIONSHIPS")
@@ -49,7 +46,6 @@ with DuckDBHandler(db_path) as db:
         result = db.query(query)
         print("\n" + result.to_string(index=False))
 
-    # Check games-to-pitches relationship
     if db.table_exists("games") and db.table_exists("pitches"):
         print("\n" + "=" * 60)
         print("GAMES-TO-PITCHES RELATIONSHIP")

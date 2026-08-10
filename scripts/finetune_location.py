@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Fine-tune only the location head on a pre-trained pitch prediction model.
 
@@ -25,22 +24,22 @@ sys.path.insert(0, str(project_root))
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
-from src.ml.model import (
-    HierarchicalMDN,
-    PitchPredictorWithAttention,
-    PitchPredictor,
-)
-from src.ml.train import PitchPredictionTrainer
+from src.ml.cross_validation import TimeSeriesCrossValidator
 from src.ml.evaluate import (
     evaluate_model,
-    plot_mdn_predictions,
     plot_location_predictions,
+    plot_mdn_predictions,
 )
-from src.ml.cross_validation import TimeSeriesCrossValidator
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES
+from src.ml.features import PitchFeatureEngine
+from src.ml.model import (
+    HierarchicalMDN,
+    PitchPredictor,
+    PitchPredictorWithAttention,
+)
+from src.ml.train import PitchPredictionTrainer
 
 
 def set_seed(seed: int = 42) -> None:
@@ -103,14 +102,12 @@ def upgrade_model_location_head(
     model.location_head = new_location_head
 
     # Update n_location_components to match new head
-    model.n_location_components = new_location_head.total_components
+    setattr(model, "n_location_components", new_location_head.total_components)
 
     # Override the forward method to use pitch-type conditioning
-    original_forward = model.forward
-
     def new_forward(features, lengths, mask, return_attention=False):
         """Modified forward that conditions location on pitch type."""
-        batch_size, seq_len, n_features = features.shape
+        _, seq_len, _ = features.shape
 
         # Extract embedding indices
         pitcher_idx = features[:, :, model.pitcher_idx_pos].long().clamp(
@@ -252,7 +249,6 @@ def run_finetuning(args) -> dict:
     )
     # Use the loaded feature engine
     cv.feature_engine = feature_engine
-    cv._fitted = True
 
     # Load data
     print("\nLoading data...")
@@ -293,7 +289,6 @@ def run_finetuning(args) -> dict:
     if has_attention:
         # Count attention layers
         n_attn_layers = len([k for k in state_dict.keys() if "attention_layers" in k and "attention.q_proj.weight" in k])
-        n_heads = state_dict["attention_layers.0.attention.q_proj.weight"].shape[0] // (hidden_dim // 4)
 
         model = PitchPredictorWithAttention(
             n_pitch_types=n_pitch_types,
@@ -483,7 +478,12 @@ def main():
                         help="Path to pre-trained model checkpoint or directory")
 
     # Data
-    parser.add_argument("--data-path", type=str, default="data/processed/livefeeds")
+    parser.add_argument(
+        "--data-path",
+        type=str,
+        default="postgres",
+        help="Training data source: 'postgres' or a parquet path",
+    )
     parser.add_argument("--exclude-2020", action="store_true", default=True)
 
     # Model

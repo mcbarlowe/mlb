@@ -8,7 +8,6 @@ The async version is significantly faster (10x+) due to concurrent downloads.
 import asyncio
 import json
 from pathlib import Path
-from typing import Optional
 
 import aiofiles
 from tqdm import tqdm
@@ -20,7 +19,9 @@ from src.endpoints.game_feed import GameFeed
 async def live_feed_etl_async(
     concurrency_limit: int = 15,
     skip_existing: bool = True,
-    seasons: Optional[list[str]] = None,
+    seasons: list[str] | None = None,
+    schedule_path: Path | None = None,
+    live_feeds_root: Path | None = None,
 ) -> dict[str, dict[str, int]]:
     """
     Extract live feed data concurrently using async/await.
@@ -32,34 +33,37 @@ async def live_feed_etl_async(
         concurrency_limit: Maximum concurrent requests (default 15)
         skip_existing: Skip games that already have JSON files (default True)
         seasons: Optional list of seasons to process. If None, processes all.
+        schedule_path: Root directory containing `schedule_<season>.json` files
+        live_feeds_root: Root directory where raw live feed JSON files are written
 
     Returns:
         dict: Statistics per season {season: {"success": N, "error": M, "skipped": K}}
     """
-    game_file_path = Path("data/raw/schedules/")
+    if schedule_path is None:
+        schedule_path = Path("data/raw/schedules")
+    if live_feeds_root is None:
+        live_feeds_root = Path("data/raw/livefeeds")
     stats = {}
 
-    for file in sorted(game_file_path.glob("*.json")):
+    for file in sorted(schedule_path.glob("*.json")):
         season = file.stem.split("_")[1]
 
         # Filter by seasons if specified
         if seasons and season not in seasons:
             continue
 
-        live_feeds_path = Path(f"data/raw/livefeeds/{season}")
+        live_feeds_path = live_feeds_root / season
         live_feeds_path.mkdir(parents=True, exist_ok=True)
 
-        with open(file, "r") as f:
-            games = json.load(f)
+        async with aiofiles.open(file, "r") as handle:
+            games = json.loads(await handle.read())
 
-        # Collect all game PKs from this season
         game_pks = []
         skipped = 0
         for date in games.get("dates", []):
             for game in date.get("games", []):
                 game_pk = game["gamePk"]
 
-                # Skip if file exists and skip_existing is True
                 if skip_existing:
                     output_file = live_feeds_path / f"{game_pk}.json"
                     if output_file.exists():
@@ -75,39 +79,30 @@ async def live_feed_etl_async(
 
         print(f"Season {season}: Fetching {len(game_pks)} games ({skipped} already exist)...")
 
-        # Track progress and errors
         success_count = 0
         error_count = 0
         pbar = tqdm(total=len(game_pks), desc=f"Downloading {season}")
 
-        async def save_game(game_pk: int, data: dict) -> None:
-            """Save game data to JSON file."""
-            nonlocal success_count
-            output_file = live_feeds_path / f"{game_pk}.json"
-            async with aiofiles.open(output_file, "w") as f:
-                await f.write(json.dumps(data, indent=2))
-            success_count += 1
-            pbar.update(1)
-
-        def on_error(game_pk: int, error: Exception) -> None:
-            """Handle fetch errors."""
-            nonlocal error_count
-            error_count += 1
-            pbar.update(1)
-            tqdm.write(f"Error fetching game {game_pk}: {error}")
-
         async with GameFeed(concurrency_limit=concurrency_limit) as game_feed:
-            # Create tasks for all games
-            async def fetch_and_save(game_pk: int) -> None:
+            async def fetch_and_save(
+                game_pk: int,
+                output_dir: Path = live_feeds_path,
+                progress_bar: tqdm = pbar,
+            ) -> None:
+                nonlocal success_count, error_count
                 try:
                     data = await game_feed.get_async(game_pk)
-                    await save_game(game_pk, data)
+                    output_file = output_dir / f"{game_pk}.json"
+                    async with aiofiles.open(output_file, "w") as handle:
+                        await handle.write(json.dumps(data, indent=2))
+                    success_count += 1
                 except Exception as e:
-                    on_error(game_pk, e)
+                    error_count += 1
+                    tqdm.write(f"Error fetching game {game_pk}: {e}")
+                finally:
+                    progress_bar.update(1)
 
-            # Run all fetches concurrently
-            tasks = [fetch_and_save(game_pk) for game_pk in game_pks]
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*(fetch_and_save(game_pk) for game_pk in game_pks))
 
         pbar.close()
         print(f"Season {season}: {success_count} succeeded, {error_count} failed")
@@ -119,7 +114,9 @@ async def live_feed_etl_async(
 def live_feed_etl(
     concurrency_limit: int = 15,
     skip_existing: bool = True,
-    seasons: Optional[list[str]] = None,
+    seasons: list[str] | None = None,
+    schedule_path: Path | None = None,
+    live_feeds_root: Path | None = None,
 ) -> dict[str, dict[str, int]]:
     """
     Extract live feed data and save to JSON files.
@@ -131,6 +128,8 @@ def live_feed_etl(
         concurrency_limit: Maximum concurrent requests (default 15)
         skip_existing: Skip games that already have JSON files (default True)
         seasons: Optional list of seasons to process. If None, processes all.
+        schedule_path: Root directory containing `schedule_<season>.json` files
+        live_feeds_root: Root directory where raw live feed JSON files are written
 
     Returns:
         dict: Statistics per season {season: {"success": N, "error": M, "skipped": K}}
@@ -140,13 +139,15 @@ def live_feed_etl(
             concurrency_limit=concurrency_limit,
             skip_existing=skip_existing,
             seasons=seasons,
+            schedule_path=schedule_path,
+            live_feeds_root=live_feeds_root,
         )
     )
 
 
 async def process_live_feed_data_async(
     skip_existing: bool = True,
-    seasons: Optional[list[str]] = None,
+    seasons: list[str] | None = None,
 ) -> dict[str, dict[str, int]]:
     """
     Process raw live feed data and transform to parquet files (async I/O).
@@ -215,7 +216,7 @@ async def process_live_feed_data_async(
                     live_feed_json = json.loads(content)
 
                     # Transform data (CPU-bound)
-                    data_df = game_feed_data.transform(live_feed_json, game_pk, season)
+                    data_df = game_feed_data.transform(live_feed_json, game_pk, int(season))
 
                     # Save to parquet
                     game_feed_data.save(data_df, output_file, format="parquet")
@@ -233,7 +234,7 @@ async def process_live_feed_data_async(
 
 def process_live_feed_data(
     skip_existing: bool = True,
-    seasons: Optional[list[str]] = None,
+    seasons: list[str] | None = None,
 ) -> dict[str, dict[str, int]]:
     """
     Process raw live feed data and transform to parquet files.
@@ -256,7 +257,7 @@ def process_live_feed_data(
 async def full_etl_async(
     concurrency_limit: int = 15,
     skip_existing: bool = True,
-    seasons: Optional[list[str]] = None,
+    seasons: list[str] | None = None,
 ) -> dict[str, dict]:
     """
     Run the complete ETL pipeline: download -> transform.
@@ -298,7 +299,7 @@ async def full_etl_async(
 def full_etl(
     concurrency_limit: int = 15,
     skip_existing: bool = True,
-    seasons: Optional[list[str]] = None,
+    seasons: list[str] | None = None,
 ) -> dict[str, dict]:
     """
     Run the complete ETL pipeline: download -> transform.

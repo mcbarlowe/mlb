@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Training script for Pitch-Type-Conditioned Location Model.
 
@@ -15,7 +14,7 @@ Usage:
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
@@ -24,18 +23,19 @@ sys.path.insert(0, str(project_root))
 import numpy as np
 import polars as pl
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES, IDX_TO_PITCH_TYPE
+from src.ml.evaluate import compute_mdn_coverage, compute_mdn_nll
+from src.ml.features import IDX_TO_PITCH_TYPE, PITCH_TYPE_CODES, PitchFeatureEngine
+from src.ml.mdn_location_model import BivariateMDN, MDNLocationTrainer
 from src.ml.pitch_type_location_model import (
     PitchTypeConditionedMDN,
+    PitchTypeLocationBatchIterableDataset,
     PitchTypeLocationDataset,
     PitchTypeLocationTrainer,
-    create_pitch_type_location_dataloaders,
     compare_to_baseline,
 )
-from src.ml.mdn_location_model import BivariateMDN, MDNLocationTrainer
-from src.ml.evaluate import compute_mdn_nll, compute_mdn_coverage
+from src.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42):
@@ -256,7 +256,7 @@ def train_baseline_model(
 def run_training(args):
     """Run the pitch-type-conditioned location model training pipeline."""
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) / f"pitch_type_location_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -268,12 +268,15 @@ def run_training(args):
 
     set_seed(args.seed)
 
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
+    if args.device == "auto":
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
     else:
-        device = torch.device("cpu")
+        device = torch.device(args.device)
     print(f"Device: {device}")
 
     config = {
@@ -297,96 +300,142 @@ def run_training(args):
     print("\n" + "=" * 70)
     print("LOADING DATA")
     print("=" * 70)
-
     data_path = Path(args.data_path)
     feature_engine = PitchFeatureEngine(data_path)
 
-    # Load training data
-    print(f"\nTraining seasons: {args.train_seasons}")
-    train_df = feature_engine.load_data(seasons=args.train_seasons)
-    print(f"  Loaded {len(train_df):,} pitches")
+    def load_season_frame(season: str) -> pl.DataFrame:
+        df = feature_engine.load_data(seasons=[season])
+        print(f"  Loaded {len(df):,} pitches for {season}")
+        return df
 
     # Fit feature engine
+    print(f"\nTraining seasons: {args.train_seasons}")
     print("\nFitting feature engine...")
-    feature_engine.fit(train_df)
+    if args.low_memory:
+        feature_engine.fit_frames(
+            load_season_frame(season) for season in args.train_seasons
+        )
+    else:
+        train_df = feature_engine.load_data(seasons=args.train_seasons)
+        print(f"  Loaded {len(train_df):,} pitches")
+        feature_engine.fit(train_df)
     print(f"  Pitchers: {len(feature_engine.pitcher_to_idx):,}")
     print(f"  Batters: {len(feature_engine.batter_to_idx):,}")
 
-    # Transform data
-    print("\nTransforming training data...")
-    train_df = feature_engine.transform(train_df)
+    if args.low_memory:
+        feature_cols = feature_engine.get_feature_columns()
+        print(f"\nUsing {len(feature_cols)} features")
 
-    # Load validation data
-    print(f"\nValidation season: {args.val_season}")
-    val_df = feature_engine.load_data(seasons=[args.val_season])
-    print(f"  Loaded {len(val_df):,} pitches")
-    val_df = feature_engine.transform(val_df)
+        print("\n" + "=" * 70)
+        print("CREATING STREAMING DATASETS")
+        print("=" * 70)
+        train_dataset = PitchTypeLocationBatchIterableDataset(
+            seasons=args.train_seasons,
+            load_season=load_season_frame,
+            transform_season=feature_engine.transform,
+            feature_columns=feature_cols,
+            batch_size=args.batch_size,
+            pitch_type_column="pitch_type_idx",
+            location_columns=["px", "pz"],
+            exclude_from_features=["pitch_type_idx"],
+            shuffle=True,
+            seed=args.seed,
+        )
+        val_dataset = PitchTypeLocationBatchIterableDataset(
+            seasons=[args.val_season],
+            load_season=load_season_frame,
+            transform_season=feature_engine.transform,
+            feature_columns=feature_cols,
+            batch_size=args.batch_size,
+            pitch_type_column="pitch_type_idx",
+            location_columns=["px", "pz"],
+            exclude_from_features=["pitch_type_idx"],
+            shuffle=False,
+            seed=args.seed,
+        )
+        test_dataset = PitchTypeLocationBatchIterableDataset(
+            seasons=[args.test_season],
+            load_season=load_season_frame,
+            transform_season=feature_engine.transform,
+            feature_columns=feature_cols,
+            batch_size=args.batch_size,
+            pitch_type_column="pitch_type_idx",
+            location_columns=["px", "pz"],
+            exclude_from_features=["pitch_type_idx"],
+            shuffle=False,
+            seed=args.seed,
+        )
 
-    # Load test data
-    print(f"\nTest season: {args.test_season}")
-    test_df = feature_engine.load_data(seasons=[args.test_season])
-    print(f"  Loaded {len(test_df):,} pitches")
-    test_df = feature_engine.transform(test_df)
+        train_loader = DataLoader(train_dataset, batch_size=None, shuffle=False, num_workers=0)
+        val_loader = DataLoader(val_dataset, batch_size=None, shuffle=False, num_workers=0)
+        test_loader = DataLoader(test_dataset, batch_size=None, shuffle=False, num_workers=0)
+        n_features = train_dataset.n_features
+    else:
+        print("\nTransforming training data...")
+        train_df = feature_engine.transform(train_df)
 
-    # Get feature columns
-    feature_cols = get_feature_columns(train_df)
-    print(f"\nUsing {len(feature_cols)} features")
+        print(f"\nValidation season: {args.val_season}")
+        val_df = load_season_frame(args.val_season)
+        val_df = feature_engine.transform(val_df)
 
-    # =========================================================================
-    # Create Datasets
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("CREATING DATASETS")
-    print("=" * 70)
+        print(f"\nTest season: {args.test_season}")
+        test_df = load_season_frame(args.test_season)
+        test_df = feature_engine.transform(test_df)
 
-    print("\nTraining set:")
-    train_dataset = PitchTypeLocationDataset(
-        train_df,
-        feature_columns=feature_cols,
-        pitch_type_column="pitch_type_idx",
-        location_columns=["px", "pz"],
-        exclude_from_features=["pitch_type_idx"],
-    )
+        feature_cols = get_feature_columns(train_df)
+        print(f"\nUsing {len(feature_cols)} features")
 
-    print("\nValidation set:")
-    val_dataset = PitchTypeLocationDataset(
-        val_df,
-        feature_columns=feature_cols,
-        pitch_type_column="pitch_type_idx",
-        location_columns=["px", "pz"],
-        exclude_from_features=["pitch_type_idx"],
-    )
+        print("\n" + "=" * 70)
+        print("CREATING DATASETS")
+        print("=" * 70)
 
-    print("\nTest set:")
-    test_dataset = PitchTypeLocationDataset(
-        test_df,
-        feature_columns=feature_cols,
-        pitch_type_column="pitch_type_idx",
-        location_columns=["px", "pz"],
-        exclude_from_features=["pitch_type_idx"],
-    )
+        print("\nTraining set:")
+        train_dataset = PitchTypeLocationDataset(
+            train_df,
+            feature_columns=feature_cols,
+            pitch_type_column="pitch_type_idx",
+            location_columns=["px", "pz"],
+            exclude_from_features=["pitch_type_idx"],
+        )
 
-    # Create dataloaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=0,
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=0,
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=0,
-    )
+        print("\nValidation set:")
+        val_dataset = PitchTypeLocationDataset(
+            val_df,
+            feature_columns=feature_cols,
+            pitch_type_column="pitch_type_idx",
+            location_columns=["px", "pz"],
+            exclude_from_features=["pitch_type_idx"],
+        )
 
-    n_features = train_dataset.n_features
+        print("\nTest set:")
+        test_dataset = PitchTypeLocationDataset(
+            test_df,
+            feature_columns=feature_cols,
+            pitch_type_column="pitch_type_idx",
+            location_columns=["px", "pz"],
+            exclude_from_features=["pitch_type_idx"],
+        )
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=0,
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=0,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=0,
+        )
+        n_features = train_dataset.n_features
+
     print(f"\nInput features: {n_features}")
 
     # =========================================================================
@@ -404,7 +453,7 @@ def run_training(args):
         dropout=args.dropout,
     )
 
-    print(f"\nModel architecture:")
+    print("\nModel architecture:")
     print(f"  Hidden dims: {args.hidden_dims}")
     print(f"  Components per pitch type: {args.n_components}")
     print(f"  Total pitch type heads: {len(PITCH_TYPE_CODES)}")
@@ -551,15 +600,15 @@ def main():
     parser.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/livefeeds",
-        help="Path to processed parquet files",
+        default="postgres",
+        help="Training data source: 'postgres' or a parquet path",
     )
     parser.add_argument(
         "--train-seasons",
         type=str,
         nargs="+",
-        default=["2021", "2022", "2023"],
-        help="Training seasons",
+        default=None,
+        help="Optional explicit training seasons; default uses all available pre-validation seasons except 2020",
     )
     parser.add_argument(
         "--val-season",
@@ -574,6 +623,11 @@ def main():
         help="Test season",
     )
 
+    parser.add_argument(
+        "--low-memory",
+        action="store_true",
+        help="Stream season-sized batches instead of materializing the full training window in memory",
+    )
     # Model arguments
     parser.add_argument(
         "--hidden-dims",
@@ -651,6 +705,13 @@ def main():
         args.train_seasons = ["2023"]
         args.hidden_dims = [128, 64]
         print("Quick mode enabled: reduced epochs, data, and model size")
+    if args.train_seasons is None:
+        args.train_seasons = default_data_source_train_seasons(
+            args.data_path,
+            val_season=args.val_season,
+            test_season=args.test_season,
+            exclude_2020=True,
+        )
 
     run_training(args)
 

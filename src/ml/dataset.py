@@ -4,14 +4,56 @@ PyTorch Dataset for pitch sequence prediction.
 This module handles data loading and batching for training pitch prediction models.
 """
 
+import random
+from collections.abc import Callable, Iterator
 from typing import Optional
 
 import numpy as np
 import polars as pl
 import torch
-from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 from tqdm import tqdm
+
+
+def _iter_pitch_sequence_arrays(
+    df: pl.DataFrame,
+    feature_columns: list[str],
+    target_columns: list[str],
+    max_seq_len: int,
+) -> Iterator[dict[str, np.ndarray | int]]:
+    """Yield per-at-bat feature and target arrays from a transformed frame."""
+    print("    Sorting pitches...")
+    df = df.sort(["game_pk", "at_bat_index", "pitch_number"])
+
+    print("    Grouping by at-bat...")
+    print(f"    Feature columns ({len(feature_columns)}): {feature_columns}")
+    grouped = df.group_by(["game_pk", "at_bat_index"], maintain_order=True)
+
+    for _, group_df in tqdm(grouped, desc="    Creating sequences", leave=False):
+        features = np.array(
+            group_df.select(feature_columns).cast(pl.Float32).to_numpy(),
+            dtype=np.float32,
+            copy=True,
+        )
+        targets = np.array(
+            group_df.select(target_columns).cast(pl.Float32).to_numpy(),
+            dtype=np.float32,
+            copy=True,
+        )
+
+        if len(features) == 0 or np.isnan(features).any():
+            continue
+
+        if len(features) > max_seq_len:
+            features = features[: max_seq_len]
+            targets = targets[: max_seq_len]
+
+        yield {
+            "features": features,
+            "targets": targets,
+            "length": len(features),
+        }
 
 
 class PitchSequenceDataset(Dataset):
@@ -52,36 +94,19 @@ class PitchSequenceDataset(Dataset):
         Returns list of dicts with 'features' and 'targets' tensors.
         """
         at_bats = []
-
-        # Sort by game and at-bat, then pitch number
-        print("    Sorting pitches...")
-        df = df.sort(["game_pk", "at_bat_index", "pitch_number"])
-
-        # Group by game and at-bat
-        print("    Grouping by at-bat...")
-        print(f"    Feature columns ({len(self.feature_columns)}): {self.feature_columns}")
-        grouped = df.group_by(["game_pk", "at_bat_index"], maintain_order=True)
-        groups_list = list(grouped)
-
-        for _, group_df in tqdm(groups_list, desc="    Creating sequences", leave=False):
-            # Get features and targets as numpy arrays
-            features = group_df.select(self.feature_columns).to_numpy()
-            targets = group_df.select(self.target_columns).to_numpy()
-
-            # Skip empty at-bats or at-bats with missing data
-            if len(features) == 0 or np.isnan(features).any():
-                continue
-
-            # Truncate if too long
-            if len(features) > self.max_seq_len:
-                features = features[: self.max_seq_len]
-                targets = targets[: self.max_seq_len]
-
-            at_bats.append({
-                "features": torch.tensor(features, dtype=torch.float32),
-                "targets": torch.tensor(targets, dtype=torch.float32),
-                "length": len(features),
-            })
+        for sample in _iter_pitch_sequence_arrays(
+            df,
+            self.feature_columns,
+            self.target_columns,
+            self.max_seq_len,
+        ):
+            at_bats.append(
+                {
+                    "features": torch.tensor(sample["features"], dtype=torch.float32),
+                    "targets": torch.tensor(sample["targets"], dtype=torch.float32),
+                    "length": int(sample["length"]),
+                }
+            )
 
         return at_bats
 
@@ -90,6 +115,63 @@ class PitchSequenceDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         return self.at_bats[idx]
+
+
+class PitchSequenceIterableDataset(IterableDataset):
+    """Low-memory iterable sequence dataset that streams one season at a time."""
+
+    def __init__(
+        self,
+        seasons: list[str],
+        load_season: Callable[[str], pl.DataFrame],
+        transform_season: Callable[[pl.DataFrame], pl.DataFrame],
+        feature_columns: list[str],
+        target_columns: list[str],
+        max_seq_len: int = 20,
+        shuffle: bool = False,
+        seed: int = 42,
+        shuffle_buffer_size: int = 1024,
+    ):
+        self.seasons = list(seasons)
+        self.load_season = load_season
+        self.transform_season = transform_season
+        self.feature_columns = feature_columns
+        self.target_columns = target_columns
+        self.max_seq_len = max_seq_len
+        self.shuffle = shuffle
+        self.seed = seed
+        self.shuffle_buffer_size = shuffle_buffer_size
+        self._iteration = 0
+
+    def __iter__(self) -> Iterator[dict[str, np.ndarray | int]]:
+        rng = random.Random(self.seed + self._iteration)
+        self._iteration += 1
+
+        seasons = list(self.seasons)
+        if self.shuffle:
+            rng.shuffle(seasons)
+
+        shuffle_buffer: list[dict[str, np.ndarray | int]] = []
+        for season in seasons:
+            season_df = self.transform_season(self.load_season(season))
+            if season_df.is_empty():
+                continue
+
+            for sample in _iter_pitch_sequence_arrays(
+                season_df,
+                self.feature_columns,
+                self.target_columns,
+                self.max_seq_len,
+            ):
+                if self.shuffle and self.shuffle_buffer_size > 1:
+                    shuffle_buffer.append(sample)
+                    if len(shuffle_buffer) >= self.shuffle_buffer_size:
+                        yield shuffle_buffer.pop(rng.randrange(len(shuffle_buffer)))
+                else:
+                    yield sample
+
+        while shuffle_buffer:
+            yield shuffle_buffer.pop(rng.randrange(len(shuffle_buffer)))
 
 
 def collate_pitch_sequences(batch: list[dict]) -> dict:
@@ -104,9 +186,19 @@ def collate_pitch_sequences(batch: list[dict]) -> dict:
     Returns:
         Dict with padded tensors and lengths.
     """
-    features = [item["features"] for item in batch]
-    targets = [item["targets"] for item in batch]
-    lengths = torch.tensor([item["length"] for item in batch])
+    features = [
+        item["features"]
+        if torch.is_tensor(item["features"])
+        else torch.tensor(item["features"], dtype=torch.float32)
+        for item in batch
+    ]
+    targets = [
+        item["targets"]
+        if torch.is_tensor(item["targets"])
+        else torch.tensor(item["targets"], dtype=torch.float32)
+        for item in batch
+    ]
+    lengths = torch.tensor([int(item["length"]) for item in batch], dtype=torch.long)
 
     # Pad sequences (batch_first=True)
     features_padded = pad_sequence(features, batch_first=True, padding_value=0.0)
@@ -234,6 +326,7 @@ class PitchDataModule:
             sample_frac: Optional fraction to sample for faster iteration.
         """
         from pathlib import Path
+
         from src.ml.features import PitchFeatureEngine
 
         self.data_path = Path(data_path) if data_path else None

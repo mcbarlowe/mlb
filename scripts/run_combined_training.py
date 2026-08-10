@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Combined training script for pitch prediction models.
 
@@ -59,15 +58,14 @@ import polars as pl
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES
-from src.ml.catboost_model import PitchCatBoostModel
+from src.ml.catboost_model import PitchCatBoostModel, PitchXGBoostModel
+from src.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
 from src.ml.mdn_location_model import (
     BivariateMDN,
     MDNLocationTrainer,
     plot_multiple_densities,
-    get_point_estimate,
-    predict_location_batch,
 )
+from src.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42):
@@ -77,28 +75,33 @@ def set_seed(seed: int = 42):
     torch.manual_seed(seed)
 
 
-def load_data(data_path: Path, train_seasons: list[str], val_season: str, test_season: str):
+def load_data(
+    data_path: str,
+    train_seasons: list[str],
+    val_season: str,
+    test_season: str,
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, PitchFeatureEngine]:
     """Load data for all seasons."""
+    feature_engine = PitchFeatureEngine(data_path)
+
     print("Loading training data...")
     train_dfs = []
     for season in train_seasons:
-        path = data_path / season
-        if path.exists():
-            df = pl.scan_parquet(str(path / "*.parquet")).collect()
-            train_dfs.append(df)
-            print(f"  {season}: {len(df):,} pitches")
+        df = feature_engine.load_data(seasons=[season])
+        train_dfs.append(df)
+        print(f"  {season}: {len(df):,} pitches")
     train_df = pl.concat(train_dfs, how="diagonal")
     print(f"Total training: {len(train_df):,} pitches")
 
     print(f"\nLoading validation data: {val_season}")
-    val_df = pl.scan_parquet(str(data_path / val_season / "*.parquet")).collect()
+    val_df = feature_engine.load_data(seasons=[val_season])
     print(f"  {val_season}: {len(val_df):,} pitches")
 
     print(f"\nLoading test data: {test_season}")
-    test_df = pl.scan_parquet(str(data_path / test_season / "*.parquet")).collect()
+    test_df = feature_engine.load_data(seasons=[test_season])
     print(f"  {test_season}: {len(test_df):,} pitches")
 
-    return train_df, val_df, test_df
+    return train_df, val_df, test_df, feature_engine
 
 
 def prepare_mdn_features(
@@ -106,8 +109,6 @@ def prepare_mdn_features(
     feature_engine: PitchFeatureEngine,
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Prepare features for MDN location prediction."""
-    from src.ml.features import PITCH_TYPE_TO_IDX
-
     df = feature_engine.transform(df)
 
     df = df.filter(
@@ -117,7 +118,7 @@ def prepare_mdn_features(
     )
 
     # Get feature columns from the feature engine and add pitch_type_idx for location prediction
-    feature_cols = feature_engine.get_feature_columns() + ["pitch_type_idx"]
+    feature_cols = [*feature_engine.get_feature_columns(), "pitch_type_idx"]
 
     # Remove any duplicates while preserving order
     seen = set()
@@ -140,24 +141,29 @@ def train_catboost(
     feature_engine: PitchFeatureEngine,
     output_dir: Path,
     args,
+    model_cls=PitchCatBoostModel,
+    label: str = "CatBoost",
+    subdir: str = "catboost",
 ) -> dict:
-    """Train CatBoost pitch type model."""
+    """Train a tree-based pitch type/location model."""
     print("\n" + "=" * 70)
-    print("TRAINING CATBOOST PITCH TYPE MODEL")
+    print(f"TRAINING {label.upper()} PITCH TYPE MODEL")
     print("=" * 70)
 
-    model = PitchCatBoostModel(
-        iterations=args.catboost_iterations,
-        learning_rate=args.catboost_lr,
-        depth=args.catboost_depth,
-        l2_leaf_reg=3.0,
-        early_stopping_rounds=args.early_stopping,
-        task_type="CPU",
-        random_seed=args.seed,
-        verbose=50 if not args.quick else 10,
-    )
+    common_kwargs = {
+        "iterations": args.catboost_iterations,
+        "learning_rate": args.catboost_lr,
+        "depth": args.catboost_depth,
+        "early_stopping_rounds": args.early_stopping,
+        "random_seed": args.seed,
+        "verbose": 50 if not args.quick else 10,
+    }
+    if model_cls is PitchCatBoostModel:
+        common_kwargs["l2_leaf_reg"] = 3.0
+        common_kwargs["task_type"] = "CPU"
+    model = model_cls(**common_kwargs)
 
-    print("\nPreparing CatBoost data...")
+    print(f"\nPreparing {label} data...")
     X_train, y_type_train, y_px_train, y_pz_train, cat_features = model.prepare_data(
         train_df, feature_engine
     )
@@ -172,19 +178,28 @@ def train_catboost(
     print(f"Val: {len(X_val):,} samples")
     print(f"Test: {len(X_test):,} samples")
 
-    train_results = model.train(
-        X_train, y_type_train, y_px_train, y_pz_train,
-        X_val, y_type_val, y_px_val, y_pz_val,
+    model.train(
+        X_train,
+        y_type_train,
+        y_px_train,
+        y_pz_train,
+        X_val,
+        y_type_val,
+        y_px_val,
+        y_pz_val,
         cat_features=cat_features,
         n_classes=len(PITCH_TYPE_CODES),
     )
 
     test_results = model.evaluate(
-        X_test, y_type_test, y_px_test, y_pz_test,
+        X_test,
+        y_type_test,
+        y_px_test,
+        y_pz_test,
         cat_features=cat_features,
     )
 
-    print("\nCatBoost Test Results:")
+    print(f"\n{label} Test Results:")
     print(f"  Pitch Type Accuracy: {test_results['accuracy']:.1%}")
     print(f"  Top-3 Accuracy:      {test_results['top3_accuracy']:.1%}")
     print(f"  Macro F1:            {test_results['f1_macro']:.4f}")
@@ -192,10 +207,9 @@ def train_catboost(
     print(f"  Location MAE pz:     {test_results['mae_pz']:.4f} ft")
     print(f"  Euclidean Error:     {test_results['euclidean_error']:.4f} ft")
 
-    # Save model
-    catboost_dir = output_dir / "catboost"
-    model.save(catboost_dir)
-    print(f"\nCatBoost model saved: {catboost_dir}")
+    tree_dir = output_dir / subdir
+    model.save(tree_dir)
+    print(f"\n{label} model saved: {tree_dir}")
 
     return {
         "accuracy": test_results["accuracy"],
@@ -208,7 +222,6 @@ def train_catboost(
         "feature_columns": model.feature_columns,
         "categorical_features": model.categorical_features,
     }
-
 
 def train_mdn(
     train_df: pl.DataFrame,
@@ -346,10 +359,14 @@ def run_combined_training(args):
 
     set_seed(args.seed)
 
-    # Define seasons
-    train_seasons = ["2018", "2019", "2021", "2022", "2023"]
-    val_season = "2024"
-    test_season = "2025"
+    train_seasons = args.train_seasons or default_data_source_train_seasons(
+        args.data_path,
+        val_season=args.val_season,
+        test_season=args.test_season,
+        exclude_2020=args.exclude_2020,
+    )
+    val_season = args.val_season
+    test_season = args.test_season
 
     print("Data Split:")
     print(f"  Train: {train_seasons}")
@@ -361,13 +378,15 @@ def run_combined_training(args):
     print("LOADING DATA")
     print("=" * 70)
 
-    data_path = Path(args.data_path)
-    train_df, val_df, test_df = load_data(data_path, train_seasons, val_season, test_season)
+    train_df, val_df, test_df, feature_engine = load_data(
+        args.data_path,
+        train_seasons,
+        val_season,
+        test_season,
+    )
 
-    # Fit feature engine
     print("\nFitting feature engine...")
     all_df = pl.concat([train_df, val_df, test_df], how="diagonal")
-    feature_engine = PitchFeatureEngine(data_path)
     feature_engine.fit(all_df)
     print(f"Pitchers: {feature_engine.n_pitchers:,}")
     print(f"Batters: {feature_engine.n_batters:,}")
@@ -377,10 +396,19 @@ def run_combined_training(args):
         train_df, val_df, test_df, feature_engine, output_dir, args
     )
 
-    # Train MDN
-    mdn_results = train_mdn(
-        train_df, val_df, test_df, feature_engine, output_dir, args
-    )
+    xgboost_results = None
+    if args.train_xgboost:
+        xgboost_results = train_catboost(
+            train_df,
+            val_df,
+            test_df,
+            feature_engine,
+            output_dir,
+            args,
+            model_cls=PitchXGBoostModel,
+            label="XGBoost",
+            subdir="xgboost",
+        )
 
     # Save feature engine
     feature_engine_path = output_dir / "feature_engine.json"
@@ -407,6 +435,7 @@ def run_combined_training(args):
         "val_season": val_season,
         "test_season": test_season,
         "catboost": catboost_results,
+        "xgboost": xgboost_results,
         "mdn": mdn_results,
     }
 
@@ -422,14 +451,30 @@ def run_combined_training(args):
     print(f"|  Accuracy            | {catboost_results['accuracy']:>18.1%}   |")
     print(f"|  Top-3 Accuracy      | {catboost_results['top3_accuracy']:>18.1%}   |")
     print(f"|  Macro F1            | {catboost_results['f1_macro']:>20.4f} |")
-    print("+----------------------+----------------------+")
-    print("|  MDN (Location Density)                     |")
-    print("+----------------------+----------------------+")
-    print(f"|  NLL                 | {mdn_results['nll']:>20.4f} |")
-    print(f"|  MAE px              | {mdn_results['mae_px']:>17.4f} ft |")
-    print(f"|  MAE pz              | {mdn_results['mae_pz']:>17.4f} ft |")
-    print(f"|  Euclidean           | {mdn_results['euclidean']:>17.4f} ft |")
-    print("+----------------------+----------------------+")
+    if xgboost_results is not None:
+        print("+----------------------+----------------------+")
+        print("|  XGBOOST (Pitch Type)                      |")
+        print("+----------------------+----------------------+")
+        print(f"|  Accuracy            | {xgboost_results['accuracy']:>18.1%}   |")
+        print(f"|  Top-3 Accuracy      | {xgboost_results['top3_accuracy']:>18.1%}   |")
+        print(f"|  Macro F1            | {xgboost_results['f1_macro']:>20.4f} |")
+        print("+----------------------+----------------------+")
+        print("|  MDN (Location Density)                     |")
+        print("+----------------------+----------------------+")
+        print(f"|  NLL                 | {mdn_results['nll']:>20.4f} |")
+        print(f"|  MAE px              | {mdn_results['mae_px']:>17.4f} ft |")
+        print(f"|  MAE pz              | {mdn_results['mae_pz']:>17.4f} ft |")
+        print(f"|  Euclidean           | {mdn_results['euclidean']:>17.4f} ft |")
+        print("+----------------------+----------------------+")
+    else:
+        print("+----------------------+----------------------+")
+        print("|  MDN (Location Density)                     |")
+        print("+----------------------+----------------------+")
+        print(f"|  NLL                 | {mdn_results['nll']:>20.4f} |")
+        print(f"|  MAE px              | {mdn_results['mae_px']:>17.4f} ft |")
+        print(f"|  MAE pz              | {mdn_results['mae_pz']:>17.4f} ft |")
+        print(f"|  Euclidean           | {mdn_results['euclidean']:>17.4f} ft |")
+        print("+----------------------+----------------------+")
 
     print(f"\nAll outputs saved to: {output_dir}")
     print(f"Results JSON: {results_path}")
@@ -479,14 +524,33 @@ def main():
         description="Train CatBoost (pitch type) + MDN (location density) models",
     )
 
-    # Data
-    parser.add_argument("--data-path", default="data/processed/livefeeds")
+    parser.add_argument(
+        "--data-path",
+        default="postgres",
+        help="Training data source: 'postgres' or a parquet path",
+    )
+    parser.add_argument(
+        "--train-seasons",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Optional explicit training seasons; default uses all available pre-validation seasons except 2020",
+    )
+    parser.add_argument("--val-season", type=str, default="2024")
+    parser.add_argument("--test-season", type=str, default="2025")
+    parser.add_argument("--exclude-2020", action="store_true", default=True)
+    parser.add_argument("--include-2020", action="store_true")
 
     # CatBoost settings
     parser.add_argument("--catboost-iterations", type=int, default=1000)
     parser.add_argument("--catboost-lr", type=float, default=0.05)
     parser.add_argument("--catboost-depth", type=int, default=8)
 
+    parser.add_argument(
+        "--train-xgboost",
+        action="store_true",
+        help="Also train an XGBoost baseline with the same feature set.",
+    )
     # MDN settings
     parser.add_argument("--mdn-hidden-dims", nargs="+", type=int, default=[256, 128, 64])
     parser.add_argument("--mdn-components", type=int, default=5)
@@ -501,6 +565,8 @@ def main():
     parser.add_argument("--quick", action="store_true", help="Quick test run")
 
     args = parser.parse_args()
+    if args.include_2020:
+        args.exclude_2020 = False
 
     if args.quick:
         args.catboost_iterations = 100

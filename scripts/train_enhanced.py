@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Train the enhanced pitch prediction model with all improvements.
 
@@ -20,12 +19,12 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import json
-import numpy as np
-import torch
-import polars as pl
 
-from src.ml.model import create_model
-from src.ml.train import PitchPredictionTrainer
+import numpy as np
+import polars as pl
+import torch
+
+from src.ml.cross_validation import TimeSeriesCrossValidator
 from src.ml.evaluate import (
     evaluate_model,
     plot_confusion_matrix,
@@ -33,8 +32,9 @@ from src.ml.evaluate import (
     plot_mdn_predictions,
     print_classification_report,
 )
-from src.ml.cross_validation import TimeSeriesCrossValidator
-from src.ml.features import compute_class_weights, PITCH_TYPE_CODES
+from src.ml.features import PITCH_TYPE_CODES, compute_class_weights
+from src.ml.model import create_model
+from src.ml.train import PitchPredictionTrainer
 
 
 def set_seed(seed: int = 42) -> None:
@@ -99,14 +99,16 @@ def main():
     for k, v in config.items():
         print(f"  {k}: {v}")
 
-    # Setup data - use 2023 for training to avoid memory issues
+    # Setup data - keep this script on 2023-only training to stay within memory,
+    # but source the data from PostgreSQL so the validation/test seasons stay aligned
+    # with the broader full-history training pipeline.
     print("\n" + "=" * 70)
     print("LOADING DATA")
     print("=" * 70)
 
-    # Use only 2023 for training (2018-2023 causes memory issues)
+    # Use only 2023 for training (full-history settings exceed this script's memory budget)
     cv = TimeSeriesCrossValidator(
-        data_path="data/processed/livefeeds",
+        data_path="postgres",
         batch_size=config["batch_size"],
         exclude_seasons=["2020", "2018", "2019", "2021", "2022"],  # Only use 2023
         val_seasons=["2024"],
@@ -117,6 +119,7 @@ def main():
         val_season="2024",
     )
 
+    assert cv.feature_engine is not None
     print(f"\nTrain: {n_train:,} at-bats (2023)")
     print(f"Val: {n_val:,} at-bats (2024)")
 
@@ -300,7 +303,7 @@ def main():
     print("COMPLETE")
     print("=" * 70)
     print(f"\nOutput: {output_dir}")
-    print(f"\nKey Results:")
+    print("\nKey Results:")
     print(f"  Pitch Type Accuracy: {test_results['accuracy']:.1%}")
     print(f"  Top-3 Accuracy:      {test_results['top3_accuracy']:.1%}")
     print(f"  Location NLL:        {test_results['nll']:.3f}")

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Main training script for pitch prediction model.
 
@@ -19,26 +18,16 @@ Usage:
 import argparse
 import json
 import random
-import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-
-# Add project root to path for imports
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 import numpy as np
 import torch
 
+from src.ml.cross_validation import TimeSeriesCrossValidator, run_cross_validation
+from src.ml.evaluate import evaluate_model, plot_confusion_matrix, plot_mdn_predictions
 from src.ml.model import create_model
-from src.ml.train import PitchPredictionTrainer, PitchPredictionLoss
-from src.ml.evaluate import evaluate_model, plot_mdn_predictions, plot_confusion_matrix
-from src.ml.cross_validation import (
-    TimeSeriesCrossValidator,
-    CVResults,
-    run_cross_validation,
-)
+from src.ml.train import PitchPredictionTrainer
 
 
 def set_seed(seed: int = 42) -> None:
@@ -88,7 +77,7 @@ def train_fold(
     learning_rate: float = 1e-3,
     type_weight: float = 1.0,
     location_weight: float = 0.5,
-    checkpoint_dir: Optional[Path] = None,
+    checkpoint_dir: Path | None = None,
 ) -> dict:
     """Train a model on a single fold."""
     trainer = PitchPredictionTrainer(
@@ -407,7 +396,6 @@ def run_test_mode(args) -> None:
     print(f"Test set: {n_test:,} at-bats from season {cv.test_season}")
 
     # Evaluate
-    device = get_device(args.device)
     results = evaluate_model(model, test_loader, device=args.device)
 
     print(f"\n{'='*60}")
@@ -497,8 +485,8 @@ def main():
     parser.add_argument(
         "--data-path",
         type=str,
-        default="data/processed/livefeeds",
-        help="Path to processed parquet files",
+        default="postgres",
+        help="Training data source: 'postgres' or a parquet path",
     )
     parser.add_argument(
         "--exclude-2020",

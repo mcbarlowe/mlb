@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Training script for CatBoost pitch prediction model.
 
@@ -30,8 +29,9 @@ import numpy as np
 import polars as pl
 
 from src.ml.catboost_model import PitchCatBoostModel
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES
 from src.ml.evaluate import plot_confusion_matrix, plot_location_predictions
+from src.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
+from src.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42) -> None:
@@ -53,37 +53,32 @@ def load_and_prepare_data(
     Returns:
         Tuple of DataFrames and feature engine.
     """
-    data_path = Path(data_path)
+    feature_engine = PitchFeatureEngine(data_path)
 
     # Load training data
     print(f"Loading training data: {train_seasons}")
     train_dfs = []
     for season in train_seasons:
-        season_path = data_path / season
-        if season_path.exists():
-            df = pl.scan_parquet(str(season_path / "*.parquet")).collect()
-            train_dfs.append(df)
-            print(f"  {season}: {len(df):,} pitches")
+        df = feature_engine.load_data(seasons=[season])
+        train_dfs.append(df)
+        print(f"  {season}: {len(df):,} pitches")
 
     train_df = pl.concat(train_dfs, how="diagonal")
     print(f"Total training: {len(train_df):,} pitches")
 
     # Load validation data
     print(f"\nLoading validation data: {val_season}")
-    val_path = data_path / val_season
-    val_df = pl.scan_parquet(str(val_path / "*.parquet")).collect()
+    val_df = feature_engine.load_data(seasons=[val_season])
     print(f"Validation: {len(val_df):,} pitches")
 
     # Load test data
     print(f"\nLoading test data: {test_season}")
-    test_path = data_path / test_season
-    test_df = pl.scan_parquet(str(test_path / "*.parquet")).collect()
+    test_df = feature_engine.load_data(seasons=[test_season])
     print(f"Test: {len(test_df):,} pitches")
 
     # Fit feature engine on all data for consistent mappings
     print("\nFitting feature engine...")
     all_df = pl.concat([train_df, val_df, test_df], how="diagonal")
-    feature_engine = PitchFeatureEngine(data_path)
     feature_engine.fit(all_df)
 
     print(f"Pitchers: {feature_engine.n_pitchers:,}")
@@ -125,12 +120,12 @@ def run_training(args) -> dict:
         print(f"  {key}: {value}")
     print()
 
-    # Define seasons
-    all_seasons = ["2018", "2019", "2021", "2022", "2023", "2024", "2025"]
-    if args.exclude_2020:
-        train_seasons = [s for s in all_seasons if s not in [args.val_season, args.test_season]]
-    else:
-        train_seasons = [s for s in all_seasons + ["2020"] if s not in [args.val_season, args.test_season]]
+    train_seasons = args.train_seasons or default_data_source_train_seasons(
+        args.data_path,
+        val_season=args.val_season,
+        test_season=args.test_season,
+        exclude_2020=args.exclude_2020,
+    )
 
     print("Data Split:")
     print(f"  Train: {train_seasons}")
@@ -344,8 +339,19 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # Data
-    parser.add_argument("--data-path", type=str, default="data/processed/livefeeds")
+    parser.add_argument(
+        "--data-path",
+        type=str,
+        default="postgres",
+        help="Training data source: 'postgres' or a parquet path",
+    )
+    parser.add_argument(
+        "--train-seasons",
+        nargs="+",
+        type=str,
+        default=None,
+        help="Optional explicit training seasons; default uses all available pre-validation seasons except 2020",
+    )
     parser.add_argument("--val-season", type=str, default="2024")
     parser.add_argument("--test-season", type=str, default="2025")
     parser.add_argument("--exclude-2020", action="store_true", default=True)

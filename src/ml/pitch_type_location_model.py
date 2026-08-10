@@ -13,6 +13,7 @@ Classes:
 """
 
 import math
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Optional
 
@@ -21,7 +22,7 @@ import polars as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 from tqdm import tqdm
 
 from src.ml.features import PITCH_TYPE_CODES, IDX_TO_PITCH_TYPE
@@ -45,7 +46,7 @@ class PitchTypeConditionedMDN(nn.Module):
         self,
         n_features: int,
         n_pitch_types: int = 11,
-        hidden_dims: list[int] = None,
+        hidden_dims: list[int] | None = None,
         n_components: int = 3,
         dropout: float = 0.2,
     ):
@@ -512,8 +513,8 @@ class PitchTypeLocationDataset(Dataset):
         df: pl.DataFrame,
         feature_columns: list[str],
         pitch_type_column: str = "pitch_type_idx",
-        location_columns: list[str] = None,
-        exclude_from_features: list[str] = None,
+        location_columns: list[str] | None = None,
+        exclude_from_features: list[str] | None = None,
     ):
         """
         Initialize the dataset.
@@ -546,18 +547,25 @@ class PitchTypeLocationDataset(Dataset):
         )
         df = df.filter(valid_mask)
 
-        # Extract data
         self.features = torch.tensor(
-            df.select(self.feature_columns).to_numpy(),
-            dtype=torch.float32
+            np.array(
+                df.select(self.feature_columns).cast(pl.Float32).to_numpy(),
+                dtype=np.float32,
+                copy=True,
+            ),
+            dtype=torch.float32,
         )
         self.pitch_type_idx = torch.tensor(
-            df[pitch_type_column].to_numpy(),
-            dtype=torch.long
+            np.array(df[pitch_type_column].cast(pl.Int64).to_numpy(), dtype=np.int64, copy=True),
+            dtype=torch.long,
         )
         self.location = torch.tensor(
-            df.select(location_columns).to_numpy(),
-            dtype=torch.float32
+            np.array(
+                df.select(location_columns).cast(pl.Float32).to_numpy(),
+                dtype=np.float32,
+                copy=True,
+            ),
+            dtype=torch.float32,
         )
 
         # Handle NaN in features by replacing with 0
@@ -576,13 +584,104 @@ class PitchTypeLocationDataset(Dataset):
     def n_features(self) -> int:
         return self.features.shape[1]
 
+class PitchTypeLocationBatchIterableDataset(IterableDataset):
+    """Low-memory iterable dataset that streams pitch-location batches by season."""
+
+    def __init__(
+        self,
+        seasons: list[str],
+        load_season: Callable[[str], pl.DataFrame],
+        transform_season: Callable[[pl.DataFrame], pl.DataFrame],
+        feature_columns: list[str],
+        batch_size: int,
+        pitch_type_column: str = "pitch_type_idx",
+        location_columns: list[str] | None = None,
+        exclude_from_features: list[str] | None = None,
+        shuffle: bool = False,
+        seed: int = 42,
+    ):
+        if location_columns is None:
+            location_columns = ["px", "pz"]
+        if exclude_from_features is None:
+            exclude_from_features = [pitch_type_column]
+
+        self.seasons = list(seasons)
+        self.load_season = load_season
+        self.transform_season = transform_season
+        self.feature_columns = [
+            column for column in feature_columns if column not in exclude_from_features
+        ]
+        self.batch_size = batch_size
+        self.pitch_type_column = pitch_type_column
+        self.location_columns = location_columns
+        self.shuffle = shuffle
+        self.seed = seed
+        self._iteration = 0
+
+    @property
+    def n_features(self) -> int:
+        return len(self.feature_columns)
+
+    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        rng = np.random.default_rng(self.seed + self._iteration)
+        self._iteration += 1
+
+        season_order = list(self.seasons)
+        if self.shuffle and season_order:
+            season_indices = rng.permutation(len(season_order))
+            season_order = [season_order[index] for index in season_indices]
+
+        for season in season_order:
+            season_df = self.transform_season(self.load_season(season))
+            valid_mask = (
+                season_df[self.location_columns[0]].is_not_null()
+                & season_df[self.location_columns[1]].is_not_null()
+                & season_df[self.pitch_type_column].is_not_null()
+                & (season_df[self.pitch_type_column] >= 0)
+            )
+            season_df = season_df.filter(valid_mask)
+            if season_df.is_empty():
+                continue
+
+            print(f"    Streaming season {season}: {len(season_df):,} samples")
+            features = np.array(
+                season_df.select(self.feature_columns).cast(pl.Float32).to_numpy(),
+                dtype=np.float32,
+                copy=True,
+            )
+            features = np.nan_to_num(features, nan=0.0)
+            pitch_type_idx = np.array(
+                season_df[self.pitch_type_column].cast(pl.Int64).to_numpy(),
+                dtype=np.int64,
+                copy=True,
+            )
+            location = np.array(
+                season_df.select(self.location_columns).cast(pl.Float32).to_numpy(),
+                dtype=np.float32,
+                copy=True,
+            )
+
+            if self.shuffle:
+                row_indices = rng.permutation(len(features))
+                features = features[row_indices]
+                pitch_type_idx = pitch_type_idx[row_indices]
+                location = location[row_indices]
+
+            for start in range(0, len(features), self.batch_size):
+                end = start + self.batch_size
+                yield (
+                    torch.tensor(features[start:end], dtype=torch.float32),
+                    torch.tensor(pitch_type_idx[start:end], dtype=torch.long),
+                    torch.tensor(location[start:end], dtype=torch.float32),
+                )
+
 
 def create_pitch_type_location_dataloaders(
     df: pl.DataFrame,
     feature_columns: list[str],
     pitch_type_column: str = "pitch_type_idx",
-    location_columns: list[str] = None,
-    exclude_from_features: list[str] = None,
+    location_columns: list[str] | None = None,
+    exclude_from_features: list[str] | None = None,
     batch_size: int = 256,
     train_frac: float = 0.7,
     val_frac: float = 0.15,
@@ -709,10 +808,10 @@ class PitchTypeLocationTrainer:
         """Train for one epoch."""
         self.model.train()
         total_loss = 0.0
-        n_batches = len(dataloader)
+        n_batches = 0
 
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}", leave=False)
-        for batch_idx, (features, pitch_type_idx, location) in enumerate(pbar):
+        for features, pitch_type_idx, location in pbar:
             features = features.to(self.device)
             pitch_type_idx = pitch_type_idx.to(self.device)
             location = location.to(self.device)
@@ -721,16 +820,17 @@ class PitchTypeLocationTrainer:
 
             params = self.model(features, pitch_type_idx)
             log_prob = self.model.log_prob(params, location)
-            loss = -log_prob.mean()  # Negative log likelihood
+            loss = -log_prob.mean()
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
             total_loss += loss.item()
+            n_batches += 1
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
-        return total_loss / n_batches
+        return total_loss / max(n_batches, 1)
 
     def validate(self, dataloader: DataLoader) -> dict:
         """Validate the model with per-pitch-type metrics."""
@@ -890,7 +990,7 @@ def compare_to_baseline(
     conditioned_model: PitchTypeConditionedMDN,
     baseline_model: nn.Module,
     test_loader: DataLoader,
-    device: str = "auto",
+    device: str | torch.device = "auto",
 ) -> dict:
     """
     Compare pitch-type-conditioned model to a baseline (no pitch type info).
@@ -904,18 +1004,20 @@ def compare_to_baseline(
     Returns:
         Dictionary with comparison metrics.
     """
-    if device == "auto":
+    if isinstance(device, torch.device):
+        resolved_device = device
+    elif device == "auto":
         if torch.cuda.is_available():
-            device = torch.device("cuda")
+            resolved_device = torch.device("cuda")
         elif torch.backends.mps.is_available():
-            device = torch.device("mps")
+            resolved_device = torch.device("mps")
         else:
-            device = torch.device("cpu")
+            resolved_device = torch.device("cpu")
     else:
-        device = torch.device(device)
+        resolved_device = torch.device(device)
 
-    conditioned_model = conditioned_model.to(device)
-    baseline_model = baseline_model.to(device)
+    conditioned_model = conditioned_model.to(resolved_device)
+    baseline_model = baseline_model.to(resolved_device)
     conditioned_model.eval()
     baseline_model.eval()
 
@@ -925,9 +1027,9 @@ def compare_to_baseline(
 
     with torch.no_grad():
         for features, pitch_type_idx, location in test_loader:
-            features = features.to(device)
-            pitch_type_idx = pitch_type_idx.to(device)
-            location = location.to(device)
+            features = features.to(resolved_device)
+            pitch_type_idx = pitch_type_idx.to(resolved_device)
+            location = location.to(resolved_device)
 
             # Conditioned model
             cond_params = conditioned_model(features, pitch_type_idx)

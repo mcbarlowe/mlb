@@ -107,7 +107,7 @@ class DailyPipeline:
     def __init__(
         self,
         concurrency_limit: int = 15,
-        poll_interval: float = 30.0,
+        poll_interval: float = 3.0,
         output_dir: Path = Path("data/raw/livefeeds"),
         processed_dir: Path = Path("data/processed/livefeeds"),
         on_game_complete: Optional[Callable[[int, dict], None]] = None,

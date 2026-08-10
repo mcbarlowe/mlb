@@ -1,11 +1,9 @@
-#!/usr/bin/env python
 """
 Training script for pitch prediction model.
 
-Uses a simple temporal split:
-- Train: 2018-2023 (excluding 2020 by default)
-- Validation: 2024 (for early stopping)
-- Test: 2025 (held out for final evaluation)
+By default, this uses every available season before the validation year from
+the selected data source, excluding 2020 unless ``--include-2020`` is passed.
+Validation defaults to 2024 and the held-out test season defaults to 2025.
 
 Usage:
     # Run full training
@@ -21,7 +19,7 @@ Usage:
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Add project root to path
@@ -29,19 +27,24 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import numpy as np
+import polars as pl
 import torch
 
-from src.ml.model import create_model
-from src.ml.train import PitchPredictionTrainer
+from src.ml.cross_validation import TimeSeriesCrossValidator
 from src.ml.evaluate import (
     evaluate_model,
-    plot_mdn_predictions,
     plot_confusion_matrix,
     plot_location_predictions,
+    plot_mdn_predictions,
     print_classification_report,
 )
-from src.ml.cross_validation import TimeSeriesCrossValidator
-from src.ml.features import compute_class_weights, PITCH_TYPE_CODES
+from src.ml.features import (
+    PITCH_TYPE_CODES,
+    PITCH_TYPE_TO_IDX,
+    compute_class_weights_from_counts,
+)
+from src.ml.model import create_model
+from src.ml.train import PitchPredictionTrainer
 
 
 def set_seed(seed: int = 42) -> None:
@@ -65,12 +68,38 @@ def get_device(device_str: str = "auto") -> torch.device:
             return torch.device("cpu")
     return torch.device(device_str)
 
+def format_sample_count(count: int) -> str:
+    """Render sample counts, including streaming loaders with unknown length."""
+    return f"{count:,}" if count >= 0 else "unknown (streaming)"
+
+
+def compute_training_class_weights(
+    cv: TimeSeriesCrossValidator,
+    train_seasons: list[str],
+    smoothing: float,
+) -> torch.Tensor:
+    """Compute class weights from raw pitch codes without concatenating all seasons."""
+    count_dict: dict[int, int] = {}
+    for season in train_seasons:
+        season_df = cv._load_season(season)
+        counts = season_df.group_by("pitch_type_code").agg(pl.len().alias("count"))
+        for row in counts.to_dicts():
+            code = row["pitch_type_code"]
+            pitch_type_idx = PITCH_TYPE_TO_IDX.get(code, PITCH_TYPE_TO_IDX["OTHER"])
+            count_dict[pitch_type_idx] = count_dict.get(pitch_type_idx, 0) + int(row["count"])
+
+    return compute_class_weights_from_counts(
+        count_dict,
+        n_classes=len(PITCH_TYPE_CODES),
+        smoothing=smoothing,
+    )
+
 
 def run_training(args) -> dict:
     """Run the training pipeline."""
 
     # Create output directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) / f"run_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -109,22 +138,23 @@ def run_training(args) -> dict:
     for key, value in config.items():
         print(f"  {key}: {value}")
     print()
-
     # Setup data loader helper
     exclude_seasons = ["2020"] if args.exclude_2020 else None
     cv = TimeSeriesCrossValidator(
         data_path=args.data_path,
         batch_size=args.batch_size,
         exclude_seasons=exclude_seasons,
-        val_seasons=["2024"],  # Only used for final train/val split
-        test_season="2025",
+        train_seasons=args.train_seasons,
+        val_seasons=[args.val_season],
+        test_season=args.test_season,
+        low_memory=args.low_memory,
     )
 
     print("Data Split:")
-    train_seasons = [s for s in cv.train_seasons if s != "2024"]
+    train_seasons = args.train_seasons or [s for s in cv.train_seasons if s != args.val_season]
     print(f"  Train: {train_seasons}")
-    print(f"  Validation: 2024")
-    print(f"  Test: 2025 (held out)")
+    print(f"  Validation: {args.val_season}")
+    print(f"  Test: {args.test_season} (held out)")
     if exclude_seasons:
         print(f"  Excluded: {exclude_seasons}")
     print()
@@ -144,10 +174,11 @@ def run_training(args) -> dict:
     print()
 
     train_loader, val_loader, n_train, n_val = cv.get_final_train_val_loaders(
-        val_season="2024"
+        val_season=args.val_season
     )
-    print(f"\nTraining: {n_train:,} at-bats")
-    print(f"Validation: {n_val:,} at-bats")
+    assert cv.feature_engine is not None
+    print(f"\nTraining: {format_sample_count(n_train)} at-bats")
+    print(f"Validation: {format_sample_count(n_val)} at-bats")
 
     # Validate feature dimensions
     feature_cols = cv.feature_engine.get_feature_columns()
@@ -169,26 +200,16 @@ def run_training(args) -> dict:
     class_weights = None
     if args.use_class_weights:
         print("Computing class weights from training data...")
-        # Get training seasons (excluding validation)
-        train_seasons = [s for s in cv.train_seasons if s != "2024"]
-        # Access cached season data
-        import polars as pl
-        train_dfs = [cv._season_data[s] for s in train_seasons if s in cv._season_data]
-        if train_dfs:
-            combined_train = pl.concat(train_dfs, how="diagonal")
-            # Transform to get pitch_type_idx
-            transformed = cv.feature_engine.transform(combined_train)
-            # Compute class weights
-            class_weights = compute_class_weights(
-                transformed,
-                pitch_type_col="pitch_type_idx",
-                n_classes=len(PITCH_TYPE_CODES),
-                smoothing=args.class_weight_smoothing,
-            )
-            print(f"Class weights (smoothing={args.class_weight_smoothing}):")
-            for i, code in enumerate(PITCH_TYPE_CODES):
-                print(f"  {code}: {class_weights[i]:.3f}")
-            print()
+        train_seasons = [s for s in cv.train_seasons if s != args.val_season]
+        class_weights = compute_training_class_weights(
+            cv,
+            train_seasons,
+            smoothing=args.class_weight_smoothing,
+        )
+        print(f"Class weights (smoothing={args.class_weight_smoothing}):")
+        for i, code in enumerate(PITCH_TYPE_CODES):
+            print(f"  {code}: {class_weights[i]:.3f}")
+        print()
 
     # =========================================================================
     # PHASE 2: Train Model
@@ -269,7 +290,7 @@ def run_training(args) -> dict:
     print()
 
     test_loader, n_test = cv.get_test_loader()
-    print(f"Test set: {n_test:,} at-bats from season {cv.test_season}")
+    print(f"Test set: {format_sample_count(n_test)} at-bats from season {cv.test_season}")
     print()
 
     test_results = evaluate_model(model, test_loader, device=args.device)
@@ -323,6 +344,7 @@ def run_training(args) -> dict:
 
     # Save feature engine (needed for inference)
     feature_engine_path = output_dir / "feature_engine.json"
+    assert cv.feature_engine is not None
     cv.feature_engine.save(feature_engine_path)
     print(f"Feature engine saved: {feature_engine_path}")
 
@@ -332,6 +354,7 @@ def run_training(args) -> dict:
         json.dump(results, f, indent=2, default=str)
     print(f"Results saved: {results_path}")
 
+    report_path = None
     # Generate plots
     if args.plots:
         print("\nGenerating plots...")
@@ -370,9 +393,6 @@ def run_training(args) -> dict:
             sys.stdout = old_stdout
         print(f"  {report_path}")
 
-    # =========================================================================
-    # Summary
-    # =========================================================================
     print()
     print("=" * 70)
     print("TRAINING COMPLETE")
@@ -397,9 +417,19 @@ def main():
     )
 
     # Data
-    parser.add_argument("--data-path", type=str, default="data/processed/livefeeds")
+    parser.add_argument("--data-path", type=str, default="postgres",
+                        help="Training data source: 'postgres' or a parquet path")
+    parser.add_argument("--train-seasons", nargs="+", type=str, default=None,
+                        help="Optional explicit training seasons; default uses all available pre-validation seasons")
+    parser.add_argument("--val-season", type=str, default="2024")
+    parser.add_argument("--test-season", type=str, default="2025")
     parser.add_argument("--exclude-2020", action="store_true", default=True)
     parser.add_argument("--include-2020", action="store_true")
+    parser.add_argument(
+        "--low-memory",
+        action="store_true",
+        help="Stream season-sized chunks instead of materializing the full training window in memory",
+    )
 
     # Model
     parser.add_argument("--model-type", type=str, default="lstm",
