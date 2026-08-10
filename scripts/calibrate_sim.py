@@ -120,10 +120,15 @@ def simulate_rates(
 ) -> tuple[dict, dict, dict]:
     """Simulated aggregate/per-count result and event rates per side.
 
-    Calibration runs windup providers (stretch=False); the stretch variants
-    share the same multipliers.
+    PAs run inside a rolling base-out context (transitions sampled from the
+    empirical engine, provider stretch selected by current runners) so the
+    measured rates reflect the same windup/stretch mixture the game loop
+    produces — calibrating windup-only providers understates offense.
     """
+    from src.sim.base_out import BaseOutEngine
+
     rng = random.Random(seed)
+    engine = BaseOutEngine.load(seed=seed)
     result_counts = {side: Counter() for side in SIDES}
     count_counts: dict[str, dict[str, Counter]] = {
         side: {count_key(b, s): Counter() for b, s in COUNTS} for side in SIDES
@@ -131,9 +136,11 @@ def simulate_rates(
     event_counts = {side: Counter() for side in SIDES}
     for pitcher, batter, is_top in matchups:
         side = "top" if is_top else "bottom"
-        provider = factory(pitcher, batter, is_top, False)
+        runners, outs = 0, 0
         for _ in range(pas_per_matchup):
+            provider = factory(pitcher, batter, is_top, runners != 0)
             balls = strikes = 0
+            pa_outcome: str | None = None
             while True:
                 result = rng.choices(
                     RESULT_CLASSES,
@@ -157,7 +164,14 @@ def simulate_rates(
                         ],
                     )[0]
                     event_counts[side][event] += 1
+                    pa_outcome = event
+                else:
+                    pa_outcome = transition.terminal
                 break
+            base_out = engine.sample(pa_outcome, runners, outs)
+            runners, outs = base_out.runners_after, base_out.outs_after
+            if outs >= 3:
+                runners, outs = 0, 0
 
     def normalize(counts: Counter) -> dict[str, float]:
         total = sum(counts.values())

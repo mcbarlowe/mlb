@@ -353,3 +353,20 @@ Mitigations, in order:
   Remaining levers: totals +0.6 runs/game (PA->runs layer), team bullpen
   identity, and P(type | count, runners) pitch mixes now that state is
   trustworthy.
+- Three-lever pass (shipped): per-count calibration multipliers (the
+  count-machine kernel is matched per count and side, measured inside a
+  rolling base-out context so the windup/stretch mixture matches the game
+  loop), stretch-aware pitch mixes (P(type | count, runners-on) plus
+  stretch location pools; providers keyed (pitcher, batter, side,
+  stretch)), and synthetic per-team bullpen arms (reliever rows relabeled
+  to -team_id through the same mix/profile builders; majority hand in
+  models/sim/team_bullpens.json). 120-game 2025 validation, production
+  state-feature models: **raw win Brier 0.2450 / log loss 0.6833 — first
+  strict win over the constant league-home baseline (0.2468/0.6868)** —
+  and pick accuracy 60.0% vs 55.8% always-home; mean p(home) 0.544.
+  Known gaps: (1) totals 9.89 vs 8.71 — per-pitch rates are matched, so
+  the residual sits in event-given-contact coupled to base state and the
+  transition sampler; (2) the anchored win-calibration shrink (slope
+  0.164 from a noisy 2024 fit) now over-shrinks a genuinely informative
+  spread — raw beats calibrated on 2025; refit on a larger 2024 sample or
+  trust raw once slope estimates stabilize above ~0.8.
