@@ -654,6 +654,416 @@ def test_bluesky_publisher_sends_explicit_aspect_ratio(tmp_path: Path):
     assert aspect.width == 2400
     assert aspect.height == 1350
 
+def test_x_publisher_uses_media_upload_and_reply_flow(tmp_path: Path):
+    import json
+    from typing import Any, cast
+
+    from PIL import Image as PILImage
+
+    from src.live.publisher import XPublisher
+
+    class StubResponse:
+        def __init__(self, payload: dict, status_code: int = 200) -> None:
+            self._payload = payload
+            self.status_code = status_code
+            self.text = json.dumps(payload)
+
+        def json(self) -> dict:
+            return self._payload
+
+    class StubSession:
+        def __init__(self) -> None:
+            self.requests: list[dict] = []
+            self._media_uploads = 0
+            self._tweet_posts = 0
+
+        def request(
+            self,
+            method: str,
+            url: str,
+            headers: dict | None = None,
+            timeout: float | None = None,
+            **kwargs,
+        ) -> StubResponse:
+            self.requests.append(
+                {
+                    "method": method,
+                    "url": url,
+                    "headers": headers,
+                    "timeout": timeout,
+                    **kwargs,
+                }
+            )
+            if url.endswith("/2/media/upload"):
+                self._media_uploads += 1
+                return StubResponse({"data": {"id": f"media-{self._media_uploads}"}})
+            if url.endswith("/2/tweets"):
+                self._tweet_posts += 1
+                post_id = "tweet-1" if self._tweet_posts == 1 else "reply-1"
+                return StubResponse({"data": {"id": post_id}})
+            raise AssertionError(f"unexpected request url {url}")
+
+    card = tmp_path / "card.jpg"
+    PILImage.new("RGB", (2400, 1350), (20, 30, 40)).save(card, format="JPEG")
+
+    publisher = XPublisher.__new__(XPublisher)
+    publisher._api_base_url = "https://api.x.com"
+    publisher._access_token = "access-token"
+    publisher._refresh_token = None
+    publisher._client_id = "client-id"
+    publisher._auth_mode = "oauth2"
+    stub_session = StubSession()
+    publisher._session = cast(Any, stub_session)
+
+    post_id = publisher.publish(PredictionPost(text="next pitch", image_path=card))
+    reply_id = publisher.publish_result(
+        ResultPost(text="pitch result", image_path=card, reply_to=post_id)
+    )
+
+    assert post_id == "tweet-1"
+    assert reply_id == "reply-1"
+
+    create_requests = [
+        request for request in stub_session.requests if request["url"].endswith("/2/tweets")
+    ]
+    assert create_requests[0]["headers"]["Authorization"] == "Bearer access-token"
+    assert create_requests[0]["json"]["media"]["media_ids"] == ["media-1"]
+    assert create_requests[1]["json"]["reply"]["in_reply_to_tweet_id"] == "tweet-1"
+
+
+def test_x_publisher_publish_images_truncates_text_and_enforces_limit(
+    tmp_path: Path,
+):
+    import json
+    from typing import Any, cast
+
+    import pytest
+    from PIL import Image as PILImage
+
+    from src.live.publisher import X_MAX_POST_CHARS, XPublisher
+
+    class StubResponse:
+        def __init__(self, payload: dict, status_code: int = 200) -> None:
+            self._payload = payload
+            self.status_code = status_code
+            self.text = json.dumps(payload)
+
+        def json(self) -> dict:
+            return self._payload
+
+    class StubSession:
+        def __init__(self) -> None:
+            self.requests: list[dict] = []
+            self._media_uploads = 0
+
+        def request(
+            self,
+            method: str,
+            url: str,
+            headers: dict | None = None,
+            timeout: float | None = None,
+            **kwargs,
+        ) -> StubResponse:
+            self.requests.append(
+                {
+                    "method": method,
+                    "url": url,
+                    "headers": headers,
+                    "timeout": timeout,
+                    **kwargs,
+                }
+            )
+            if url.endswith("/2/media/upload"):
+                self._media_uploads += 1
+                return StubResponse({"data": {"id": f"media-{self._media_uploads}"}})
+            if url.endswith("/2/tweets"):
+                return StubResponse({"data": {"id": "tweet-1"}})
+            raise AssertionError(f"unexpected request url {url}")
+
+    cards: list[Path] = []
+    for idx in range(5):
+        card = tmp_path / f"card_{idx}.jpg"
+        PILImage.new("RGB", (2400, 1350), (20 + idx, 30, 40)).save(card, format="JPEG")
+        cards.append(card)
+
+    publisher = XPublisher.__new__(XPublisher)
+    publisher._api_base_url = "https://api.x.com"
+    publisher._auth_mode = "oauth2"
+    publisher._access_token = "access-token"
+    publisher._refresh_token = None
+    publisher._client_id = "client-id"
+    publisher._client_secret = "client-secret"
+    stub_session = StubSession()
+    publisher._session = cast(Any, stub_session)
+
+    post_id = publisher.publish_images("x" * (X_MAX_POST_CHARS + 25), cards[:2])
+    assert post_id == "tweet-1"
+
+    create_request = next(
+        request for request in stub_session.requests if request["url"].endswith("/2/tweets")
+    )
+    assert len(create_request["json"]["text"]) == X_MAX_POST_CHARS
+    assert create_request["json"]["media"]["media_ids"] == ["media-1", "media-2"]
+
+    with pytest.raises(RuntimeError, match="at most 4 images"):
+        publisher.publish_images("board", cards)
+
+
+def test_x_publisher_refreshes_after_401(tmp_path: Path):
+    import json
+    from typing import Any, cast
+
+    from PIL import Image as PILImage
+
+    from src.live.publisher import XPublisher
+
+    class StubResponse:
+        def __init__(self, payload: dict, status_code: int = 200) -> None:
+            self._payload = payload
+            self.status_code = status_code
+            self.text = json.dumps(payload)
+
+        def json(self) -> dict:
+            return self._payload
+
+    class StubSession:
+        def __init__(self) -> None:
+            self.requests: list[dict] = []
+            self.refreshed = False
+
+        def request(
+            self,
+            method: str,
+            url: str,
+            headers: dict | None = None,
+            timeout: float | None = None,
+            **kwargs,
+        ) -> StubResponse:
+            self.requests.append(
+                {
+                    "method": method,
+                    "url": url,
+                    "headers": headers,
+                    "timeout": timeout,
+                    **kwargs,
+                }
+            )
+            if url.endswith("/2/media/upload"):
+                return StubResponse({"data": {"id": "media-1"}})
+            if url.endswith("/2/tweets"):
+                if not self.refreshed:
+                    return StubResponse({"title": "Unauthorized"}, status_code=401)
+                assert headers is not None
+                assert headers["Authorization"] == "Bearer refreshed-token"
+                return StubResponse({"data": {"id": "tweet-1"}})
+            raise AssertionError(f"unexpected request url {url}")
+
+        def post(
+            self,
+            url: str,
+            auth=None,
+            data: dict | None = None,
+            timeout: float | None = None,
+        ) -> StubResponse:
+            self.refreshed = True
+            return StubResponse(
+                {
+                    "access_token": "refreshed-token",
+                    "refresh_token": "refreshed-refresh-token",
+                }
+            )
+
+    card = tmp_path / "card.jpg"
+    PILImage.new("RGB", (2400, 1350), (20, 30, 40)).save(card, format="JPEG")
+
+    publisher = XPublisher.__new__(XPublisher)
+    publisher._auth_mode = "oauth2"
+    publisher._api_base_url = "https://api.x.com"
+    publisher._access_token = "expired-token"
+    publisher._refresh_token = "refresh-token"
+    publisher._client_id = "client-id"
+    publisher._client_secret = "client-secret"
+    stub_session = StubSession()
+    publisher._session = cast(Any, stub_session)
+
+    post_id = publisher.publish(PredictionPost(text="next pitch", image_path=card))
+
+    assert post_id == "tweet-1"
+    assert publisher._access_token == "refreshed-token"
+    assert publisher._refresh_token == "refreshed-refresh-token"
+
+def test_x_publisher_oauth1_signs_requests(tmp_path: Path):
+    import json
+    from typing import Any, cast
+
+    from PIL import Image as PILImage
+
+    from src.live.publisher import XPublisher
+
+    class StubResponse:
+        def __init__(self, payload: dict, status_code: int = 200) -> None:
+            self._payload = payload
+            self.status_code = status_code
+            self.text = json.dumps(payload)
+
+        def json(self) -> dict:
+            return self._payload
+
+    class StubSession:
+        def __init__(self) -> None:
+            self.requests: list[dict] = []
+            self._media_uploads = 0
+
+        def request(
+            self,
+            method: str,
+            url: str,
+            headers: dict | None = None,
+            timeout: float | None = None,
+            **kwargs,
+        ) -> StubResponse:
+            self.requests.append(
+                {
+                    "method": method,
+                    "url": url,
+                    "headers": headers,
+                    "timeout": timeout,
+                    **kwargs,
+                }
+            )
+            if url.endswith("/2/media/upload"):
+                self._media_uploads += 1
+                return StubResponse({"data": {"id": f"media-{self._media_uploads}"}})
+            if url.endswith("/2/tweets"):
+                return StubResponse({"data": {"id": "tweet-1"}})
+            raise AssertionError(f"unexpected request url {url}")
+
+    card = tmp_path / "card.jpg"
+    PILImage.new("RGB", (2400, 1350), (20, 30, 40)).save(card, format="JPEG")
+
+    publisher = XPublisher.__new__(XPublisher)
+    publisher._auth_mode = "oauth1"
+    publisher._api_base_url = "https://api.x.com"
+    publisher._api_key = "api-key"
+    publisher._api_key_secret = "api-key-secret"
+    publisher._access_token = "oauth1-access-token"
+    publisher._access_token_secret = "oauth1-access-token-secret"
+    stub_session = StubSession()
+    publisher._session = cast(Any, stub_session)
+
+    post_id = publisher.publish(PredictionPost(text="next pitch", image_path=card))
+
+    assert post_id == "tweet-1"
+    auth_header = stub_session.requests[0]["headers"]["Authorization"]
+    assert auth_header.startswith("OAuth ")
+    assert "oauth_consumer_key=" in auth_header
+    assert "oauth_token=" in auth_header
+
+def test_x_env_alias_prefers_oauth2_user_token(monkeypatch):
+    from src.live import publisher as publisher_module
+
+    monkeypatch.delenv("X_API_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("X_API_OAUTH2_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("X_ACCESS_TOKEN", raising=False)
+    monkeypatch.setenv("X_ACCESS_TOKEN", "app-only-token")
+    monkeypatch.setenv("X_API_OAUTH2_ACCESS_TOKEN", "user-context-token")
+
+    assert publisher_module._require_x_env("access_token") == "user-context-token"
+
+
+
+
+def test_multi_publisher_round_trips_reply_targets(tmp_path: Path):
+    import json
+
+    from src.live.publisher import MultiPublisher
+
+    class StubPublisher:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.reply_targets: list[str] = []
+
+        def publish(self, post: PredictionPost) -> str:
+            return f"{self.name}-post"
+
+        def publish_images(self, text: str, image_paths: list[Path]) -> str:
+            return f"{self.name}-board"
+
+        def publish_result(self, post: ResultPost) -> str:
+            self.reply_targets.append(post.reply_to)
+            return f"{self.name}-reply"
+
+    card = tmp_path / "card.png"
+    card.write_bytes(b"png")
+
+    bluesky = StubPublisher("bluesky")
+    x = StubPublisher("x")
+    publisher = MultiPublisher({"bluesky": bluesky, "x": x})
+
+    post_id = publisher.publish(PredictionPost(text="next pitch", image_path=card))
+    assert json.loads(post_id[len("multi:") :]) == {
+        "bluesky": "bluesky-post",
+        "x": "x-post",
+    }
+
+    reply_id = publisher.publish_result(
+        ResultPost(text="result", image_path=card, reply_to=post_id)
+    )
+    assert json.loads(reply_id[len("multi:") :]) == {
+        "bluesky": "bluesky-reply",
+        "x": "x-reply",
+    }
+    assert bluesky.reply_targets == ["bluesky-post"]
+    assert x.reply_targets == ["x-post"]
+
+
+def test_multi_publisher_returns_partial_mapping_when_one_provider_fails(
+    tmp_path: Path,
+):
+    import json
+
+    from src.live.publisher import MultiPublisher
+
+    class StubPublisher:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.reply_targets: list[str] = []
+
+        def publish(self, post: PredictionPost) -> str:
+            return f"{self.name}-post"
+
+        def publish_images(self, text: str, image_paths: list[Path]) -> str:
+            return f"{self.name}-board"
+
+        def publish_result(self, post: ResultPost) -> str:
+            self.reply_targets.append(post.reply_to)
+            return f"{self.name}-reply"
+
+    class BrokenPublisher:
+        def publish(self, post: PredictionPost) -> str:
+            raise RuntimeError("x publish failed")
+
+        def publish_images(self, text: str, image_paths: list[Path]) -> str:
+            raise RuntimeError("x board failed")
+
+        def publish_result(self, post: ResultPost) -> str:
+            raise RuntimeError("x reply failed")
+
+    card = tmp_path / "card.png"
+    card.write_bytes(b"png")
+
+    bluesky = StubPublisher("bluesky")
+    publisher = MultiPublisher({"bluesky": bluesky, "x": BrokenPublisher()})
+
+    post_id = publisher.publish(PredictionPost(text="next pitch", image_path=card))
+    assert json.loads(post_id[len("multi:") :]) == {"bluesky": "bluesky-post"}
+
+    reply_id = publisher.publish_result(
+        ResultPost(text="result", image_path=card, reply_to=post_id)
+    )
+    assert json.loads(reply_id[len("multi:") :]) == {"bluesky": "bluesky-reply"}
+    assert bluesky.reply_targets == ["bluesky-post"]
+
 
 def test_html_renderer_works_inside_asyncio_loop(tmp_path: Path):
     import asyncio

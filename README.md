@@ -359,15 +359,18 @@ The regression tests use `example_json_files/example_live_feed.json`; they do no
 
 ### Live Next-Pitch Prediction
 
-Predict the next pitch of in-progress games and publish pitch cards to Bluesky:
+Predict the next pitch of in-progress games and publish pitch cards to Bluesky, X, or both:
 
 ```bash
 # Dry run for today's schedule: waits for first pitch, polls live games,
 # saves cards to output/live_cards/<game_pk>/ without posting
 uv run python scripts/run_live_pipeline.py
 
-# Actually post to Bluesky (requires credentials, see below)
-uv run python scripts/run_live_pipeline.py --post
+# Post to X
+uv run python scripts/run_live_pipeline.py --post --post-provider x
+
+# Cross-post to Bluesky and X
+uv run python scripts/run_live_pipeline.py --post --post-provider both
 
 # Follow one game only
 uv run python scripts/run_live_pipeline.py --game-pk 823514
@@ -382,7 +385,29 @@ How it works:
 
 Model defaults are the trained pair in `models/attention_full/run_20260119_124719` (pitch type) and `models/pitch_type_location_20260121_003206` (location); override with `--pitch-type-model` / `--location-model` when newer models finish training.
 
-Bluesky posting uses these environment variables: `BLUESKY_HANDLE` (e.g. `pitchbot.bsky.social`) and `BLUESKY_APP_PASSWORD` (create one at bsky.app -> Settings -> App Passwords; never use the main account password). Set `BLUESKY_PDS_URL` only for a self-hosted PDS. Without `--post`, the pipeline runs in dry-run mode and only saves card images.
+Bluesky posting uses `BLUESKY_HANDLE` (e.g. `pitchbot.bsky.social`) and `BLUESKY_APP_PASSWORD` (create one at bsky.app -> Settings -> App Passwords; never use the main account password). X posting accepts either OAuth 1.0a user-context credentials (`X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`) or OAuth 2.0 user-context credentials (`X_API_CLIENT_ID`, `X_API_CLIENT_SECRET`, plus `X_API_ACCESS_TOKEN` or `X_API_OAUTH2_ACCESS_TOKEN`; add `X_API_REFRESH_TOKEN` or `X_API_OAUTH2_REFRESH_TOKEN` if you want unattended posting to survive token expiry). Without `--post`, the pipeline runs in dry-run mode and only saves card images.
+
+### Daily Game Simulation Board
+
+Generate one morning board image covering every preview game on the slate:
+
+```bash
+# Dry run: build the board image and write probable-starter state locally
+uv run python scripts/run_daily_sim_slate.py
+
+# Cross-post the board to Bluesky and X, then keep polling preview games for probable-starter changes
+uv run python scripts/run_daily_sim_slate.py --post --post-provider both --watch-starters
+```
+
+How it works:
+
+1. Resolves the outcome-model artifacts with `--outcome-run-dir auto`: shared MLflow production runs first when `MLFLOW_TRACKING_URI` is set, then `models/outcome/latest_run.txt`, then the newest local `models/outcome/run_*` directory.
+2. Fetches that day's preview games from the MLB schedule with hydrated probable starters.
+3. Simulates each preview game, renders one combined board to `output/sim_cards/daily/daily_sim_<date>.jpg`, and stores the current probable-starter snapshot in `output/sim_state/daily_sim_<date>.json`.
+4. With `--watch-starters`, keeps polling preview games and posts a fresh one-game sim card whenever a probable starter changes.
+
+`scripts/run_daily_sim_slate.sh` is the launchd-friendly wrapper; it mirrors the existing live-pipeline helper and reads `BARLOWE_DAILY_SIM_*` environment variables for posting, posting provider, polling cadence, state/output directories, and optional date overrides. The wrapper defaults to `BARLOWE_DAILY_SIM_POST_PROVIDER=both` so scheduled daily game-winner boards post to Bluesky and X unless overridden. `scripts/run_daily_random_live_game.sh` uses the same provider mechanism for `BARLOWE_RANDOM_GAME_*`.
+
 
 ## Performance Notes
 

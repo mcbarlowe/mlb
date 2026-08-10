@@ -8,7 +8,7 @@ RUN_PATTERN="scripts/run_daily_sim_slate.py"
 
 POST_ENABLED="${BARLOWE_DAILY_SIM_POST:-1}"
 WATCH_STARTERS="${BARLOWE_DAILY_SIM_WATCH_STARTERS:-1}"
-POST_PROVIDER="${BARLOWE_DAILY_SIM_POST_PROVIDER:-bluesky}"
+POST_PROVIDER="${BARLOWE_DAILY_SIM_POST_PROVIDER:-both}"
 ALL_GAMES="${BARLOWE_DAILY_SIM_ALL_GAMES:-0}"
 TARGET_DATE="${BARLOWE_DAILY_SIM_DATE:-}"
 SIMS="${BARLOWE_DAILY_SIM_SIMS:-2000}"
@@ -18,6 +18,38 @@ OUTPUT_DIR="${BARLOWE_DAILY_SIM_OUTPUT_DIR:-output/sim_cards/daily}"
 STATE_DIR="${BARLOWE_DAILY_SIM_STATE_DIR:-output/sim_state}"
 
 cd "$REPO_DIR"
+load_from_zsh() {
+  local name="$1"
+  if [[ -n "${!name:-}" ]] || ! command -v zsh >/dev/null; then
+    return
+  fi
+  local value
+  value="$(zsh -ic "printenv $name" 2>/dev/null || true)"
+  if [[ -n "$value" ]]; then
+    export "$name=$value"
+  fi
+}
+
+if [[ "$POST_ENABLED" == "1" ]]; then
+  for name in \
+    BLUESKY_HANDLE \
+    BLUESKY_APP_PASSWORD \
+    BLUESKY_PDS_URL \
+    X_API_KEY \
+    X_API_KEY_SECRET \
+    X_ACCESS_TOKEN \
+    X_ACCESS_TOKEN_SECRET \
+    X_API_CLIENT_ID \
+    X_API_CLIENT_SECRET \
+    X_API_OAUTH2_ACCESS_TOKEN \
+    X_API_OAUTH2_REFRESH_TOKEN \
+    X_API_ACCESS_TOKEN \
+    X_API_REFRESH_TOKEN \
+    MLFLOW_TRACKING_URI; do
+    load_from_zsh "$name"
+  done
+fi
+
 
 if [[ "${1:-}" == "--validate" ]]; then
   echo "repo: $REPO_DIR"
@@ -39,6 +71,7 @@ if [[ "${1:-}" == "--validate" ]]; then
   echo "x api client secret present: ${X_API_CLIENT_SECRET:+yes}"
   echo "x api key present: ${X_API_KEY:+yes}"
   echo "x api key secret present: ${X_API_KEY_SECRET:+yes}"
+  echo "x access token present: ${X_ACCESS_TOKEN:+yes}"
   echo "x api access token present: ${X_API_ACCESS_TOKEN:+yes}"
   echo "x api oauth2 access token present: ${X_API_OAUTH2_ACCESS_TOKEN:+yes}"
   echo "x api refresh token present: ${X_API_REFRESH_TOKEN:+yes}"

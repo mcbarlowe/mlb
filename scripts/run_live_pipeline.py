@@ -2,15 +2,15 @@
 
 Waits for game start using the MLB schedule, polls live feeds while
 games are in progress, predicts the next pitch before it happens,
-renders a pitch card, and posts it to Bluesky (or saves locally in
-dry-run mode).
+renders a pitch card, and posts it to the configured social platform
+(or saves locally in dry-run mode).
 
 Usage:
     # Monitor all of today's games (dry run, no posts)
     uv run python scripts/run_live_pipeline.py
 
-    # Monitor a specific date and actually post to Bluesky
-    uv run python scripts/run_live_pipeline.py --date 2026-08-09 --post
+    # Monitor a specific date and post to X
+    uv run python scripts/run_live_pipeline.py --date 2026-08-09 --post --post-provider x
 
     # Follow a single game
     uv run python scripts/run_live_pipeline.py --game-pk 823490
@@ -39,7 +39,7 @@ from src.live.pipeline import (
     run_random_live_game,
 )
 from src.live.predictor import LiveNextPitchPredictor
-from src.live.publisher import BlueskyPublisher, DryRunPublisher
+from src.live.publisher import POST_PROVIDER_CHOICES, build_publisher
 
 DEFAULT_PITCH_TYPE_MODEL = "models/attention_full/run_20260119_124719"
 DEFAULT_LOCATION_MODEL = "models/pitch_type_location_20260121_003206"
@@ -107,7 +107,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--post",
         action="store_true",
-        help="Actually post to Bluesky (default: dry run that saves cards)",
+        help="Actually post to the selected provider (default: dry run that saves cards)",
+    )
+    parser.add_argument(
+        "--post-provider",
+        type=str,
+        choices=POST_PROVIDER_CHOICES,
+        default="bluesky",
+        help="Posting backend to use when --post is set (default: bluesky)",
     )
     parser.add_argument(
         "--post-cadence",
@@ -178,7 +185,7 @@ def main() -> None:
                 "Outcome models not found locally or in shared MLflow; rendering without outcome-odds strip"
             )
 
-    publisher = BlueskyPublisher() if args.post else DryRunPublisher()
+    publisher = build_publisher(post=args.post, provider=args.post_provider)
     service = LiveGamePredictionService(
         predictor=predictor,
         publisher=publisher,
