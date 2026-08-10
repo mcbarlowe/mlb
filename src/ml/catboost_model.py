@@ -504,3 +504,29 @@ class PitchXGBoostModel(PitchCatBoostModel):
         px_preds = self.px_model.predict(X_enc)
         pz_preds = self.pz_model.predict(X_enc)
         return type_probs, type_preds, px_preds, pz_preds
+
+    def get_feature_importance(self, top_n: int = 20) -> dict:
+        result = {}
+
+        if self.type_model is not None and hasattr(self.type_model, "feature_importances_"):
+            importance = np.asarray(self.type_model.feature_importances_)
+            indices = np.argsort(importance)[::-1][:top_n]
+            result["pitch_type"] = [
+                (self._encoded_columns[i], float(importance[i])) for i in indices
+            ]
+
+        if self.px_model is not None and hasattr(self.px_model, "feature_importances_"):
+            importance = np.asarray(self.px_model.feature_importances_)
+            indices = np.argsort(importance)[::-1][:top_n]
+            result["px"] = [
+                (self._encoded_columns[i], float(importance[i])) for i in indices
+            ]
+
+        if self.pz_model is not None and hasattr(self.pz_model, "feature_importances_"):
+            importance = np.asarray(self.pz_model.feature_importances_)
+            indices = np.argsort(importance)[::-1][:top_n]
+            result["pz"] = [
+                (self._encoded_columns[i], float(importance[i])) for i in indices
+            ]
+
+        return result
