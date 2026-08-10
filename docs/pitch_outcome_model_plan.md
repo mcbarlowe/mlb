@@ -337,3 +337,19 @@ Mitigations, in order:
   retrain, bullpen identity). Slate/single-game cards and captions now
   show calibrated p(home) (raw kept as `home_win_probability_raw`). Refit
   after every model/mix/profile change, after `scripts/calibrate_sim.py`.
+- Base/out state repair + reinstated state features (shipped): all 14.2M
+  `mlb.pitches` rows updated in place (11 min, `fix_pitches_base_state.py`)
+  with reconstructed at-bat-start state; verification: outs split
+  4.88/4.74/4.62M across 0/1/2, runner rates 33.9/17.6/9.3%, and the leak
+  signature is gone (runner_on_first ~flat across event types, was 36% vs
+  14%). Retrain with `outs`+`runner_on_*` reinstated: Stage A test 0.9706
+  (from 0.9724), Stage B test 0.9508 (from 0.9514) — production pair
+  stage A `c5445b3a95c545668c6bebbe88f60e30`, stage B
+  `10f7d2c2bfaf4348b39412a9f844611f`. The anchored win-calibration slope
+  jumped 0.05 -> 0.906 on the 2024 fit sample (the matchup spread is now
+  mostly real signal, not noise) and 2025 pick accuracy reached 55.0% vs
+  55.8% always-home; calibrated Brier 0.2498 / log loss 0.6930 vs the
+  constant league-home 0.2468/0.6868 on a home-heavy 120-game sample.
+  Remaining levers: totals +0.6 runs/game (PA->runs layer), team bullpen
+  identity, and P(type | count, runners) pitch mixes now that state is
+  trustworthy.
