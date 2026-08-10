@@ -84,12 +84,14 @@ CATEGORICAL_FEATURES = [
 NUMERIC_FEATURES = [
     "balls_before",
     "strikes_before",
-    # NOTE: `outs` and `runner_on_*` are deliberately excluded. The current
-    # pitches table carries a dead `outs` column (always 0) and mover-only
-    # runner flags, which LEAK the outcome (a runner "on" often means someone
-    # moved during this play — hits set the flags far more than outs).
-    # Reinstate them only after the DB reload with reconstructed state
-    # (src/data/base_state.py) and a retrain.
+    # State features reinstated 2026-08-09: the pitches table was repaired
+    # in place (scripts/fix_pitches_base_state.py) with true at-bat start
+    # outs/runner state reconstructed from raw feeds. The legacy columns
+    # were dead (`outs` always 0) and leaky (mover-only runner flags).
+    "outs",
+    "runner_on_first",
+    "runner_on_second",
+    "runner_on_third",
     "inning",
     "is_top_half",
     "score_diff",
