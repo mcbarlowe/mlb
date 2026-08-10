@@ -24,7 +24,9 @@ if TYPE_CHECKING:
     import torch
 
 PITCH_CHAMPION_ALIAS = "champion"
-PITCH_MODEL_COLLECTION = "pitch_prediction_models"
+# Predicts the thrown pitch (type/location); pitch OUTCOME models
+# (mlb-pitch-result-stage-a / mlb-in-play-event-stage-b) live in src/outcome.
+PITCH_MODEL_COLLECTION = "pitch_type_prediction_models"
 
 
 @dataclass(frozen=True)
@@ -40,8 +42,10 @@ PITCH_TYPE_SPEC = PitchModelSpec(
     registered_model_name="mlb-pitch-type-lstm-attention",
     logged_model_name="pitch_type_model",
     description=(
-        "LSTM+attention pitch prediction model over at-bat sequences: "
-        "per-pitch type logits plus an MDN location head. Load with "
+        "Pitch type prediction model (LSTM+attention over at-bat sequences): "
+        "per-pitch type logits plus an MDN location head. Predicts what the "
+        "pitcher throws, not the pitch outcome (outcome models: "
+        "mlb-pitch-result-stage-a / mlb-in-play-event-stage-b). Load with "
         "mlflow.pytorch.load_model from this repo (requires src.ml on "
         "sys.path and MLFLOW_ALLOW_PICKLE_DESERIALIZATION=true) and "
         "featurize inputs with the PitchFeatureEngine state in "
@@ -54,11 +58,14 @@ PITCH_LOCATION_SPEC = PitchModelSpec(
     registered_model_name="mlb-pitch-type-conditioned-location",
     logged_model_name="pitch_location_model",
     description=(
-        "Pitch-type-conditioned MDN location model: bivariate Gaussian "
-        "mixture over plate coordinates with one head per pitch type. Load "
-        "with mlflow.pytorch.load_model from this repo (requires src.ml on "
-        "sys.path and MLFLOW_ALLOW_PICKLE_DESERIALIZATION=true); the "
-        "feature contract is feature_columns in extra_files/config.json."
+        "Pitch location prediction model (MDN conditioned on pitch type): "
+        "bivariate Gaussian mixture over plate coordinates with one head per "
+        "pitch type. Predicts where the pitcher throws, not the pitch "
+        "outcome (outcome models: mlb-pitch-result-stage-a / "
+        "mlb-in-play-event-stage-b). Load with mlflow.pytorch.load_model "
+        "from this repo (requires src.ml on sys.path and "
+        "MLFLOW_ALLOW_PICKLE_DESERIALIZATION=true); the feature contract is "
+        "feature_columns in extra_files/config.json."
     ),
 )
 
