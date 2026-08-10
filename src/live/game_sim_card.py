@@ -232,7 +232,7 @@ def build_game_sim_card_html(data: GameSimCardData) -> str:
       <div class="away-fill" style="width:{away_p * 100:.2f}%"></div>
       <div class="home-fill" style="width:{home_p * 100:.2f}%"></div>
     </div>
-    <div class="winprob-caption"><span>WIN PROBABILITY</span><span>MODEL CHAIN &middot; PITCH &rarr; PA &rarr; GAME</span></div>
+    <div class="winprob-caption"><span>WIN PROBABILITY</span><span>TEAM STRENGTH &middot; FORM &middot; STARTERS</span></div>
   </div>
 
   <div class="body">
@@ -257,7 +257,7 @@ def build_game_sim_card_html(data: GameSimCardData) -> str:
 
   <div class="footer">
     {_brand_footer_html()}
-    <span class="footer-note">MONTE CARLO FROM LIVE PITCH &middot; OUTCOME MODELS</span>
+    <span class="footer-note">WIN ODDS + MONTE CARLO SCORE PROJECTION</span>
   </div>
 </div></body></html>"""
 

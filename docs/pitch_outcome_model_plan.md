@@ -14,7 +14,8 @@ graph LR
     B --> C[Pitch outcome model<br/>NEW - Stage A]
     C --> D[In-play event model<br/>NEW - Stage B]
     D --> E[Base-out state engine<br/>NEW - empirical tables]
-    E --> F[Game simulator<br/>Monte Carlo win probability]
+    E --> F[Game simulator<br/>Monte Carlo score distributions]
+    G[Pregame team-strength model<br/>Elo + form + starters] --> H[Published win probability]
 ```
 
 - `P(pitch_type | sequence)` — exists (`src/ml/model.py`, LSTM+Attention)
@@ -166,8 +167,9 @@ since April 2024.
 2. **Base-out engine**: empirical advancement tables built from our own pitches
    data (event × runners × outs → new state + runs). RE288-style, no model.
 3. **Game simulator**: half-inning loop over lineups; v1 pitcher changes by
-   simple pitch-count rules. Win probability = Monte Carlo (N≈1000) from any
-   game state — which plugs directly into the live bot's `LiveSnapshot`.
+   simple pitch-count rules. Monte Carlo produces projected scores and totals.
+   Published pregame win probability comes from the separately validated
+   team-strength model (`src/sim/team_strength.py`).
 
 ### Key engineering risk: simulation speed
 
@@ -334,9 +336,9 @@ Mitigations, in order:
   current matchup spread is noise-dominated at game level, so calibrated
   output ~= league anchor. That is the honest state; the slope will rise
   when the underlying models gain real team/pitcher separation (DB reload
-  retrain, bullpen identity). Slate/single-game cards and captions now
-  show calibrated p(home) (raw kept as `home_win_probability_raw`). Refit
-  after every model/mix/profile change, after `scripts/calibrate_sim.py`.
+  retrain, bullpen identity). The calibration remains available for simulator
+  diagnostics (`home_win_probability_sim`) but is no longer the published
+  card probability after the team-strength model promotion below.
 - Base/out state repair + reinstated state features (shipped): all 14.2M
   `mlb.pitches` rows updated in place (11 min, `fix_pitches_base_state.py`)
   with reconstructed at-bat-start state; verification: outs split
@@ -370,6 +372,18 @@ Mitigations, in order:
   0.164 from a noisy 2024 fit) now over-shrinks a genuinely informative
   spread — raw beats calibrated on 2025; refit on a larger 2024 sample or
   trust raw once slope estimates stabilize above ~0.8.
+- Team-strength win model (shipped): a chronological pregame model combines
+  slowly updated team Elo, recent runs scored/allowed, and Bayesian-shrunk
+  starting-pitcher FIP/length. Every row is emitted before its game's result
+  updates state; coefficients train only on seasons before the prediction
+  season. Full untouched 2025 holdout (2,430 games; train 2021-2024): Brier
+  **0.2418** vs **0.2482**, log loss **0.6763** vs **0.6895**, pick accuracy
+  **56.5%** vs **54.3%** for the fixed p(home)=0.543 league baseline. All
+  promotion gates pass. `scripts/evaluate_team_strength.py` reproduces the
+  gate. Slate cards now publish this probability; pitch/outcome simulation
+  still supplies scores and totals. The raw and calibrated simulation win
+  shares remain diagnostic fields (`home_win_probability_raw` and
+  `home_win_probability_sim`).
 - PENDING (owner-gated): retrain the pitch-type LSTM + location MDN on the
   repaired base/out data. They consume `outs`/runner features and were
   trained pre-repair (`outs` constant-0 -> untrained input weights fed real

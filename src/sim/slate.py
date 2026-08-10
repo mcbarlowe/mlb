@@ -32,6 +32,7 @@ from src.sim.game import (
 from src.sim.lineups import lineup_from_feed
 from src.sim.matchup import MatchupProviderFactory
 from src.sim.pitch_mix import PitchMixProfiles
+from src.sim.team_strength import TeamStrengthPredictor
 
 LIVEFEED_ROOT = Path("data/raw/livefeeds")
 STATS_API = "https://statsapi.mlb.com/api/v1"
@@ -429,16 +430,24 @@ def simulate_slate_game(
     *,
     season: int,
     n_sims: int,
+    win_predictor: TeamStrengthPredictor,
 ) -> SlatePrediction:
     lineups, starters = build_projected_lineups(game, season=season)
     results = simulator.simulate_many(lineups["away"], lineups["home"], n_sims)
     stats = summarize(results)
+    sim_probability = stats["home_win_probability"]
     calibration = load_win_calibration()
-    stats["home_win_probability_raw"] = stats["home_win_probability"]
-    if calibration is not None:
-        stats["home_win_probability"] = calibration.apply(
-            stats["home_win_probability"]
-        )
+    stats["home_win_probability_raw"] = sim_probability
+    stats["home_win_probability_sim"] = (
+        calibration.apply(sim_probability) if calibration is not None else sim_probability
+    )
+    stats["home_win_probability"] = win_predictor.predict_home_probability(
+        season=season,
+        away_team_id=game.away_team_id,
+        home_team_id=game.home_team_id,
+        away_starter_id=lineups["away"].starter.player_id,
+        home_starter_id=lineups["home"].starter.player_id,
+    )
     return SlatePrediction(
         game=game,
         results=results,
@@ -535,7 +544,7 @@ def build_update_caption(
     )
     text = (
         f"Updated {prediction.game.label}: {'; '.join(change_bits)}. "
-        f"New sim: {favorite} {favorite_prob:.0%} to win. "
+        f"New model: {favorite} {favorite_prob:.0%} to win. "
         f"Projected score {prediction.game.away_abbrev} {prediction.stats['mean_away_runs']:.1f} - "
         f"{prediction.game.home_abbrev} {prediction.stats['mean_home_runs']:.1f}."
     )

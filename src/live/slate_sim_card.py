@@ -269,7 +269,7 @@ def build_slate_sim_card_html(data: SlateSimBoardData) -> str:
   <div class="grid">{rows_html}</div>
   <div class="footer">
     {_brand_footer_html()}
-    <span class="footer-note">Projected scores and win odds from the current production model chain</span>
+    <span class="footer-note">Team-strength win odds · pitch-model score projections</span>
   </div>
 </div></body></html>"""
 

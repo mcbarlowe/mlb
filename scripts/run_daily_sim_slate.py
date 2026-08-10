@@ -35,6 +35,10 @@ from src.sim.slate import (
     simulate_slate_game,
     snapshot_state,
 )
+from src.sim.team_strength import (
+    TeamStrengthPredictor,
+    build_live_strength_predictor,
+)
 
 MAX_ROWS_PER_BOARD = 4
 
@@ -179,6 +183,7 @@ def _simulate_preview_games(
     preview_games: list[SlateGame],
     *,
     simulator,
+    win_predictor: TeamStrengthPredictor,
     season: int,
     sims: int,
 ) -> tuple[list[SlatePrediction], list[tuple[SlateGame, str]]]:
@@ -191,6 +196,7 @@ def _simulate_preview_games(
                 simulator,
                 season=season,
                 n_sims=sims,
+                win_predictor=win_predictor,
             )
         except (ValueError, KeyError) as exc:
             skipped.append((game, str(exc)))
@@ -341,6 +347,7 @@ def _poll_probable_starters(
     publisher,
     target_date: date,
     simulator,
+    win_predictor: TeamStrengthPredictor,
     season: int,
     sims: int,
     state_path: Path,
@@ -390,6 +397,7 @@ def _poll_probable_starters(
                     simulator,
                     season=season,
                     n_sims=sims,
+                    win_predictor=win_predictor,
                 )
             except (ValueError, KeyError) as exc:
                 print(f"{game.label:12s} UPDATE SKIPPED ({exc})")
@@ -441,6 +449,7 @@ def main() -> None:
         outcome_run_dir=args.outcome_run_dir,
         tracking_uri=args.mlflow_tracking_uri,
     )
+    win_predictor = build_live_strength_predictor(target_date)
     print(f"Loaded outcome models from {run_dir}")
     print(
         f"Simulating {_games_summary(len(slate_games), preview_only=preview_only)} "
@@ -450,6 +459,7 @@ def main() -> None:
     predictions, skipped = _simulate_preview_games(
         slate_games,
         simulator=simulator,
+        win_predictor=win_predictor,
         season=season,
         sims=args.sims,
     )
@@ -498,6 +508,7 @@ def main() -> None:
             publisher=publisher,
             target_date=target_date,
             simulator=simulator,
+            win_predictor=win_predictor,
             season=season,
             sims=args.sims,
             state_path=state_path,

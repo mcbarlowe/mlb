@@ -399,9 +399,16 @@ uv run python scripts/run_daily_sim_slate.py --post --post-provider both --watch
 How it works:
 
 1. Resolves the outcome-model artifacts with `--outcome-run-dir auto`: shared MLflow production runs first when `MLFLOW_TRACKING_URI` is set, then `models/outcome/latest_run.txt`, then the newest local `models/outcome/run_*` directory.
-2. Fetches that day's preview games from the MLB schedule with hydrated probable starters.
-3. Simulates each preview game, renders one combined board to `output/sim_cards/daily/daily_sim_<date>.jpg`, and stores the current probable-starter snapshot in `output/sim_state/daily_sim_<date>.json`.
-4. With `--watch-starters`, keeps polling preview games and posts a fresh one-game sim card whenever a probable starter changes.
+2. Fits the leak-free team-strength win model from PostgreSQL using the four prior seasons, with Elo, recent run form, and Bayesian-shrunk probable-starter quality updated only from games before the slate date.
+3. Fetches that day's preview games from the MLB schedule with hydrated probable starters.
+4. Uses the team-strength model for published win odds and the pitch/outcome Monte Carlo chain for score distributions, then renders the combined board to `output/sim_cards/daily/daily_sim_<date>.jpg`.
+5. Stores the probable-starter snapshot in `output/sim_state/daily_sim_<date>.json`; with `--watch-starters`, it posts a fresh one-game card whenever a probable starter changes.
+
+The 2025 holdout gate covers all 2,430 regular-season games and must beat the fixed league-home-rate baseline on Brier score, log loss, and pick accuracy:
+
+```bash
+uv run python scripts/evaluate_team_strength.py
+```
 
 `scripts/run_daily_sim_slate.sh` is the launchd-friendly wrapper; it mirrors the existing live-pipeline helper and reads `BARLOWE_DAILY_SIM_*` environment variables for posting, posting provider, polling cadence, state/output directories, and optional date overrides. The wrapper defaults to `BARLOWE_DAILY_SIM_POST_PROVIDER=both` so scheduled daily game-winner boards post to Bluesky and X unless overridden. `scripts/run_daily_random_live_game.sh` uses the same provider mechanism for `BARLOWE_RANDOM_GAME_*`.
 

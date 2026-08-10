@@ -21,6 +21,7 @@ import math
 import random
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
@@ -39,6 +40,7 @@ from src.sim.slate import (
     render_prediction_card,
     simulate_slate_game,
 )
+from src.sim.team_strength import build_live_strength_predictor
 
 LIVEFEED_ROOT = Path("data/raw/livefeeds")
 
@@ -90,20 +92,33 @@ def run_single(args: argparse.Namespace) -> None:
 
     feed = load_feed(args.game_pk, args.season)
     season = int(feed["gameData"]["game"]["season"])
+    game_date = date.fromisoformat(feed["gameData"]["datetime"]["officialDate"])
     away = lineup_from_feed(feed, "away")
     home = lineup_from_feed(feed, "home")
     simulator, _ = build_simulator(args, season)
+    win_predictor = build_live_strength_predictor(game_date)
     print(f"Simulating {describe_game(feed)} x{args.sims}...")
     results = simulator.simulate_many(away, home, args.sims)
     stats = summarize(results)
     calibration = load_win_calibration()
-    raw_p = stats["home_win_probability"]
-    if calibration is not None:
-        stats["home_win_probability"] = calibration.apply(raw_p)
+    sim_probability = stats["home_win_probability"]
+    stats["home_win_probability_raw"] = sim_probability
+    stats["home_win_probability_sim"] = (
+        calibration.apply(sim_probability) if calibration is not None else sim_probability
+    )
+    stats["home_win_probability"] = win_predictor.predict_home_probability(
+        season=season,
+        away_team_id=int(feed["gameData"]["teams"]["away"]["id"]),
+        home_team_id=int(feed["gameData"]["teams"]["home"]["id"]),
+        away_starter_id=away.starter.player_id,
+        home_starter_id=home.starter.player_id,
+    )
 
     away_actual, home_actual = actual_final(feed)
-    print(f"\nHome win probability: {stats['home_win_probability']:.1%}"
-          + (f" (raw {raw_p:.1%})" if calibration is not None else ""))
+    print(
+        f"\nHome win probability: {stats['home_win_probability']:.1%} "
+        f"(team strength; sim {stats['home_win_probability_sim']:.1%})"
+    )
     print(
         f"Mean score: away {stats['mean_away_runs']:.2f} - home {stats['mean_home_runs']:.2f}"
         f" (total {stats['mean_total_runs']:.2f})"
@@ -342,13 +357,15 @@ def run_slate(args: argparse.Namespace) -> None:
     from datetime import UTC, datetime
 
     slate_date = args.date or datetime.now(UTC).astimezone().date().isoformat()
-    season = int(slate_date[:4])
-    games = fetch_slate_games(datetime.fromisoformat(slate_date).date(), abstract_states={"Preview"})
+    target_date = datetime.fromisoformat(slate_date).date()
+    season = target_date.year
+    games = fetch_slate_games(target_date, abstract_states={"Preview"})
     if not games:
         raise SystemExit(f"No unstarted games on {slate_date}")
     print(f"{len(games)} unstarted games on {slate_date}\n")
 
     simulator, _ = build_simulator(args, season)
+    win_predictor = build_live_strength_predictor(target_date)
     for game in games:
         try:
             prediction = simulate_slate_game(
@@ -356,6 +373,7 @@ def run_slate(args: argparse.Namespace) -> None:
                 simulator,
                 season=season,
                 n_sims=args.sims,
+                win_predictor=win_predictor,
             )
         except (ValueError, KeyError) as exc:
             print(f"{game.label:12s} SKIPPED ({exc})")

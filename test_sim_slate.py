@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
-from src.sim.game import GameResult
+from src.sim.game import GameResult, GameSimulator
 from src.sim.slate import (
     DailySlateState,
     ProbablePitcher,
@@ -15,9 +17,11 @@ from src.sim.slate import (
     changed_games,
     load_daily_slate_state,
     save_daily_slate_state,
+    simulate_slate_game,
     snapshot_state,
     starter_changes,
 )
+from src.sim.team_strength import TeamStrengthPredictor
 
 
 def _game(
@@ -92,9 +96,46 @@ def test_build_update_caption_mentions_reason_and_projection():
 
     assert "Updated BAL @ BOS" in caption
     assert "BAL probable starter Away Arm → Replacement" in caption
-    assert "New sim: BOS 62% to win" in caption
+    assert "New model: BOS 62% to win" in caption
     assert "Projected score BAL 3.4 - BOS 4.8" in caption
     assert len(caption) <= 300
+
+
+def test_slate_uses_team_strength_for_published_win_probability(monkeypatch):
+    lineups = {
+        "away": SimpleNamespace(starter=SimpleNamespace(player_id=11)),
+        "home": SimpleNamespace(starter=SimpleNamespace(player_id=22)),
+    }
+    monkeypatch.setattr(
+        "src.sim.slate.build_projected_lineups",
+        lambda game, season: (lineups, {"away": "Away Arm", "home": "Home Arm"}),
+    )
+
+    class Simulator:
+        def simulate_many(self, _away, _home, _n_sims):
+            return [GameResult(away_runs=2, home_runs=5, innings=9)]
+
+    class WinPredictor:
+        def predict_home_probability(self, **kwargs):
+            assert kwargs == {
+                "season": 2026,
+                "away_team_id": 110,
+                "home_team_id": 111,
+                "away_starter_id": 11,
+                "home_starter_id": 22,
+            }
+            return 0.61
+
+    prediction = simulate_slate_game(
+        _game(),
+        cast(GameSimulator, Simulator()),
+        season=2026,
+        n_sims=1,
+        win_predictor=cast(TeamStrengthPredictor, WinPredictor()),
+    )
+
+    assert prediction.stats["home_win_probability"] == 0.61
+    assert prediction.stats["home_win_probability_raw"] == 1.0
 
 
 def test_build_daily_board_caption_mentions_updates_when_enabled():
