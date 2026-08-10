@@ -82,3 +82,45 @@ def test_provider_applies_calibration_multipliers():
     event = provider.event_probabilities(1, 2)
     assert event["single"] == pytest.approx(0.6 / 1.3)
     assert sum(event.values()) == pytest.approx(1.0)
+
+
+def test_fit_win_calibration_shrinks_overconfident_spread():
+    import random
+
+    from src.sim.calibration import WinCalibration, fit_win_calibration
+
+    rng = random.Random(0)
+    # True p is 0.5 + 0.5*(raw - 0.5): raw spread is twice as wide as truth.
+    probabilities, outcomes = [], []
+    for _ in range(4000):
+        raw = rng.uniform(0.2, 0.8)
+        true_p = 0.5 + 0.5 * (raw - 0.5)
+        probabilities.append(raw)
+        outcomes.append(1.0 if rng.random() < true_p else 0.0)
+    calibration = fit_win_calibration(probabilities, outcomes)
+    assert 0.2 < calibration.slope < 0.9  # shrinks
+    # Calibrated Brier beats raw on the fit distribution.
+    raw_brier = sum((p - y) ** 2 for p, y in zip(probabilities, outcomes)) / len(outcomes)
+    cal_brier = sum(
+        (calibration.apply(p) - y) ** 2 for p, y in zip(probabilities, outcomes)
+    ) / len(outcomes)
+    assert cal_brier < raw_brier
+
+    # Round trip.
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "win.json"
+        calibration.save(path, meta={"fit_season": 2024})
+        loaded = WinCalibration.load(path)
+        assert loaded == calibration
+
+
+def test_win_calibration_apply_is_monotone_and_bounded():
+    from src.sim.calibration import WinCalibration
+
+    calibration = WinCalibration(intercept=0.1, slope=0.5)
+    values = [calibration.apply(p) for p in (0.01, 0.3, 0.5, 0.7, 0.99)]
+    assert all(0.0 < v < 1.0 for v in values)
+    assert values == sorted(values)

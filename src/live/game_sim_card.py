@@ -65,6 +65,7 @@ def card_data_from_results(
     game_date: str,
     venue: str | None,
     top_n_scores: int = 5,
+    home_win_probability: float | None = None,
 ) -> GameSimCardData:
     """Aggregate Monte Carlo results into presentation data."""
     if not results:
@@ -95,7 +96,9 @@ def card_data_from_results(
         game_date=game_date,
         venue=venue,
         n_sims=n,
-        home_win_probability=home_wins / n,
+        home_win_probability=(
+            home_win_probability if home_win_probability is not None else home_wins / n
+        ),
         mean_away_runs=sum(r.away_runs for r in results) / n,
         mean_home_runs=sum(r.home_runs for r in results) / n,
         top_scores=top_scores,

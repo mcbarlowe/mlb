@@ -87,3 +87,91 @@ def derive_multipliers(
         composed = existing.get(cls, 1.0) * ratio
         out[cls] = min(max(composed, MULTIPLIER_FLOOR), MULTIPLIER_CEILING)
     return out
+
+
+DEFAULT_WIN_CALIBRATION_PATH = Path("models/sim/win_calibration.json")
+
+
+@dataclass(frozen=True)
+class WinCalibration:
+    """Platt scaling for simulated home-win probabilities.
+
+    Fitted on val-season (2024) simulated games — never on the 2025 test
+    season. ``slope < 1`` shrinks an overconfident Monte Carlo spread.
+    """
+
+    intercept: float
+    slope: float
+
+    def apply(self, p_home: float) -> float:
+        import math
+
+        p = min(max(p_home, 1e-3), 1 - 1e-3)
+        z = self.intercept + self.slope * math.log(p / (1 - p))
+        return 1.0 / (1.0 + math.exp(-z))
+
+    @classmethod
+    def load(cls, path: Path = DEFAULT_WIN_CALIBRATION_PATH) -> WinCalibration:
+        payload = json.loads(Path(path).read_text())
+        return cls(intercept=payload["intercept"], slope=payload["slope"])
+
+    def save(
+        self, path: Path = DEFAULT_WIN_CALIBRATION_PATH, meta: dict | None = None
+    ) -> None:
+        payload: dict = {"intercept": self.intercept, "slope": self.slope}
+        if meta:
+            payload["meta"] = meta
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+
+
+def load_win_calibration(
+    path: Path = DEFAULT_WIN_CALIBRATION_PATH,
+) -> WinCalibration | None:
+    """Load the fitted win calibration, or None when not fitted yet."""
+    if not Path(path).exists():
+        return None
+    return WinCalibration.load(path)
+
+
+LEAGUE_HOME_RATE = 0.543
+
+
+def fit_win_calibration(
+    probabilities: list[float],
+    outcomes: list[float],
+    anchor: float = LEAGUE_HOME_RATE,
+) -> WinCalibration:
+    """Fit anchored Platt scaling: shrink the spread around the league rate.
+
+    Only the slope is fitted (1-D MLE): ``p = anchor`` maps to ``anchor``,
+    so a small fit sample cannot teach the calibrator a bogus home/away
+    shift — 150 games carry ~4pp of home-rate sampling noise, which a free
+    intercept absorbs and then projects onto every future season.
+    """
+    import math
+
+    import numpy as np
+    from scipy.optimize import minimize_scalar
+
+    def logit(p: float) -> float:
+        p = min(max(p, 1e-3), 1 - 1e-3)
+        return math.log(p / (1 - p))
+
+    anchor_logit = logit(anchor)
+    x = np.array([logit(p) - anchor_logit for p in probabilities])
+    y = np.array(outcomes)
+
+    def negative_log_likelihood(slope: float) -> float:
+        z = anchor_logit + slope * x
+        p = 1.0 / (1.0 + np.exp(-z))
+        p = np.clip(p, 1e-9, 1 - 1e-9)
+        return -float(np.sum(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
+    fit = minimize_scalar(negative_log_likelihood, bounds=(0.05, 2.0), method="bounded")
+    slope = float(fit.x)
+    return WinCalibration(
+        intercept=anchor_logit * (1.0 - slope),
+        slope=slope,
+    )

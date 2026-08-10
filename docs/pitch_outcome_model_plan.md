@@ -322,3 +322,18 @@ Mitigations, in order:
   No explicit pitcher×batter identity interactions by design: matchup
   pairs are tiny samples; skill-vs-skill aggregates (platoon + profile ×
   prior tree interactions) carry the signal.
+- Anchored win-probability calibration (shipped): Platt scaling of p(home)
+  with the fixed point pinned at the league home rate (0.543) and only the
+  spread slope fitted by 1-D MLE (`fit_win_calibration`;
+  `scripts/simulate_game.py --fit-win-calibration --season 2024`, never
+  2025). A free intercept absorbed the 150-game fit sample's home-rate
+  noise and projected an anti-home shift onto 2025 (Brier 0.2519 -> 0.2608);
+  the anchored version fixes that: 2025 calibrated Brier 0.2469 / log loss
+  0.6870 vs raw 0.2524/0.6979 — now even with the constant league-home
+  baseline (0.2468/0.6868). The fitted slope hit the floor (0.05): the
+  current matchup spread is noise-dominated at game level, so calibrated
+  output ~= league anchor. That is the honest state; the slope will rise
+  when the underlying models gain real team/pitcher separation (DB reload
+  retrain, bullpen identity). Slate/single-game cards and captions now
+  show calibrated p(home) (raw kept as `home_win_probability_raw`). Refit
+  after every model/mix/profile change, after `scripts/calibrate_sim.py`.
