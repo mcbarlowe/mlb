@@ -14,6 +14,14 @@ wheels/
 .basedpyright/
 .ipynb_checkpoints/
 
+# Local data, trained models, and generated reports
 /data/
-/output/live_cards/
+/models/
+/output/
+/catboost_info/
+
+# Local MLflow tracking stores and downloaded artifacts
 /mlflow.db
+/mlruns/
+/mlartifacts/
+/artifacts/

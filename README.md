@@ -349,6 +349,18 @@ Shared multi-machine setup:
 - `scripts/run_outcome_training.sh` remains available as a convenience helper; it resolves `MLFLOW_TRACKING_URI` from the current shell or `~/.zshrc` and then launches `scripts/train_outcome_models.py`.
 - To import a locally trained outcome run into the shared MLflow experiment (including artifacts), use `uv run python scripts/import_outcome_models_to_mlflow.py --production-model`.
 
+Win-model versioning and comparison:
+
+```bash
+uv run python scripts/evaluate_team_strength.py --log-mlflow --set-champion
+```
+
+- Every evaluation logs the fitted estimator, exact feature contract, training and holdout datasets, coefficients, baseline metrics, promotion-gate result, and dependency metadata.
+- Every logged estimator creates an immutable version of the registered model `mlb-team-strength-win`. The registered-model tags `latest_logged_version` / `latest_run_id` identify the newest candidate; `champion_version` / `champion_run_id` identify the benchmark.
+- `--set-champion` advances the benchmark only when the candidate beats the league-home-rate baseline on Brier score, log loss, and pick accuracy. Failed candidates remain in MLflow for comparison and the command exits nonzero.
+- Compare future versions in the `mlb-model-training-shared` experiment by registered-model version or run ID. Use each run's `brier_improvement`, `log_loss_improvement`, and `pick_accuracy_improvement` metrics for the promotion decision.
+- `models/`, `output/`, `catboost_info/`, and local MLflow stores are generated working data and are intentionally ignored by Git. Production outcome artifacts bootstrap from shared MLflow when absent; other local model paths must be produced by training or downloaded explicitly.
+
 The PostgreSQL training source must already contain the required seasons before this command will run.
 
 Use `--low-memory` for historical retrains on memory-constrained machines; it streams season-sized chunks instead of materializing the entire training window at once.
@@ -380,7 +392,7 @@ How it works:
 3. On every new pitch state, builds the current at-bat sequence plus a pending-pitch row, predicts the next pitch type and location, and renders a pitch card.
 4. Posts the card once per at-bat by default (`--post-cadence pitch` posts on every pitch; `--max-posts-per-game` caps volume).
 
-Model defaults are the trained pair in `models/attention_full/run_20260119_124719` (pitch type) and `models/pitch_type_location_20260121_003206` (location); override with `--pitch-type-model` / `--location-model` when newer models finish training.
+Model defaults point to local working copies in `models/attention_full/run_20260119_124719` (pitch type) and `models/pitch_type_location_20260121_003206` (location). These generated files are not version-controlled; train or download the artifacts before a fresh checkout runs this pipeline, and override them with `--pitch-type-model` / `--location-model` when needed.
 
 Bluesky posting uses `BLUESKY_HANDLE` (e.g. `pitchbot.bsky.social`) and `BLUESKY_APP_PASSWORD` (create one at bsky.app -> Settings -> App Passwords; never use the main account password). X posting accepts either OAuth 1.0a user-context credentials (`X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`) or OAuth 2.0 user-context credentials (`X_API_CLIENT_ID`, `X_API_CLIENT_SECRET`, plus `X_API_ACCESS_TOKEN` or `X_API_OAUTH2_ACCESS_TOKEN`; add `X_API_REFRESH_TOKEN` or `X_API_OAUTH2_REFRESH_TOKEN` if you want unattended posting to survive token expiry). Without `--post`, the pipeline runs in dry-run mode and only saves card images.
 

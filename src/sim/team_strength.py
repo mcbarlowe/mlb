@@ -21,12 +21,15 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 from src.database import PostgresConfig, PostgresHandler
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+
+    from sklearn.linear_model import LogisticRegression
 
 FEATURE_NAMES = (
     "elo_diff",
@@ -297,6 +300,17 @@ class TeamStrengthPredictor:
         return 1.0 / (1.0 + math.exp(-log_odds))
 
 
+@dataclass(frozen=True)
+class StrengthModelFit:
+    """Fitted estimator plus the exact feature frame used to train it."""
+
+    estimator: LogisticRegression
+    predictor: TeamStrengthPredictor
+    feature_frame: pd.DataFrame
+    train_seasons: tuple[int, ...]
+    config: StrengthConfig
+
+
 def _db_int(value: object | None) -> int:
     """Normalize integer-valued PostgreSQL/Pandas scalars."""
     if value is None:
@@ -434,6 +448,45 @@ def build_feature_frame(
     return pd.DataFrame(rows), builder
 
 
+def train_strength_model(
+    games: Sequence[CompletedGame],
+    *,
+    prediction_season: int,
+    train_seasons: Sequence[int] | None = None,
+    config: StrengthConfig = DEFAULT_STRENGTH_CONFIG,
+) -> StrengthModelFit:
+    """Fit a comparable estimator and retain chronological inference state."""
+    from sklearn.linear_model import LogisticRegression
+
+    feature_frame, builder = build_feature_frame(games, config)
+    resolved_train_seasons = tuple(
+        train_seasons
+        if train_seasons is not None
+        else range(prediction_season - 4, prediction_season)
+    )
+    train = feature_frame[feature_frame["season"].isin(resolved_train_seasons)]
+    if train.empty:
+        raise ValueError(
+            f"No training games for seasons {list(resolved_train_seasons)}"
+        )
+    estimator = LogisticRegression(C=1.0, max_iter=1000)
+    estimator.fit(train[list(FEATURE_NAMES)], train["home_won"])
+    predictor = TeamStrengthPredictor(
+        coefficients=tuple(
+            float(value) for value in estimator.coef_.reshape(-1).tolist()
+        ),
+        intercept=float(np.asarray(estimator.intercept_).reshape(-1)[0]),
+        feature_builder=builder,
+    )
+    return StrengthModelFit(
+        estimator=estimator,
+        predictor=predictor,
+        feature_frame=feature_frame,
+        train_seasons=resolved_train_seasons,
+        config=config,
+    )
+
+
 def fit_strength_predictor(
     games: Sequence[CompletedGame],
     *,
@@ -442,24 +495,13 @@ def fit_strength_predictor(
     config: StrengthConfig = DEFAULT_STRENGTH_CONFIG,
 ) -> tuple[TeamStrengthPredictor, pd.DataFrame]:
     """Fit on prior seasons and retain state through all completed games."""
-    from sklearn.linear_model import LogisticRegression
-
-    feature_frame, builder = build_feature_frame(games, config)
-    if train_seasons is None:
-        train_seasons = list(range(prediction_season - 4, prediction_season))
-    train = feature_frame[feature_frame["season"].isin(train_seasons)]
-    if train.empty:
-        raise ValueError(f"No training games for seasons {list(train_seasons)}")
-    estimator = LogisticRegression(C=1.0, max_iter=1000)
-    estimator.fit(train[list(FEATURE_NAMES)], train["home_won"])
-    predictor = TeamStrengthPredictor(
-        coefficients=tuple(
-            float(value) for value in estimator.coef_.reshape(-1).tolist()
-        ),
-        intercept=float(estimator.intercept_),
-        feature_builder=builder,
+    fitted = train_strength_model(
+        games,
+        prediction_season=prediction_season,
+        train_seasons=train_seasons,
+        config=config,
     )
-    return predictor, feature_frame
+    return fitted.predictor, fitted.feature_frame
 
 
 def build_live_strength_predictor(
