@@ -182,6 +182,11 @@ def build_feature_frame(
         on="batter_id",
         how="left",
     )
+    missing = [column for column in FEATURE_COLUMNS if column not in frame.columns]
+    if missing:
+        frame = frame.with_columns(
+            [pl.lit(None).alias(column) for column in missing]
+        )
     return frame.select(FEATURE_COLUMNS), np.asarray(weights)
 
 
@@ -196,26 +201,39 @@ class PitchOutcomePredictor:
         self.stage_a.load_model(str(run_dir / "stage_a.cbm"))
         self.stage_b = CatBoostClassifier()
         self.stage_b.load_model(str(run_dir / "stage_b.cbm"))
-        self._check_features(run_dir)
+        self.stage_a_features, self.stage_b_features = self._load_feature_columns(
+            run_dir
+        )
 
         profiles_dir = Path(profiles_dir) if profiles_dir else run_dir.parent
         self.pitcher_profiles, self.batter_priors = load_profile_stores(profiles_dir)
 
     @staticmethod
-    def _check_features(run_dir: Path) -> None:
+    def _load_feature_columns(run_dir: Path) -> tuple[list[str], list[str]]:
+        stage_columns: dict[str, list[str]] = {}
         for stage in ("stage_a", "stage_b"):
             meta = json.loads((run_dir / f"{stage}_features.json").read_text())
-            if meta["feature_columns"] != FEATURE_COLUMNS:
+            columns = [str(column) for column in meta["feature_columns"]]
+            unknown = [column for column in columns if column not in FEATURE_COLUMNS]
+            if unknown:
                 raise ValueError(
-                    f"{stage} was trained with different features than this "
-                    "code builds; retrain or check out the matching revision"
+                    f"{stage} requires unsupported features {unknown}; "
+                    "retrain or check out the matching revision"
                 )
+            stage_columns[stage] = columns
+        return stage_columns["stage_a"], stage_columns["stage_b"]
 
-    def _predict_proba(self, model, features: pl.DataFrame) -> np.ndarray:
-        pandas_frame = features.to_pandas()
+    def _predict_proba(
+        self,
+        model,
+        features: pl.DataFrame,
+        feature_columns: list[str],
+    ) -> np.ndarray:
+        pandas_frame = features.select(feature_columns).to_pandas()
         for column in CATEGORICAL_FEATURES:
-            pandas_frame[column] = pandas_frame[column].fillna("unknown").astype(str)
-        numeric = [c for c in FEATURE_COLUMNS if c not in CATEGORICAL_FEATURES]
+            if column in pandas_frame.columns:
+                pandas_frame[column] = pandas_frame[column].fillna("unknown").astype(str)
+        numeric = [column for column in feature_columns if column not in CATEGORICAL_FEATURES]
         pandas_frame[numeric] = pandas_frame[numeric].astype("float64")
         return model.predict_proba(pandas_frame)
 
@@ -240,7 +258,7 @@ class PitchOutcomePredictor:
         )
         weights = weights / weights.sum()
 
-        result_probs = self._predict_proba(self.stage_a, features)
+        result_probs = self._predict_proba(self.stage_a, features, self.stage_a_features)
         result_classes = [str(c) for c in np.asarray(self.stage_a.classes_)]
         result = {
             cls: float((weights * result_probs[:, i]).sum())
@@ -249,7 +267,7 @@ class PitchOutcomePredictor:
 
         in_play_index = result_classes.index("in_play")
         in_play_row_weights = weights * result_probs[:, in_play_index]
-        event_probs = self._predict_proba(self.stage_b, features)
+        event_probs = self._predict_proba(self.stage_b, features, self.stage_b_features)
         event_classes = [str(c) for c in np.asarray(self.stage_b.classes_)]
         denominator = in_play_row_weights.sum()
         if denominator > 0:

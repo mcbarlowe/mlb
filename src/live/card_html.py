@@ -617,9 +617,11 @@ class HtmlCardRenderer:
                     item = self._requests.get()
                     if item is None:
                         break
-                    html, out_path, result_q = item
+                    html, out_path, width, height, result_q = item
                     try:
-                        result_q.put(self._render_with_page(page, html, out_path))
+                        result_q.put(
+                            self._render_with_page(page, html, out_path, width, height)
+                        )
                     except BaseException as exc:
                         result_q.put(exc)
                 browser.close()
@@ -645,7 +647,14 @@ class HtmlCardRenderer:
             raise RuntimeError("Failed to start Playwright card renderer") from self._startup_error
 
     @staticmethod
-    def _render_with_page(page, html: str, out_path: Path) -> Path:
+    def _render_with_page(
+        page,
+        html: str,
+        out_path: Path,
+        width: int,
+        height: int,
+    ) -> Path:
+        page.set_viewport_size({"width": width, "height": height})
         page.set_content(html, wait_until="load")
         jpeg_path = out_path.with_suffix(".jpg")
         for quality in _JPEG_QUALITY_CANDIDATES:
@@ -663,15 +672,25 @@ class HtmlCardRenderer:
             f"stay under {_BLOB_LIMIT_BYTES:,} bytes."
         )
 
-    def render(self, html: str, out_path: Path) -> Path:
+    def render_with_size(
+        self,
+        html: str,
+        out_path: Path,
+        *,
+        width: int,
+        height: int,
+    ) -> Path:
         self._ensure_page()
         assert self._requests is not None
         result_q = Queue(maxsize=1)
-        self._requests.put((html, out_path, result_q))
+        self._requests.put((html, out_path, width, height, result_q))
         result = result_q.get()
         if isinstance(result, BaseException):
             raise result
         return result
+
+    def render(self, html: str, out_path: Path) -> Path:
+        return self.render_with_size(html, out_path, width=CARD_W, height=CARD_H)
 
     def close(self) -> None:
         requests = self._requests

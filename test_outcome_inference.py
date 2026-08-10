@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import polars as pl
 
+from src.outcome.dataset import FEATURE_COLUMNS
 from src.outcome.inference import (
     OutcomeGameState,
+    PitchOutcomePredictor,
     build_feature_frame,
     sample_locations_from_grid,
 )
@@ -86,3 +90,72 @@ def test_build_feature_frame_marginalizes_type_probs_and_joins_profiles():
     sl_weight = weights[features["pitch_type"].to_list().index("SL")]
     ff_weight = weights[features["pitch_type"].to_list().index("FF")]
     assert sl_weight > ff_weight
+
+
+def test_build_feature_frame_backfills_missing_profile_columns():
+    state = OutcomeGameState(
+        balls=0,
+        strikes=0,
+        outs=0,
+        runner_on_first=False,
+        runner_on_second=False,
+        runner_on_third=False,
+        inning=1,
+        is_top_half=True,
+        score_diff=0,
+        season=2026,
+        times_through_order=1,
+        pitcher_id=543037,
+        batter_id=660271,
+        throw_side="R",
+        bat_side="L",
+    )
+    pitcher, batter = _profiles()
+    features, _ = build_feature_frame(
+        state,
+        {"FF": 1.0},
+        [(0.0, 2.5)],
+        pitcher.select([column for column in pitcher.columns if column != "pitcher_hr_rate"]),
+        batter.select(
+            [column for column in batter.columns if column not in {"batter_hr_rate", "batter_xbh_rate", "batter_hit_rate"}]
+        ),
+    )
+
+    assert "pitcher_hr_rate" in features.columns
+    assert "batter_hr_rate" in features.columns
+    assert "batter_xbh_rate" in features.columns
+    assert "batter_hit_rate" in features.columns
+    assert features["pitcher_hr_rate"].to_list() == [None]
+
+
+
+def test_load_feature_columns_accepts_older_subset(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    subset = FEATURE_COLUMNS[:-4]
+    for stage in ("stage_a", "stage_b"):
+        (run_dir / f"{stage}_features.json").write_text(
+            json.dumps({"feature_columns": subset})
+        )
+
+    stage_a, stage_b = PitchOutcomePredictor._load_feature_columns(run_dir)
+
+    assert stage_a == subset
+    assert stage_b == subset
+
+
+def test_load_feature_columns_rejects_unknown_features(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    bad = FEATURE_COLUMNS[:-1] + ["not_a_real_feature"]
+    for stage in ("stage_a", "stage_b"):
+        (run_dir / f"{stage}_features.json").write_text(
+            json.dumps({"feature_columns": bad})
+        )
+
+    try:
+        PitchOutcomePredictor._load_feature_columns(run_dir)
+    except ValueError as exc:
+        assert "unsupported features" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for unsupported feature metadata")
