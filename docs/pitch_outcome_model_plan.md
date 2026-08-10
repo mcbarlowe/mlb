@@ -370,3 +370,9 @@ Mitigations, in order:
   0.164 from a noisy 2024 fit) now over-shrinks a genuinely informative
   spread — raw beats calibrated on 2025; refit on a larger 2024 sample or
   trust raw once slope estimates stabilize above ~0.8.
+- PENDING (owner-gated): retrain the pitch-type LSTM + location MDN on the
+  repaired base/out data. They consume `outs`/runner features and were
+  trained pre-repair (`outs` constant-0 -> untrained input weights fed real
+  values at serve time; mover-biased runner flags -> train/serve skew). An
+  attempt on the Pro was killed at owner request (machine instability);
+  reschedule only with an agreed window, or run CPU-bound on the iMac.
