@@ -674,6 +674,12 @@ def main():
         default=42,
         help="Random seed",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="Computation device: auto, cpu, cuda, or mps",
+    )
 
     # Output arguments
     parser.add_argument(
