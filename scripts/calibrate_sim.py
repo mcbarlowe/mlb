@@ -228,8 +228,13 @@ def main() -> None:
     actual_agg, actual_cells, actual_events = actual_rates(args.seasons)
     print(f"...done in {time.perf_counter() - start:.0f}s")
 
-    pointer = Path("models/outcome/latest_run.txt").read_text().strip()
-    predictor = PitchOutcomePredictor(Path("models/outcome") / pointer)
+    from src.sim.artifacts import ensure_sim_artifacts
+    from src.sim.slate import resolve_outcome_model_dirs
+
+    ensure_sim_artifacts()
+    run_dir, profiles_dir = resolve_outcome_model_dirs("auto", tracking_uri=None)
+    print(f"Loaded outcome models from {run_dir}")
+    predictor = PitchOutcomePredictor(run_dir, profiles_dir=profiles_dir)
     mix = PitchMixProfiles.load(seed=args.seed)
     matchups = sample_matchups(args.matchup_season, args.games, args.seed)
     print(f"Sampled {len(matchups)} matchups from {args.games} games")
@@ -320,7 +325,7 @@ def main() -> None:
             "games": args.games,
             "pas": args.pas,
             "passes": args.passes,
-            "outcome_run": pointer,
+            "outcome_run": run_dir.name,
             "created": time.strftime("%Y-%m-%d %H:%M:%S"),
         },
     )
