@@ -14,7 +14,12 @@ import polars as pl
 
 from src.ml.catboost_model import PitchXGBoostModel
 from src.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
-from src.ml.mlflow_utils import build_metric_dict, build_param_dict, configure_mlflow, log_path_if_exists
+from src.ml.mlflow_utils import (
+    build_metric_dict,
+    build_param_dict,
+    configure_mlflow,
+    log_path_if_exists,
+)
 from src.ml.season_splits import default_data_source_train_seasons
 
 DEFAULT_VAL_SEASON = "2024"
@@ -62,6 +67,20 @@ def load_data(data_path: str, train_seasons: list[str], val_season: str, test_se
     print(f"  {test_season}: {len(test_df):,} pitches")
 
     return train_df, val_df, test_df, feature_engine
+
+def log_artifacts_if_available(results: dict, output_dir: Path, model_dir: Path) -> None:
+    try:
+        mlflow.log_dict(results, "results.json")
+        log_path_if_exists(model_dir, "artifacts")
+        log_path_if_exists(output_dir / "results.json", "artifacts")
+    except (OSError, mlflow.exceptions.MlflowException) as exc:
+        message = f"{type(exc).__name__}: {exc}"
+        mlflow.set_tag("artifact_logging_failed", "true")
+        mlflow.set_tag("artifact_logging_error", message[:500])
+        print(
+            "WARNING: MLflow artifact logging failed; "
+            f"local artifacts remain at {output_dir}: {message}"
+        )
 
 
 def main() -> None:
@@ -186,9 +205,7 @@ def main() -> None:
         (output_dir / "results.json").write_text(json.dumps(results, indent=2, default=str))
 
         mlflow.log_metrics(build_metric_dict(results["xgboost"], prefix="test"))
-        mlflow.log_dict(results, "results.json")
-        log_path_if_exists(model_dir, "artifacts")
-        log_path_if_exists(output_dir / "results.json", "artifacts")
+        log_artifacts_if_available(results, output_dir, model_dir)
 
     print("\nXGBoost Test Results:")
     print(f"  Accuracy:        {test_results['accuracy']:.1%}")
