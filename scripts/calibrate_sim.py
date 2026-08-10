@@ -1,16 +1,19 @@
 """Calibrate the game simulator against actual league rates.
 
 Measures the simulated per-pitch result distribution PER COUNT and the
-in-play event distribution, per batting side (top = away batting, bottom =
-home batting), against actual league rates, and stores per-class
-multipliers in ``models/sim/sim_calibration.json``. Matching every count's
-result distribution matches the count-machine transition kernel, so PA
-outcome rates and run totals follow by construction. Two passes: the
-second corrects the residual after applying pass-one multipliers.
+in-play event distribution, conditioned on batting side (top = away
+batting) AND base state (windup = bases empty, stretch = runners on),
+against actual league rates, and stores per-class multipliers in
+``models/sim/sim_calibration.json``.
+
+Conditioning on stretch matters: the outcome models' runner features
+partly encode pitcher-quality selection effects; without pinning the
+conditional rates, the simulator turns that correlation into a
+runner -> uplift -> runner feedback loop and inflates totals. PAs are
+measured inside a rolling base-out context so state frequencies match the
+game loop. Two passes: the second corrects the residual.
 
     uv run python scripts/calibrate_sim.py --seasons 2023 2024 2025
-
-Home-field advantage falls out of the per-side split.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from src.sim.calibration import (
     DEFAULT_CALIBRATION_PATH,
     SimCalibration,
     derive_multipliers,
+    stretch_key,
 )
 from src.sim.count_machine import apply_pitch_result
 from src.sim.lineups import lineup_from_feed
@@ -43,46 +47,55 @@ from src.sim.pitch_mix import COUNTS, PitchMixProfiles
 
 LIVEFEED_ROOT = Path("data/raw/livefeeds")
 SIDES = {"top": True, "bottom": False}
+STRETCHES = {"windup": False, "stretch": True}
 
 
 def count_key(balls: int, strikes: int) -> str:
     return f"{balls}-{strikes}"
 
 
-def actual_rates_by_side(seasons: list[int]) -> tuple[dict, dict, dict]:
-    """Actual league rates: aggregate result, per-count result, event."""
-    frame = build_training_frame(load_pitches(seasons))
-    result_rates: dict[str, dict[str, float]] = {}
-    result_by_count: dict[str, dict[str, dict[str, float]]] = {}
-    event_rates: dict[str, dict[str, float]] = {}
+def actual_rates(seasons: list[int]) -> tuple[dict, dict, dict]:
+    """Actual league rates: aggregate result, per (side, stretch, count)
+    result, and per (side, stretch) event distributions."""
+    frame = build_training_frame(load_pitches(seasons)).with_columns(
+        (
+            (pl.col("runner_on_first") + pl.col("runner_on_second") + pl.col("runner_on_third")) > 0
+        ).alias("stretch_state")
+    )
+    result_agg: dict[str, dict[str, float]] = {}
+    result_cells: dict[str, dict[str, dict[str, dict[str, float]]]] = {}
+    event_cells: dict[str, dict[str, dict[str, float]]] = {}
     for side, is_top in SIDES.items():
         side_rows = frame.filter(
             (pl.col("is_top_half") == int(is_top))
             & pl.col("label_result").is_not_null()
         )
         counts = side_rows["label_result"].value_counts()
-        total = side_rows.height
-        result_rates[side] = {row[0]: row[1] / total for row in counts.rows()}
-
-        result_by_count[side] = {}
-        for balls, strikes in COUNTS:
-            count_rows = side_rows.filter(
-                (pl.col("balls_before") == balls)
-                & (pl.col("strikes_before") == strikes)
-            )
-            if count_rows.height == 0:
-                continue
-            counts = count_rows["label_result"].value_counts()
-            result_by_count[side][count_key(balls, strikes)] = {
-                row[0]: row[1] / count_rows.height for row in counts.rows()
-            }
-
-        event_rows = side_rows.filter(pl.col("label_event").is_not_null())
-        counts = event_rows["label_event"].value_counts()
-        event_rates[side] = {
-            row[0]: row[1] / event_rows.height for row in counts.rows()
+        result_agg[side] = {
+            row[0]: row[1] / side_rows.height for row in counts.rows()
         }
-    return result_rates, result_by_count, event_rates
+        result_cells[side] = {}
+        event_cells[side] = {}
+        for skey, stretch in STRETCHES.items():
+            stretch_rows = side_rows.filter(pl.col("stretch_state") == stretch)
+            result_cells[side][skey] = {}
+            for balls, strikes in COUNTS:
+                cell = stretch_rows.filter(
+                    (pl.col("balls_before") == balls)
+                    & (pl.col("strikes_before") == strikes)
+                )
+                if cell.height == 0:
+                    continue
+                counts = cell["label_result"].value_counts()
+                result_cells[side][skey][count_key(balls, strikes)] = {
+                    row[0]: row[1] / cell.height for row in counts.rows()
+                }
+            event_rows = stretch_rows.filter(pl.col("label_event").is_not_null())
+            counts = event_rows["label_event"].value_counts()
+            event_cells[side][skey] = {
+                row[0]: row[1] / event_rows.height for row in counts.rows()
+            }
+    return result_agg, result_cells, event_cells
 
 
 def sample_matchups(season: int, n_games: int, seed: int) -> list[tuple]:
@@ -118,27 +131,33 @@ def simulate_rates(
     pas_per_matchup: int,
     seed: int,
 ) -> tuple[dict, dict, dict]:
-    """Simulated aggregate/per-count result and event rates per side.
+    """Simulated aggregate/per-cell result and event rates.
 
-    PAs run inside a rolling base-out context (transitions sampled from the
-    empirical engine, provider stretch selected by current runners) so the
-    measured rates reflect the same windup/stretch mixture the game loop
-    produces — calibrating windup-only providers understates offense.
+    PAs run inside a rolling base-out context so the windup/stretch state
+    frequencies match the game loop's.
     """
     from src.sim.base_out import BaseOutEngine
 
     rng = random.Random(seed)
     engine = BaseOutEngine.load(seed=seed)
-    result_counts = {side: Counter() for side in SIDES}
-    count_counts: dict[str, dict[str, Counter]] = {
-        side: {count_key(b, s): Counter() for b, s in COUNTS} for side in SIDES
+    result_agg = {side: Counter() for side in SIDES}
+    result_cells: dict[str, dict[str, dict[str, Counter]]] = {
+        side: {
+            skey: {count_key(b, s): Counter() for b, s in COUNTS}
+            for skey in STRETCHES
+        }
+        for side in SIDES
     }
-    event_counts = {side: Counter() for side in SIDES}
+    event_cells: dict[str, dict[str, Counter]] = {
+        side: {skey: Counter() for skey in STRETCHES} for side in SIDES
+    }
     for pitcher, batter, is_top in matchups:
         side = "top" if is_top else "bottom"
         runners, outs = 0, 0
         for _ in range(pas_per_matchup):
-            provider = factory(pitcher, batter, is_top, runners != 0)
+            stretch = runners != 0
+            skey = stretch_key(stretch)
+            provider = factory(pitcher, batter, is_top, stretch)
             balls = strikes = 0
             pa_outcome: str | None = None
             while True:
@@ -149,8 +168,8 @@ def simulate_rates(
                         for c in RESULT_CLASSES
                     ],
                 )[0]
-                result_counts[side][result] += 1
-                count_counts[side][count_key(balls, strikes)][result] += 1
+                result_agg[side][result] += 1
+                result_cells[side][skey][count_key(balls, strikes)][result] += 1
                 transition = apply_pitch_result(balls, strikes, result)
                 if transition.terminal is None:
                     balls, strikes = transition.balls, transition.strikes
@@ -163,7 +182,7 @@ def simulate_rates(
                             for c in EVENT_CLASSES
                         ],
                     )[0]
-                    event_counts[side][event] += 1
+                    event_cells[side][skey][event] += 1
                     pa_outcome = event
                 else:
                     pa_outcome = transition.terminal
@@ -178,12 +197,18 @@ def simulate_rates(
         return {cls: n / total for cls, n in counts.items()} if total else {}
 
     return (
-        {side: normalize(result_counts[side]) for side in SIDES},
+        {side: normalize(result_agg[side]) for side in SIDES},
         {
-            side: {key: normalize(c) for key, c in count_counts[side].items()}
+            side: {
+                skey: {key: normalize(c) for key, c in cells.items()}
+                for skey, cells in result_cells[side].items()
+            }
             for side in SIDES
         },
-        {side: normalize(event_counts[side]) for side in SIDES},
+        {
+            side: {skey: normalize(c) for skey, c in event_cells[side].items()}
+            for side in SIDES
+        },
     )
 
 
@@ -200,7 +225,7 @@ def main() -> None:
 
     print(f"Computing actual league rates for {args.seasons}...")
     start = time.perf_counter()
-    actual_result, actual_by_count, actual_event = actual_rates_by_side(args.seasons)
+    actual_agg, actual_cells, actual_events = actual_rates(args.seasons)
     print(f"...done in {time.perf_counter() - start:.0f}s")
 
     pointer = Path("models/outcome/latest_run.txt").read_text().strip()
@@ -210,13 +235,19 @@ def main() -> None:
     print(f"Sampled {len(matchups)} matchups from {args.games} games")
 
     result_mults: dict[str, dict[str, float]] = {side: {} for side in SIDES}
-    by_count_mults: dict[str, dict[str, dict[str, float]]] = {
-        side: {} for side in SIDES
+    cell_mults: dict[str, dict[str, dict[str, dict[str, float]]]] = {
+        side: {skey: {} for skey in STRETCHES} for side in SIDES
     }
     event_mults: dict[str, dict[str, float]] = {side: {} for side in SIDES}
+    event_stretch_mults: dict[str, dict[str, dict[str, float]]] = {
+        side: {skey: {} for skey in STRETCHES} for side in SIDES
+    }
     for pass_index in range(1, args.passes + 1):
         calibration = SimCalibration(
-            result=result_mults, event=event_mults, result_by_count=by_count_mults
+            result=result_mults,
+            event=event_mults,
+            result_by_count=cell_mults,
+            event_by_stretch=event_stretch_mults,
         )
         factory = MatchupProviderFactory(
             predictor,
@@ -225,47 +256,61 @@ def main() -> None:
             seed=args.seed,
             calibration=calibration,
         )
-        sim_result, sim_by_count, sim_event = simulate_rates(
+        sim_agg, sim_cells, sim_events = simulate_rates(
             factory, matchups, args.pas, args.seed
         )
-        print(f"\nPass {pass_index} simulated rates vs actual:")
+        print(f"\nPass {pass_index} simulated rates vs actual (aggregate):")
         for side in SIDES:
-            strikes_rate = sim_result[side].get("swinging_strike", 0) + sim_result[
-                side
-            ].get("called_strike", 0)
             print(
-                f"  {side:6s} in_play sim {sim_result[side].get('in_play', 0):.3f}"
-                f"/act {actual_result[side].get('in_play', 0):.3f}"
-                f"  hbp sim {sim_result[side].get('hit_by_pitch', 0):.4f}"
-                f"/act {actual_result[side].get('hit_by_pitch', 0):.4f}"
-                f"  strikes sim {strikes_rate:.3f}"
+                f"  {side:6s} in_play sim {sim_agg[side].get('in_play', 0):.3f}"
+                f"/act {actual_agg[side].get('in_play', 0):.3f}"
+                f"  hbp sim {sim_agg[side].get('hit_by_pitch', 0):.4f}"
+                f"/act {actual_agg[side].get('hit_by_pitch', 0):.4f}"
             )
         result_mults = {
-            side: derive_multipliers(
-                actual_result[side], sim_result[side], result_mults[side]
-            )
+            side: derive_multipliers(actual_agg[side], sim_agg[side], result_mults[side])
             for side in SIDES
         }
-        by_count_mults = {
+        cell_mults = {
             side: {
-                key: derive_multipliers(
-                    actual_by_count[side].get(key, {}),
-                    sim_by_count[side].get(key, {}),
-                    by_count_mults[side].get(key, {}),
-                )
-                for key in {*actual_by_count[side]} | {*by_count_mults[side]}
+                skey: {
+                    key: derive_multipliers(
+                        actual_cells[side][skey].get(key, {}),
+                        sim_cells[side][skey].get(key, {}),
+                        cell_mults[side][skey].get(key, {}),
+                    )
+                    for key in {*actual_cells[side][skey]} | {*cell_mults[side][skey]}
+                }
+                for skey in STRETCHES
             }
             for side in SIDES
         }
         event_mults = {
             side: derive_multipliers(
-                actual_event[side], sim_event[side], event_mults[side]
+                # Aggregate events across stretch states for the fallback.
+                actual_events[side]["windup"],
+                sim_events[side]["windup"],
+                event_mults[side],
             )
+            for side in SIDES
+        }
+        event_stretch_mults = {
+            side: {
+                skey: derive_multipliers(
+                    actual_events[side][skey],
+                    sim_events[side][skey],
+                    event_stretch_mults[side][skey],
+                )
+                for skey in STRETCHES
+            }
             for side in SIDES
         }
 
     calibration = SimCalibration(
-        result=result_mults, event=event_mults, result_by_count=by_count_mults
+        result=result_mults,
+        event=event_mults,
+        result_by_count=cell_mults,
+        event_by_stretch=event_stretch_mults,
     )
     calibration.save(
         Path(args.output),
@@ -281,15 +326,11 @@ def main() -> None:
     )
     print(f"\nWrote calibration -> {args.output}")
     for side in SIDES:
-        print(
-            f"  {side} aggregate result multipliers:",
-            {k: round(v, 3) for k, v in sorted(result_mults[side].items())},
-        )
-    for side in SIDES:
-        print(
-            f"  {side} event multipliers: ",
-            {k: round(v, 3) for k, v in sorted(event_mults[side].items())},
-        )
+        for skey in STRETCHES:
+            print(
+                f"  {side}/{skey} event multipliers:",
+                {k: round(v, 3) for k, v in sorted(event_stretch_mults[side][skey].items())},
+            )
 
 
 if __name__ == "__main__":

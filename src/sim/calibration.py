@@ -41,21 +41,29 @@ def apply_multipliers(
     return {cls: p / total for cls, p in adjusted.items()}
 
 
+def stretch_key(stretch: bool) -> str:
+    return "stretch" if stretch else "windup"
+
+
 @dataclass(frozen=True)
 class SimCalibration:
-    """Per-side multipliers for result and event distributions.
+    """Per-side, per-stretch multipliers for result and event distributions.
 
-    ``result_by_count`` (side -> "balls-strikes" -> class -> multiplier)
-    matches each count's per-pitch result distribution to league rates:
-    with the count-machine kernel matched per count, PA outcome rates and
-    run totals follow by construction. ``result`` keeps the side-aggregate
-    multipliers as a fallback for counts missing from the fit; ``event``
-    stays side-aggregate (in-play event mixes were near-calibrated).
+    ``result_by_count`` (side -> "windup"/"stretch" -> "balls-strikes" ->
+    class -> multiplier) matches each count's per-pitch result distribution
+    to league rates CONDITIONAL on the base state. Conditioning on stretch
+    matters: the outcome models' runner features partly encode
+    pitcher-quality selection effects, and an uncorrected simulator turns
+    that correlation into a runner -> uplift -> runner feedback loop that
+    inflates run totals. ``event_by_stretch`` does the same for in-play
+    event mixes. ``result``/``event`` keep side-aggregate multipliers as
+    fallbacks for cells missing from the fit.
     """
 
     result: dict[str, dict[str, float]]  # side ("top" | "bottom") -> class -> x
     event: dict[str, dict[str, float]]
-    result_by_count: dict[str, dict[str, dict[str, float]]] | None = None
+    result_by_count: dict[str, dict[str, dict[str, dict[str, float]]]] | None = None
+    event_by_stretch: dict[str, dict[str, dict[str, float]]] | None = None
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CALIBRATION_PATH) -> SimCalibration:
@@ -64,12 +72,15 @@ class SimCalibration:
             result=payload["result"],
             event=payload["event"],
             result_by_count=payload.get("result_by_count"),
+            event_by_stretch=payload.get("event_by_stretch"),
         )
 
     def save(self, path: Path = DEFAULT_CALIBRATION_PATH, meta: dict | None = None) -> None:
         payload: dict = {"result": self.result, "event": self.event}
         if self.result_by_count is not None:
             payload["result_by_count"] = self.result_by_count
+        if self.event_by_stretch is not None:
+            payload["event_by_stretch"] = self.event_by_stretch
         if meta:
             payload["meta"] = meta
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,18 +93,30 @@ class SimCalibration:
         return self.result.get(side, {}), self.event.get(side, {})
 
     def result_multipliers_by_count(
-        self, is_top_half: bool
+        self, is_top_half: bool, stretch: bool = False
     ) -> dict[tuple[int, int], dict[str, float]]:
-        """Per-count result multipliers; aggregate fill for missing counts."""
+        """Per-count result multipliers for one side/stretch state."""
         side = "top" if is_top_half else "bottom"
         aggregate = self.result.get(side, {})
-        by_count = (self.result_by_count or {}).get(side, {})
+        side_cells = (self.result_by_count or {}).get(side, {})
+        by_count = side_cells.get(stretch_key(stretch), {})
         out: dict[tuple[int, int], dict[str, float]] = {}
         for balls in range(4):
             for strikes in range(3):
                 key = f"{balls}-{strikes}"
                 out[(balls, strikes)] = dict(by_count.get(key, aggregate))
         return out
+
+    def event_multipliers(
+        self, is_top_half: bool, stretch: bool = False
+    ) -> dict[str, float]:
+        """Event multipliers for one side/stretch state; aggregate fallback."""
+        side = "top" if is_top_half else "bottom"
+        by_stretch = (self.event_by_stretch or {}).get(side, {})
+        cell = by_stretch.get(stretch_key(stretch))
+        if cell:
+            return dict(cell)
+        return dict(self.event.get(side, {}))
 
 
 def derive_multipliers(

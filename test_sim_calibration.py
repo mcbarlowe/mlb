@@ -124,3 +124,37 @@ def test_win_calibration_apply_is_monotone_and_bounded():
     values = [calibration.apply(p) for p in (0.01, 0.3, 0.5, 0.7, 0.99)]
     assert all(0.0 < v < 1.0 for v in values)
     assert values == sorted(values)
+
+
+def test_stretch_conditioned_lookups_and_fallbacks():
+    from src.sim.calibration import SimCalibration
+
+    calibration = SimCalibration(
+        result={"top": {"ball": 1.1}},
+        event={"top": {"single": 1.2}},
+        result_by_count={
+            "top": {
+                "windup": {"0-0": {"ball": 1.5}},
+                "stretch": {"0-0": {"ball": 0.8}},
+            }
+        },
+        event_by_stretch={"top": {"stretch": {"single": 1.4}, "windup": {}}},
+    )
+    windup = calibration.result_multipliers_by_count(True, stretch=False)
+    stretch = calibration.result_multipliers_by_count(True, stretch=True)
+    assert windup[(0, 0)] == {"ball": 1.5}
+    assert stretch[(0, 0)] == {"ball": 0.8}
+    # Counts missing from the fit fall back to the side aggregate.
+    assert windup[(3, 2)] == {"ball": 1.1}
+    # Event lookups: stretch cell present, windup empty -> aggregate.
+    assert calibration.event_multipliers(True, stretch=True) == {"single": 1.4}
+    assert calibration.event_multipliers(True, stretch=False) == {"single": 1.2}
+    # Round trip preserves the nested fields.
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "cal.json"
+        calibration.save(path)
+        loaded = SimCalibration.load(path)
+        assert loaded == calibration

@@ -90,9 +90,11 @@ class MatchupProviderFactory:
         event_multipliers = None
         if self._calibration is not None:
             result_multipliers = self._calibration.result_multipliers_by_count(
-                is_top_half
+                is_top_half, stretch
             )
-            _, event_multipliers = self._calibration.multipliers(is_top_half)
+            event_multipliers = self._calibration.event_multipliers(
+                is_top_half, stretch
+            )
         provider = MatchupOutcomeProvider(
             self._predictor,
             state,
