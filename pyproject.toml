@@ -24,6 +24,7 @@ dependencies = [
     "atproto>=0.0.55",
     "tqdm>=4.67.1",
     "playwright>=1.62.0",
+    "xgboost==3.2.0",
 ]
 
 [dependency-groups]

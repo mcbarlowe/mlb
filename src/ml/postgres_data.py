@@ -24,11 +24,10 @@ _PITCH_POLARS_DTYPES = {
 
 def discover_postgres_seasons(db_config: PostgresConfig | None = None) -> list[str]:
     with PostgresHandler(db_config) as db:
-        seasons_df = db.query("SELECT DISTINCT season FROM pitches ORDER BY season")
+        seasons_df = db.query("SELECT DISTINCT season FROM mlb.pitches ORDER BY season")
     if seasons_df.empty:
         return []
     return [str(int(season)) for season in seasons_df["season"].tolist() if season is not None]
-
 
 
 def load_pitches_from_postgres(
@@ -42,7 +41,7 @@ def load_pitches_from_postgres(
 
     query = f"""
     SELECT *
-    FROM pitches
+    FROM mlb.pitches
     {where_clause}
     ORDER BY season, game_pk, at_bat_index, pitch_number
     """
