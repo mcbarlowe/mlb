@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,12 @@ import polars as pl
 import torch
 
 from src.live.game_state import LiveSnapshot
+from src.live.pitch_mix import (
+    blend_with_empirical_mix,
+    counts_to_vector,
+    pitch_mix_counts_from_postgres,
+)
+from src.ml.features import PITCH_TYPE_CODES
 from src.ml.pitch_predictor import PitchPrediction, PitchPredictor
 from src.ml.pitch_type_location_model import PitchTypeConditionedMDN
 
@@ -62,6 +69,7 @@ class LiveNextPitchPredictor:
         pitch_type_model_dir: str | Path,
         location_model_dir: str | Path | None = None,
         device: str = "cpu",
+        pitch_mix_provider: Callable[[int], Mapping[str, int]] | None = None,
     ):
         self.device = torch.device(device)
         self.pitch_predictor = PitchPredictor.load_lstm(
@@ -74,6 +82,8 @@ class LiveNextPitchPredictor:
         self.feature_columns = (
             self.pitch_predictor.feature_engine.get_feature_columns()
         )
+        self._pitch_mix_provider = pitch_mix_provider or pitch_mix_counts_from_postgres
+        self._pitch_mix_cache: dict[int, np.ndarray] = {}
 
         self.location_model: PitchTypeConditionedMDN | None = None
         self.location_feature_columns: list[str] = []
@@ -124,6 +134,54 @@ class LiveNextPitchPredictor:
             )
         return at_bat
 
+    def _unknown_pitcher_id(self, at_bat: pl.DataFrame) -> int | None:
+        """Return the pitcher id when it is outside the model's vocabulary."""
+        engine = self.pitch_predictor.feature_engine
+        assert engine is not None
+        if "pitcher_id" not in at_bat.columns:
+            return None
+        pitcher_id = at_bat["pitcher_id"][0]
+        if pitcher_id is None:
+            return None
+        pid = int(pitcher_id)
+        return None if pid in engine.pitcher_to_idx else pid
+
+    def _apply_pitch_mix_backoff(
+        self, at_bat: pl.DataFrame, prediction: PitchPrediction
+    ) -> PitchPrediction:
+        pid = self._unknown_pitcher_id(at_bat)
+        if pid is None:
+            return prediction
+        counts = self._pitch_mix_cache.get(pid)
+        if counts is None:
+            try:
+                counts = counts_to_vector(self._pitch_mix_provider(pid))
+            except Exception as exc:
+                print(f"[unknown-pitcher] mix lookup failed for {pid}: {exc}")
+                counts = np.zeros(len(PITCH_TYPE_CODES), dtype=np.float64)
+            self._pitch_mix_cache[pid] = counts
+        n = int(counts.sum())
+        if n <= 0:
+            print(
+                f"[unknown-pitcher] {pid}: no recent pitch history; "
+                "keeping model distribution"
+            )
+            return prediction
+        blended = blend_with_empirical_mix(prediction.type_probabilities, counts)
+        prediction.type_probabilities = blended
+        prediction.predicted_type_idx = int(np.argmax(blended))
+        prediction.predicted_type = PITCH_TYPE_CODES[prediction.predicted_type_idx]
+        order = np.argsort(blended)[::-1][:3]
+        prediction.top_3_types = [
+            (PITCH_TYPE_CODES[i], float(blended[i])) for i in order
+        ]
+        print(
+            f"[unknown-pitcher] {pid}: blended empirical mix "
+            f"(n={n}) -> {prediction.predicted_type} "
+            f"{blended[prediction.predicted_type_idx]:.0%}"
+        )
+        return prediction
+
     def predict(self, snapshot: LiveSnapshot) -> PitchPrediction:
         at_bat = self._at_bat_features(snapshot)
 
@@ -137,6 +195,7 @@ class LiveNextPitchPredictor:
             dtype=torch.float32,
         )
         prediction = self.pitch_predictor.predict(lstm_features=features)
+        prediction = self._apply_pitch_mix_backoff(at_bat, prediction)
 
         if self.location_model is not None and self.location_feature_columns:
             prediction = self._refine_location(at_bat, prediction)
