@@ -6,7 +6,7 @@ This module handles data loading and batching for training pitch prediction mode
 
 import random
 from collections.abc import Callable, Iterator
-from typing import Optional
+from dataclasses import dataclass
 
 import numpy as np
 import polars as pl
@@ -56,6 +56,57 @@ def _iter_pitch_sequence_arrays(
         }
 
 
+@dataclass(frozen=True)
+class PlayerDropoutSpec:
+    """Randomly disguise players as out-of-vocabulary during training.
+
+    Mirrors inference for unseen players (see PitchFeatureEngine.transform):
+    the embedding index moves to the unknown slot and the pitcher tendency
+    features take the transform defaults. Training with a small rate gives
+    the unknown embedding gradient signal and calibrated behavior.
+    """
+
+    rate: float
+    pitcher_idx_pos: int
+    batter_idx_pos: int
+    pitcher_ff_pct_pos: int
+    pitcher_repertoire_pos: int
+    pitcher_unknown_idx: float
+    batter_unknown_idx: float
+    ff_pct_default: float = 0.5
+    repertoire_default: float = 4.0 / 7.0
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        rate: float,
+        feature_columns: list[str],
+        n_known_pitchers: int,
+        n_known_batters: int,
+    ) -> "PlayerDropoutSpec":
+        positions = {column: i for i, column in enumerate(feature_columns)}
+        return cls(
+            rate=rate,
+            pitcher_idx_pos=positions["pitcher_idx"],
+            batter_idx_pos=positions["batter_idx"],
+            pitcher_ff_pct_pos=positions["pitcher_ff_pct"],
+            pitcher_repertoire_pos=positions["pitcher_repertoire"],
+            pitcher_unknown_idx=float(n_known_pitchers),
+            batter_unknown_idx=float(n_known_batters),
+        )
+
+
+def _apply_player_dropout(features, spec: PlayerDropoutSpec, drop_pitcher: bool, drop_batter: bool) -> None:
+    """Overwrite identity features in place on a [seq, features] array/tensor."""
+    if drop_pitcher:
+        features[:, spec.pitcher_idx_pos] = spec.pitcher_unknown_idx
+        features[:, spec.pitcher_ff_pct_pos] = spec.ff_pct_default
+        features[:, spec.pitcher_repertoire_pos] = spec.repertoire_default
+    if drop_batter:
+        features[:, spec.batter_idx_pos] = spec.batter_unknown_idx
+
+
 class PitchSequenceDataset(Dataset):
     """
     PyTorch Dataset for pitch sequences grouped by at-bat.
@@ -70,6 +121,7 @@ class PitchSequenceDataset(Dataset):
         feature_columns: list[str],
         target_columns: list[str],
         max_seq_len: int = 20,
+        player_dropout: PlayerDropoutSpec | None = None,
     ):
         """
         Initialize the dataset.
@@ -79,10 +131,12 @@ class PitchSequenceDataset(Dataset):
             feature_columns: List of feature column names.
             target_columns: List of target column names.
             max_seq_len: Maximum sequence length (pitches per at-bat).
+            player_dropout: Optional training-time player identity dropout.
         """
         self.feature_columns = feature_columns
         self.target_columns = target_columns
         self.max_seq_len = max_seq_len
+        self.player_dropout = player_dropout
 
         # Group pitches by at-bat
         self.at_bats = self._group_by_at_bat(df)
@@ -114,7 +168,21 @@ class PitchSequenceDataset(Dataset):
         return len(self.at_bats)
 
     def __getitem__(self, idx: int) -> dict:
-        return self.at_bats[idx]
+        sample = self.at_bats[idx]
+        spec = self.player_dropout
+        if spec is None or spec.rate <= 0:
+            return sample
+        drop_pitcher = bool(torch.rand(()) < spec.rate)
+        drop_batter = bool(torch.rand(()) < spec.rate)
+        if not (drop_pitcher or drop_batter):
+            return sample
+        features = sample["features"].clone()
+        _apply_player_dropout(features, spec, drop_pitcher, drop_batter)
+        return {
+            "features": features,
+            "targets": sample["targets"],
+            "length": sample["length"],
+        }
 
 
 class PitchSequenceIterableDataset(IterableDataset):
@@ -131,6 +199,7 @@ class PitchSequenceIterableDataset(IterableDataset):
         shuffle: bool = False,
         seed: int = 42,
         shuffle_buffer_size: int = 1024,
+        player_dropout: PlayerDropoutSpec | None = None,
     ):
         self.seasons = list(seasons)
         self.load_season = load_season
@@ -141,6 +210,7 @@ class PitchSequenceIterableDataset(IterableDataset):
         self.shuffle = shuffle
         self.seed = seed
         self.shuffle_buffer_size = shuffle_buffer_size
+        self.player_dropout = player_dropout
         self._iteration = 0
 
     def __iter__(self) -> Iterator[dict[str, np.ndarray | int]]:
@@ -163,6 +233,14 @@ class PitchSequenceIterableDataset(IterableDataset):
                 self.target_columns,
                 self.max_seq_len,
             ):
+                spec = self.player_dropout
+                if spec is not None and spec.rate > 0:
+                    drop_pitcher = rng.random() < spec.rate
+                    drop_batter = rng.random() < spec.rate
+                    if drop_pitcher or drop_batter:
+                        _apply_player_dropout(
+                            sample["features"], spec, drop_pitcher, drop_batter
+                        )
                 if self.shuffle and self.shuffle_buffer_size > 1:
                     shuffle_buffer.append(sample)
                     if len(shuffle_buffer) >= self.shuffle_buffer_size:
@@ -309,11 +387,11 @@ class PitchDataModule:
 
     def __init__(
         self,
-        data_path: Optional[str] = None,
-        seasons: Optional[list[str]] = None,
+        data_path: str | None = None,
+        seasons: list[str] | None = None,
         batch_size: int = 64,
         max_seq_len: int = 20,
-        sample_frac: Optional[float] = None,
+        sample_frac: float | None = None,
     ):
         """
         Initialize the data module.
@@ -336,9 +414,9 @@ class PitchDataModule:
         self.sample_frac = sample_frac
 
         self.feature_engine = PitchFeatureEngine(self.data_path)
-        self.train_loader: Optional[DataLoader] = None
-        self.val_loader: Optional[DataLoader] = None
-        self.test_loader: Optional[DataLoader] = None
+        self.train_loader: DataLoader | None = None
+        self.val_loader: DataLoader | None = None
+        self.test_loader: DataLoader | None = None
 
     def setup(self) -> None:
         """Load and prepare data."""

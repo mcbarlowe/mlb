@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 from src.ml.dataset import (
     PitchSequenceDataset,
     PitchSequenceIterableDataset,
+    PlayerDropoutSpec,
     collate_pitch_sequences,
 )
 from src.ml.features import PitchFeatureEngine
@@ -102,6 +103,7 @@ class TimeSeriesCrossValidator:
         max_seq_len: int = 20,
         exclude_seasons: list[str] | None = None,
         low_memory: bool = False,
+        player_dropout: float = 0.0,
     ):
         """
         Initialize the cross-validator.
@@ -121,6 +123,7 @@ class TimeSeriesCrossValidator:
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.low_memory = low_memory
+        self.player_dropout = player_dropout
 
 
         all_seasons = discover_available_seasons(data_path)
@@ -190,9 +193,22 @@ class TimeSeriesCrossValidator:
     def _create_dataloader(
         self, seasons: list[str], shuffle: bool = True
     ) -> tuple[DataLoader, int]:
-        """Create a DataLoader for specified seasons."""
+        """Create a DataLoader for specified seasons.
+
+        Player-identity dropout applies only to training loaders
+        (``shuffle=True``); validation and test data stay untouched.
+        """
         assert self.feature_engine is not None
         print(f"  Loading {len(seasons)} season(s): {seasons}")
+
+        dropout_spec = None
+        if shuffle and self.player_dropout > 0:
+            dropout_spec = PlayerDropoutSpec.build(
+                rate=self.player_dropout,
+                feature_columns=self.feature_engine.get_feature_columns(),
+                n_known_pitchers=len(self.feature_engine.pitcher_to_idx),
+                n_known_batters=len(self.feature_engine.batter_to_idx),
+            )
 
         if self.low_memory:
             dataset = PitchSequenceIterableDataset(
@@ -203,6 +219,7 @@ class TimeSeriesCrossValidator:
                 target_columns=self.feature_engine.get_target_columns(),
                 max_seq_len=self.max_seq_len,
                 shuffle=shuffle,
+                player_dropout=dropout_spec,
             )
             loader = DataLoader(
                 dataset,
@@ -225,6 +242,7 @@ class TimeSeriesCrossValidator:
             self.feature_engine.get_feature_columns(),
             self.feature_engine.get_target_columns(),
             self.max_seq_len,
+            player_dropout=dropout_spec,
         )
         print(f"  Created {len(dataset):,} at-bat sequences")
 

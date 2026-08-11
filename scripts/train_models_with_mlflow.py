@@ -85,6 +85,7 @@ def build_pitch_type_args(
         device=device,
         seed=42,
         quick=quick,
+        player_dropout=0.0 if quick else 0.02,
         low_memory=low_memory,
 
     )
