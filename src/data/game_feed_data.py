@@ -204,8 +204,12 @@ class GameFeedData:
         row["break_vertical"] = pitch_breaks.get("breakVertical")
         row["break_vertical_induced"] = pitch_breaks.get("breakVerticalInduced")
         row["break_horizontal"] = pitch_breaks.get("breakHorizontal")
-        row["spin_rate"] = pitch_data.get("spinRate")
-        row["spin_direction"] = pitch_data.get("spinDirection")
+        # Spin lives under pitchData.breaks in the modern feed; very old
+        # feeds carried it at the pitchData level, so fall back there.
+        row["spin_rate"] = pitch_breaks.get("spinRate", pitch_data.get("spinRate"))
+        row["spin_direction"] = pitch_breaks.get(
+            "spinDirection", pitch_data.get("spinDirection")
+        )
 
         return row
 
