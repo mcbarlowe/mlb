@@ -16,9 +16,9 @@ import polars as pl
 
 from src.ml.features import PITCH_TYPE_CODES
 
-# spin_rate is deliberately absent: mlb.pitches.spin_rate is unpopulated
-# (ETL gap) — re-add once the loader backfills it.
-MOVEMENT_STATS = ("velo", "pfx_x", "pfx_z")
+# spin_rate was backfilled on 2026-08-11 (scripts/fix_pitches_spin.py)
+# after the extraction-level fix; it is a first-class profile stat again.
+MOVEMENT_STATS = ("velo", "pfx_x", "pfx_z", "spin_rate")
 DEFAULT_WINDOW_GAMES = 40
 
 PER_GAME_REQUIRED_COLUMNS = (
@@ -175,6 +175,7 @@ MOVEMENT_PROFILE_STAT_SCALES = {
     "velo": 1.0 / 100.0,
     "pfx_x": 1.0 / 12.0,
     "pfx_z": 1.0 / 12.0,
+    "spin_rate": 1.0 / 3000.0,
 }
 
 

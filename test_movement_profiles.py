@@ -26,6 +26,7 @@ def _per_game() -> pl.DataFrame:
             # pfx_x is unmeasured in game 102 (FF).
             "pfx_x": [-5.0, 5.0, None, -4.0],
             "pfx_z": [15.0, 2.0, 14.0, 16.0],
+            "spin_rate": [2200.0, 2600.0, 2350.0, 2300.0],
         }
     )
 
@@ -187,7 +188,7 @@ def test_feature_engine_contract_and_save_load_roundtrip(tmp_path):
     enabled = PitchFeatureEngine(movement_profiles_dir=tmp_path)
     assert (
         len(enabled.get_feature_columns())
-        == len(plain.get_feature_columns()) + 44
+        == len(plain.get_feature_columns()) + 55
     )
 
     enabled.pitcher_to_idx = {1: 0}
