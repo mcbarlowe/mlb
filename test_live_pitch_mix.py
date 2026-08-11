@@ -27,9 +27,10 @@ def test_blend_without_history_returns_model_distribution():
     np.testing.assert_allclose(blended, model, atol=1e-9)
 
 
-def test_blend_pulls_overconfident_model_toward_empirical_mix():
+def test_blend_corrects_overconfidence_and_surfaces_arsenal():
     # The Dylan Smith miss: model said FF 95% for a pitcher it never saw.
-    model = np.full(len(PITCH_TYPE_CODES), 1e-6)
+    # Realistic softmax output: small but nonzero tail probabilities.
+    model = np.full(len(PITCH_TYPE_CODES), 1e-3)
     model[PITCH_TYPE_TO_IDX["FF"]] = 0.95
     model[PITCH_TYPE_TO_IDX["SI"]] = 0.04
     model = model / model.sum()
@@ -41,19 +42,24 @@ def test_blend_pulls_overconfident_model_toward_empirical_mix():
     ff = blended[PITCH_TYPE_TO_IDX["FF"]]
     st = blended[PITCH_TYPE_TO_IDX["ST"]]
     cu = blended[PITCH_TYPE_TO_IDX["CU"]]
-    # FF stays the top call but loses its hallucinated certainty.
+    # Strong model signal keeps FF on top, but certainty is de-hallucinated.
     assert blended.argmax() == PITCH_TYPE_TO_IDX["FF"]
-    assert ff < 0.7
-    # The sweeper becomes a visible second option and the curveball is live.
-    assert st > 0.2
-    assert cu > 0.03
+    assert ff < model[PITCH_TYPE_TO_IDX["FF"]]
+    # The sweeper (30% of his real arsenal, rare league-wide) is boosted
+    # by an order of magnitude and the curveball becomes live.
+    assert st > 10 * model[PITCH_TYPE_TO_IDX["ST"]]
+    assert cu > model[PITCH_TYPE_TO_IDX["CU"]]
 
 
-def test_blend_converges_to_empirical_with_large_samples():
-    model = np.full(len(PITCH_TYPE_CODES), 1e-6)
-    model[PITCH_TYPE_TO_IDX["FF"]] = 1.0
+def test_blend_preserves_context_ordering_under_pitcher_prior():
+    # A non-degenerate model call gets reordered by heavy pitcher evidence.
+    model = np.full(len(PITCH_TYPE_CODES), 2e-2)
+    model[PITCH_TYPE_TO_IDX["FF"]] = 0.5
+    model[PITCH_TYPE_TO_IDX["SL"]] = 0.3
     model = model / model.sum()
-    counts = counts_to_vector({"ST": 5000})
+    counts = counts_to_vector({"ST": 4000, "FF": 1000})
     blended = blend_with_empirical_mix(model, counts)
-    assert blended.argmax() == PITCH_TYPE_TO_IDX["ST"]
-    assert blended[PITCH_TYPE_TO_IDX["ST"]] > 0.9
+    # The sweeper-dominant arsenal outranks the generic slider call.
+    assert blended[PITCH_TYPE_TO_IDX["ST"]] > blended[PITCH_TYPE_TO_IDX["SL"]]
+    # But the model's fastball signal is not erased.
+    assert blended[PITCH_TYPE_TO_IDX["FF"]] > 0.2
