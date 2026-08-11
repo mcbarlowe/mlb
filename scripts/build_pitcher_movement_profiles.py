@@ -73,8 +73,7 @@ def load_per_game_stats(min_season: int | None) -> pl.DataFrame:
             COUNT(*) AS n,
             AVG(p.pitch_start_speed) AS velo,
             AVG(p.pfxx) AS pfx_x,
-            AVG(p.pfxz) AS pfx_z,
-            AVG(p.spin_rate) AS spin_rate
+            AVG(p.pfxz) AS pfx_z
         FROM mlb.pitches p
         JOIN mlb.games g USING (game_pk)
         WHERE p.pitcher_id IS NOT NULL
@@ -84,14 +83,14 @@ def load_per_game_stats(min_season: int | None) -> pl.DataFrame:
     """
     with PostgresHandler() as db:
         frame = db.query(query)
-    return pl.from_pandas(frame).with_columns(
+    return pl.from_pandas(frame, nan_to_null=True).with_columns(
         pl.col("pitcher_id").cast(pl.Int64),
         pl.col("game_pk").cast(pl.Int64),
         pl.col("game_date").cast(pl.String),
         pl.col("n").cast(pl.Int64),
         *[
             pl.col(stat).cast(pl.Float64)
-            for stat in ("velo", "pfx_x", "pfx_z", "spin_rate")
+            for stat in ("velo", "pfx_x", "pfx_z")
         ],
     )
 

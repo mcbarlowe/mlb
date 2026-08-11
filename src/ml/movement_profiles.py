@@ -16,7 +16,9 @@ import polars as pl
 
 from src.ml.features import PITCH_TYPE_CODES
 
-MOVEMENT_STATS = ("velo", "pfx_x", "pfx_z", "spin_rate")
+# spin_rate is deliberately absent: mlb.pitches.spin_rate is unpopulated
+# (ETL gap) — re-add once the loader backfills it.
+MOVEMENT_STATS = ("velo", "pfx_x", "pfx_z")
 DEFAULT_WINDOW_GAMES = 40
 
 PER_GAME_REQUIRED_COLUMNS = (
@@ -81,8 +83,20 @@ def compute_trailing_profiles(
     if missing:
         raise ValueError(f"per_game frame is missing columns: {missing}")
 
-    dense = _dense_appearance_grid(per_game).sort(
-        ["pitcher_id", "pitch_type_code", "game_date", "game_pk"]
+    dense = (
+        _dense_appearance_grid(per_game)
+        .with_columns(
+            [
+                # DB nulls arrive as NaN through pandas; non-finite values
+                # must read as "unmeasured" or they poison rolling sums.
+                pl.when(pl.col(stat).is_finite())
+                .then(pl.col(stat))
+                .otherwise(None)
+                .alias(stat)
+                for stat in MOVEMENT_STATS
+            ]
+        )
+        .sort(["pitcher_id", "pitch_type_code", "game_date", "game_pk"])
     )
 
     group = ["pitcher_id", "pitch_type_code"]
@@ -102,11 +116,12 @@ def compute_trailing_profiles(
             .then(pl.col("n"))
             .otherwise(0)
         )
+        weight_sum = trailing_sum(weight)
         stat_exprs.append(
-            (
-                trailing_sum(pl.col(stat) * pl.col("n"))
-                / trailing_sum(weight)
-            ).alias(stat)
+            pl.when(weight_sum > 0)
+            .then(trailing_sum(pl.col(stat) * pl.col("n")) / weight_sum)
+            .otherwise(None)
+            .alias(stat)
         )
 
     trailing = dense.with_columns(stat_exprs).with_columns(
@@ -142,7 +157,7 @@ def pivot_profiles_wide(trailing: pl.DataFrame) -> pl.DataFrame:
     """Pivot long trailing profiles into one row per (pitcher, game)."""
     wide = trailing.pivot(
         on="pitch_type_code",
-        index=["pitcher_id", "game_pk", "trailing_n_total"],
+        index=["pitcher_id", "game_pk", "game_date", "trailing_n_total"],
         values=["usage", *MOVEMENT_STATS],
         aggregate_function="first",
     )
@@ -153,6 +168,81 @@ def pivot_profiles_wide(trailing: pl.DataFrame) -> pl.DataFrame:
             if column.startswith(prefix) and column[len(prefix):] in PITCH_TYPE_CODES:
                 renames[column] = profile_column_name(stat, column[len(prefix):])
     return wide.rename(renames)
+
+
+MOVEMENT_PROFILE_STAT_SCALES = {
+    "usage": 1.0,
+    "velo": 1.0 / 100.0,
+    "pfx_x": 1.0 / 12.0,
+    "pfx_z": 1.0 / 12.0,
+}
+
+
+def movement_profile_columns() -> list[str]:
+    """Feature columns contributed by movement profiles, in stable order."""
+    return [
+        profile_column_name(stat, code)
+        for stat in ("usage", *MOVEMENT_STATS)
+        for code in PITCH_TYPE_CODES
+    ]
+
+
+def attach_movement_profiles(
+    frame: pl.DataFrame,
+    wide_profiles: pl.DataFrame,
+    league_defaults: dict[str, float],
+) -> pl.DataFrame:
+    """Attach normalized profile features to a pitch frame.
+
+    Historical games hit their exact (pitcher_id, game_pk) appearance row;
+    null stats there mean "no prior history" and take league defaults —
+    NEVER the pitcher's latest profile, which would leak the future into
+    training data. Games absent from the store (live games) fall back to
+    the pitcher's latest stored profile, which is past by construction,
+    then to league defaults for true debuts.
+    """
+    columns = movement_profile_columns()
+    missing = [c for c in columns if c not in wide_profiles.columns]
+    if missing:
+        wide_profiles = wide_profiles.with_columns(
+            [pl.lit(None, dtype=pl.Float64).alias(c) for c in missing]
+        )
+    marker = "__profile_row_exists"
+    exact = wide_profiles.select(
+        "pitcher_id",
+        "game_pk",
+        pl.col("trailing_n_total").alias(marker),
+        *columns,
+    )
+    result = frame.join(exact, on=["pitcher_id", "game_pk"], how="left")
+
+    latest = (
+        wide_profiles.sort(["game_date", "game_pk"])
+        .group_by("pitcher_id", maintain_order=True)
+        .last()
+        .select("pitcher_id", *columns)
+        .rename({c: f"{c}__latest" for c in columns})
+    )
+    result = result.join(latest, on="pitcher_id", how="left")
+
+    def _scale_for(column: str) -> float:
+        for stat, scale in MOVEMENT_PROFILE_STAT_SCALES.items():
+            if column.startswith(f"profile_{stat}_"):
+                return scale
+        raise ValueError(f"No scale for profile column {column}")
+
+    fills = []
+    for column in columns:
+        default = league_defaults.get(column, 0.0)
+        row_exists = pl.col(marker).is_not_null()
+        value = (
+            pl.when(row_exists)
+            .then(pl.col(column).fill_null(default))
+            .otherwise(pl.col(f"{column}__latest").fill_null(default))
+        )
+        fills.append((value * _scale_for(column)).alias(column))
+    result = result.with_columns(fills)
+    return result.drop([marker, *[f"{c}__latest" for c in columns]])
 
 
 def league_default_profiles(trailing: pl.DataFrame) -> dict[str, float]:

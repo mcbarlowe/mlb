@@ -7,7 +7,7 @@ This module transforms raw pitch data into features suitable for ML models.
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Optional
+from typing import ClassVar
 
 import numpy as np
 import polars as pl
@@ -54,22 +54,35 @@ class PitchFeatureEngine:
     """
 
     # Fastball pitch types for cumulative counting
-    FASTBALL_TYPES = ["FF", "SI", "FC", "FA", "FT"]
+    FASTBALL_TYPES: ClassVar[list[str]] = ["FF", "SI", "FC", "FA", "FT"]
 
     # Pitch family definitions for interaction features
-    OFFSPEED_TYPES = ["CH", "FS"]
-    BREAKING_TYPES = ["SL", "CU", "KC", "ST", "SV"]  # SV = slurve
+    OFFSPEED_TYPES: ClassVar[list[str]] = ["CH", "FS"]
+    BREAKING_TYPES: ClassVar[list[str]] = ["SL", "CU", "KC", "ST", "SV"]  # SV = slurve
 
-    def __init__(self, data_path: Optional[Path | str] = None):
+    def __init__(
+        self,
+        data_path: Path | str | None = None,
+        movement_profiles_dir: Path | str | None = None,
+    ):
         """
         Initialize the feature engine.
 
         Args:
-            data_path: Path to parquet files or the string ``\"postgres\"``.
+            data_path: Path to parquet files or the string ``"postgres"``.
+            movement_profiles_dir: Optional directory produced by
+                ``scripts/build_pitcher_movement_profiles.py``. When set,
+                ``transform`` attaches trailing pitcher movement profile
+                features and ``get_feature_columns`` includes them.
         """
         raw_data_path = data_path or Path("data/processed/livefeeds")
         self.use_postgres = str(raw_data_path) == "postgres"
         self.data_path = None if self.use_postgres else Path(raw_data_path)
+        self.movement_profiles_dir = (
+            Path(movement_profiles_dir) if movement_profiles_dir else None
+        )
+        self._movement_wide: pl.DataFrame | None = None
+        self._movement_defaults: dict[str, float] | None = None
         self.pitcher_to_idx: dict[int, int] = {}
         self.batter_to_idx: dict[int, int] = {}
         self.pitcher_ff_pct: dict[int, float] = {}  # Pitcher fastball percentage
@@ -78,8 +91,8 @@ class PitchFeatureEngine:
 
     def load_data(
         self,
-        seasons: Optional[list[str]] = None,
-        sample_frac: Optional[float] = None,
+        seasons: list[str] | None = None,
+        sample_frac: float | None = None,
     ) -> pl.DataFrame:
         """
         Load pitch data from parquet files or PostgreSQL.
@@ -648,7 +661,34 @@ class PitchFeatureEngine:
             (pl.col("platoon_same_side") * pl.col("prev_is_breaking")).alias("platoon_x_breaking"),
         ])
 
+        if self.movement_profiles_dir is not None:
+            df = self._attach_movement_profiles(df)
+
         return df
+
+    def _attach_movement_profiles(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Attach trailing movement profile features (lazy-loads the store)."""
+        import json as _json
+
+        from src.ml.movement_profiles import attach_movement_profiles
+
+        assert self.movement_profiles_dir is not None
+        if self._movement_wide is None:
+            self._movement_wide = pl.read_parquet(
+                self.movement_profiles_dir / "pitcher_movement_profiles_wide.parquet"
+            )
+            defaults_path = (
+                self.movement_profiles_dir / "league_default_profiles.json"
+            )
+            self._movement_defaults = (
+                _json.loads(defaults_path.read_text())
+                if defaults_path.exists()
+                else {}
+            )
+        assert self._movement_defaults is not None
+        return attach_movement_profiles(
+            df, self._movement_wide, self._movement_defaults
+        )
 
     def fit_transform(self, df: pl.DataFrame) -> pl.DataFrame:
         """Fit and transform in one step."""
@@ -656,7 +696,7 @@ class PitchFeatureEngine:
 
     def get_feature_columns(self) -> list[str]:
         """Return list of feature column names for model input."""
-        return [
+        columns = [
             # Count features
             "balls",
             "strikes",
@@ -728,6 +768,11 @@ class PitchFeatureEngine:
             # Platoon × pitch family interaction
             "platoon_x_breaking",
         ]
+        if self.movement_profiles_dir is not None:
+            from src.ml.movement_profiles import movement_profile_columns
+
+            columns.extend(movement_profile_columns())
+        return columns
 
     def get_target_columns(self) -> list[str]:
         """Return list of target column names."""
@@ -798,6 +843,11 @@ class PitchFeatureEngine:
             "batter_to_idx": {str(k): v for k, v in self.batter_to_idx.items()},
             "pitcher_ff_pct": {str(k): v for k, v in self.pitcher_ff_pct.items()},
             "pitcher_repertoire_size": {str(k): v for k, v in self.pitcher_repertoire_size.items()},
+            "movement_profiles_dir": (
+                str(self.movement_profiles_dir)
+                if self.movement_profiles_dir is not None
+                else None
+            ),
         }
 
         path = Path(path)
@@ -821,7 +871,9 @@ class PitchFeatureEngine:
         with open(path) as f:
             data = json.load(f)
 
-        engine = cls()
+        engine = cls(
+            movement_profiles_dir=data.get("movement_profiles_dir") or None
+        )
         # Convert string keys back to integers
         engine.pitcher_to_idx = {int(k): v for k, v in data["pitcher_to_idx"].items()}
         engine.batter_to_idx = {int(k): v for k, v in data["batter_to_idx"].items()}
