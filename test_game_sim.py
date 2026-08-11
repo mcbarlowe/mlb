@@ -294,6 +294,7 @@ def test_lineup_requires_nine_batters():
 
 # --- CLI lineup extraction --------------------------------------------------
 
+
 def test_lineup_from_feed_extracts_nine_with_handedness():
     from src.sim.lineups import lineup_from_feed
 
@@ -303,4 +304,21 @@ def test_lineup_from_feed_extracts_nine_with_handedness():
     assert len(away.batters) == 9
     assert len(home.batters) == 9
     assert all(b.bat_side in {"L", "R", "S"} for b in away.batters)
+    batter_ids = {batter.player_id for batter in (*away.batters, *home.batters)}
+    assert 594838 in batter_ids
+    assert 544369 not in batter_ids
     assert home.starter.throw_side in {"L", "R"}
+
+
+def test_lineup_from_feed_rejects_incomplete_original_lineup() -> None:
+    from src.sim.lineups import lineup_from_feed
+
+    feed = json.loads(Path("example_json_files/example_live_feed.json").read_text())
+    players = feed["liveData"]["boxscore"]["teams"]["away"]["players"]
+    starter = next(
+        player for player in players.values() if player.get("battingOrder") == "100"
+    )
+    starter["battingOrder"] = "101"
+
+    with pytest.raises(ValueError, match="incomplete away starting lineup"):
+        lineup_from_feed(feed, "away")

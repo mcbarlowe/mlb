@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import pytest
 
@@ -9,6 +10,7 @@ from src.sim.team_strength import (
     StarterLine,
     StrengthFeatureBuilder,
     TeamStrengthPredictor,
+    build_feature_frame,
 )
 
 
@@ -142,3 +144,16 @@ def test_predictor_applies_fitted_logistic_probability() -> None:
     )
 
     assert probability == pytest.approx(1.0 / (1.0 + math.exp(-0.2)))
+
+
+def test_feature_frame_normalizes_chronological_input_order() -> None:
+    first = game(game_pk=1)
+    second = replace(
+        game(game_pk=2),
+        game_datetime="2024-04-02T17:00:00Z",
+    )
+
+    frame, _ = build_feature_frame([second, first])
+
+    assert frame["game_pk"].tolist() == [1, 2]
+    assert frame["game_date"].tolist() == ["2024-04-01", "2024-04-02"]

@@ -35,6 +35,7 @@ from src.ml.mlflow_utils import (
 from src.sim.game import GameSimulator, summarize
 from src.sim.lineups import actual_final, describe_game, lineup_from_feed
 from src.sim.slate import (
+    active_roster_ids,
     build_day_ahead_simulator,
     fetch_slate_games,
     render_prediction_card,
@@ -47,8 +48,7 @@ LIVEFEED_ROOT = Path("data/raw/livefeeds")
 
 def _is_final(feed: dict) -> bool:
     return (
-        feed.get("gameData", {}).get("status", {}).get("abstractGameState")
-        == "Final"
+        feed.get("gameData", {}).get("status", {}).get("abstractGameState") == "Final"
     )
 
 
@@ -76,7 +76,9 @@ def load_feed(game_pk: int, season: int | None) -> dict:
         )
 
 
-def build_simulator(args: argparse.Namespace, season: int) -> tuple[GameSimulator, Path]:
+def build_simulator(
+    args: argparse.Namespace, season: int
+) -> tuple[GameSimulator, Path]:
     simulator, run_dir = build_day_ahead_simulator(
         season=season,
         seed=args.seed,
@@ -104,15 +106,41 @@ def run_single(args: argparse.Namespace) -> None:
     sim_probability = stats["home_win_probability"]
     stats["home_win_probability_raw"] = sim_probability
     stats["home_win_probability_sim"] = (
-        calibration.apply(sim_probability) if calibration is not None else sim_probability
+        calibration.apply(sim_probability)
+        if calibration is not None
+        else sim_probability
     )
-    stats["home_win_probability"] = win_predictor.predict_home_probability(
-        season=season,
-        away_team_id=int(feed["gameData"]["teams"]["away"]["id"]),
-        home_team_id=int(feed["gameData"]["teams"]["home"]["id"]),
-        away_starter_id=away.starter.player_id,
-        home_starter_id=home.starter.player_id,
-    )
+    away_team_id = int(feed["gameData"]["teams"]["away"]["id"])
+    home_team_id = int(feed["gameData"]["teams"]["home"]["id"])
+    if "lineup_woba_edge" in win_predictor.feature_names:
+        away_active_batters, away_relievers = active_roster_ids(
+            away_team_id, game_date.isoformat()
+        )
+        home_active_batters, home_relievers = active_roster_ids(
+            home_team_id, game_date.isoformat()
+        )
+        stats["home_win_probability"] = win_predictor.predict_home_probability(
+            season=season,
+            away_team_id=away_team_id,
+            home_team_id=home_team_id,
+            away_starter_id=away.starter.player_id,
+            home_starter_id=home.starter.player_id,
+            prediction_date=game_date,
+            away_batter_ids=tuple(batter.player_id for batter in away.batters),
+            home_batter_ids=tuple(batter.player_id for batter in home.batters),
+            away_active_batter_ids=away_active_batters,
+            home_active_batter_ids=home_active_batters,
+            away_reliever_ids=away_relievers,
+            home_reliever_ids=home_relievers,
+        )
+    else:
+        stats["home_win_probability"] = win_predictor.predict_home_probability(
+            season=season,
+            away_team_id=away_team_id,
+            home_team_id=home_team_id,
+            away_starter_id=away.starter.player_id,
+            home_starter_id=home.starter.player_id,
+        )
 
     away_actual, home_actual = actual_final(feed)
     print(
@@ -123,7 +151,9 @@ def run_single(args: argparse.Namespace) -> None:
         f"Mean score: away {stats['mean_away_runs']:.2f} - home {stats['mean_home_runs']:.2f}"
         f" (total {stats['mean_total_runs']:.2f})"
     )
-    print(f"Mean innings: {stats['mean_innings']:.2f}; tie rate {stats['tie_rate']:.2%}")
+    print(
+        f"Mean innings: {stats['mean_innings']:.2f}; tie rate {stats['tie_rate']:.2%}"
+    )
     print(f"Actual final: away {away_actual} - home {home_actual}")
 
     if not args.no_card:
@@ -157,8 +187,10 @@ def render_card(
         venue=game_data.get("venue", {}).get("name"),
         home_win_probability=home_win_probability,
     )
-    out_path = Path(args.card_out) if args.card_out else Path(
-        f"output/sim_cards/sim_{args.game_pk}.jpg"
+    out_path = (
+        Path(args.card_out)
+        if args.card_out
+        else Path(f"output/sim_cards/sim_{args.game_pk}.jpg")
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     return render_game_sim_card(data, out_path)
@@ -231,9 +263,10 @@ def run_fit_win_calibration(args: argparse.Namespace) -> None:
     )
     n = len(rows)
     raw_brier = sum((p - y) ** 2 for p, y in zip(probabilities, outcomes)) / n
-    cal_brier = sum(
-        (calibration.apply(p) - y) ** 2 for p, y in zip(probabilities, outcomes)
-    ) / n
+    cal_brier = (
+        sum((calibration.apply(p) - y) ** 2 for p, y in zip(probabilities, outcomes))
+        / n
+    )
     print(
         f"\nFitted on {n} games: intercept={calibration.intercept:.3f} "
         f"slope={calibration.slope:.3f}"
@@ -301,14 +334,20 @@ def run_validation(args: argparse.Namespace) -> None:
     print(f"Mean actual total runs:    {metrics['actual_mean_total_runs']:.2f}")
     print(f"Mean p(home): {mean_p_home:.3f}; actual home win rate: {home_rate:.3f}")
     print("Home-win Brier / log loss, lower is better:")
-    print(f"  model (raw):              {metrics['win_brier']:.4f} / {metrics['win_log_loss']:.4f}")
+    print(
+        f"  model (raw):              {metrics['win_brier']:.4f} / {metrics['win_log_loss']:.4f}"
+    )
     if calibration is not None:
         print(
             f"  model (calibrated):       {metrics['win_brier_calibrated']:.4f}"
             f" / {metrics['win_log_loss_calibrated']:.4f}"
         )
-    print(f"  coin flip (p=0.5):        {metrics['win_brier_coin']:.4f} / {metrics['win_log_loss_coin']:.4f}")
-    print(f"  league home rate (p={league_home_rate}): {metrics['win_brier_league_home']:.4f} / {metrics['win_log_loss_league_home']:.4f}")
+    print(
+        f"  coin flip (p=0.5):        {metrics['win_brier_coin']:.4f} / {metrics['win_log_loss_coin']:.4f}"
+    )
+    print(
+        f"  league home rate (p={league_home_rate}): {metrics['win_brier_league_home']:.4f} / {metrics['win_log_loss_league_home']:.4f}"
+    )
     print(f"  always-home hard pick:    {metrics['win_brier_always_home']:.4f} / -")
     print(f"Pick accuracy: model {picks:.1%} vs always-home {home_rate:.1%}")
 
@@ -387,7 +426,9 @@ def run_slate(args: argparse.Namespace) -> None:
         )
 
         if not args.no_card:
-            out = Path(f"output/sim_cards/slate_{slate_date}_{prediction.game.game_pk}.jpg")
+            out = Path(
+                f"output/sim_cards/slate_{slate_date}_{prediction.game.game_pk}.jpg"
+            )
             card_path = render_prediction_card(prediction, out)
             print(f"             card: {card_path}")
 

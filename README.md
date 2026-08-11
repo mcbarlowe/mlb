@@ -373,11 +373,12 @@ Win-model versioning and comparison:
 uv run python scripts/evaluate_team_strength.py --log-mlflow --set-champion
 ```
 
-- Every evaluation logs the fitted estimator, exact feature contract, training and holdout datasets, coefficients, baseline metrics, promotion-gate result, and dependency metadata.
-- Win-probability estimators use the logged-model name `win_probability_model` and `model_collection=win_probability_models`; `model_family=team_strength_win` identifies this implementation. The stable registered-model identifier remains `mlb-team-strength-win` so production consumers do not break.
-- Every logged estimator creates an immutable version of the registered model `mlb-team-strength-win`. Version tags preserve its model contract, holdout season, promotion status, and holdout metrics. The `champion` alias and registered-model tags `champion_version` / `champion_run_id` identify the production benchmark; `latest_logged_version` / `latest_run_id` identify the newest candidate.
-- `--set-champion` advances the benchmark only when the candidate beats the league-home-rate baseline on Brier score, log loss, and pick accuracy. Failed candidates remain in MLflow for comparison and the command exits nonzero.
-- Compare future versions in the `mlb-model-training-shared` experiment by registered-model version or run ID. Use each run's `brier_improvement`, `log_loss_improvement`, and `pick_accuracy_improvement` metrics for the promotion decision.
+- Every evaluation logs the fitted estimator, exact ordered feature contract, training/holdout datasets, coefficients, rolling-fold evidence, paired date-block bootstrap intervals, promotion result, and dependencies.
+- Contract v2 adds recency- and age-adjusted projected-lineup wOBA (scaled per 10 wOBA points) plus individual bullpen FIP and recent-workload availability to the existing Elo, run-form, and starter features. Active rosters filter injuries, transactions, and call-ups; unseen players use league priors.
+- Win-probability estimators use the logged-model name `win_probability_model` and `model_collection=win_probability_models`; `model_family=team_strength_win` identifies this implementation. The stable registered-model identifier remains `mlb-team-strength-win`.
+- Every candidate creates an immutable registered-model version. Production resolves only the `champion` alias. The loader supports both the five-feature v1 contract and eight-feature v2 contract, so a v2 candidate can be logged without invalidating the current v1 champion.
+- `--set-champion` advances the alias only when the candidate's 95% paired date-block lower bounds improve both Brier score and log loss over walk-forward v1 and league-home-rate baselines across at least three seasons, with no material single-season regression. Failed candidates remain versioned and the command exits nonzero.
+- Compare runs through `rolling_evaluation.json`, the `rolling_*` MLflow metrics, and immutable registered-model version tags. `latest_logged_version` identifies the newest candidate; `champion_version` identifies production.
 - `models/`, `output/`, `catboost_info/`, and local MLflow stores are generated working data and are intentionally ignored by Git. Production outcome artifacts bootstrap from shared MLflow when absent; other local model paths must be produced by training or downloaded explicitly.
 
 The PostgreSQL training source must already contain the required seasons before this command will run.
@@ -430,12 +431,12 @@ uv run python scripts/run_daily_sim_slate.py --post --post-provider both --watch
 How it works:
 
 1. Resolves the outcome-model artifacts with `--outcome-run-dir auto`: shared MLflow production runs first when `MLFLOW_TRACKING_URI` is set, then `models/outcome/latest_run.txt`, then the newest local `models/outcome/run_*` directory.
-2. Loads the gate-passed `champion_version` of the registered MLflow model selected by `--win-model-name` (default `mlb-team-strength-win`), then rebuilds only its chronological Elo, run-form, and starter state from PostgreSQL through games before the slate date. Missing or inconsistent champion metadata stops the job rather than silently fitting another model.
+2. Loads the gate-passed `champion_version` of the registered MLflow model selected by `--win-model-name` (default `mlb-team-strength-win`), then rebuilds its chronological Elo, run-form, starter, lineup-projection, individual-bullpen, and recent-workload state from PostgreSQL through games before the slate date. Missing or inconsistent champion metadata stops the job rather than silently fitting another model.
 3. Fetches that day's preview games from the MLB schedule with hydrated probable starters.
 4. Uses the team-strength model for published win odds and the pitch/outcome Monte Carlo chain for score distributions, then renders the combined board to `output/sim_cards/daily/daily_sim_<date>.jpg`.
 5. Stores the probable-starter snapshot and published board ID in `output/sim_state/daily_sim_<date>.json`. A same-day restart reuses that post instead of publishing a duplicate; with `--watch-starters`, it resumes polling and posts a fresh one-game card only when a probable starter changes.
 
-The 2025 holdout gate covers all 2,430 regular-season games and must beat the fixed league-home-rate baseline on Brier score, log loss, and pick accuracy:
+The promotion gate uses at least three walk-forward season folds through the held-out season. A candidate must have positive 95% paired date-block bootstrap lower bounds for Brier-score and log-loss improvement over both the v1 champion contract and the fixed league-home-rate baseline, with no material single-season regression:
 
 ```bash
 uv run python scripts/evaluate_team_strength.py

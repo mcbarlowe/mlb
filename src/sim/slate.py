@@ -27,13 +27,14 @@ from src.sim.base_out import BaseOutEngine
 from src.sim.calibration import load_win_calibration
 from src.sim.game import (
     BULLPEN_ARM,
+    Batter,
     GameResult,
     GameSimulator,
     Lineup,
     Pitcher,
     summarize,
 )
-from src.sim.lineups import lineup_from_feed
+from src.sim.lineups import lineup_from_feed, starting_batters_from_feed
 from src.sim.matchup import MatchupProviderFactory
 from src.sim.pitch_mix import PitchMixProfiles
 from src.sim.team_strength import TeamStrengthPredictor
@@ -376,6 +377,48 @@ def _pitch_hand(player_id: int) -> str:
     return people[0].get("pitchHand", {}).get("code", "R") if people else "R"
 
 
+def active_roster_ids(
+    team_id: int,
+    slate_date: str,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    try:
+        payload = _fetch_json(
+            f"{STATS_API}/teams/{team_id}/roster",
+            {
+                "rosterType": "active",
+                "date": slate_date,
+            },
+        )
+    except (requests.RequestException, ValueError):
+        return (), ()
+    batter_ids: list[int] = []
+    pitcher_ids: list[int] = []
+    try:
+        roster = _mapping_list(payload.get("roster"))
+    except (TypeError, ValueError):
+        return (), ()
+    for entry in roster:
+        try:
+            person = _as_mapping(entry.get("person", {}), "roster person")
+            player_id = _as_int(person.get("id"), "roster player id")
+            if player_id is None:
+                continue
+            position = _as_mapping(entry.get("position", {}), "roster position")
+            position_type = _as_str(position.get("type")) or ""
+            abbreviation = _as_str(position.get("abbreviation")) or ""
+        except (TypeError, ValueError):
+            continue
+        is_pitcher = position_type in {"Pitcher", "Two-Way Player"} or abbreviation in {
+            "P",
+            "TWP",
+        }
+        if is_pitcher:
+            pitcher_ids.append(player_id)
+        if position_type != "Pitcher" or abbreviation == "TWP":
+            batter_ids.append(player_id)
+    return tuple(batter_ids), tuple(pitcher_ids)
+
+
 def _projected_batters(team_id: int, slate_date: str, season: int) -> list:
     from datetime import date as date_cls
     from datetime import timedelta
@@ -419,13 +462,37 @@ def _projected_batters(team_id: int, slate_date: str, season: int) -> list:
     raise ValueError(f"No recent lineup found for team {team_id}")
 
 
+def _announced_batters(game_pk: int) -> dict[str, list[Batter]]:
+    try:
+        feed = _fetch_json(
+            f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
+        )
+    except (requests.RequestException, ValueError):
+        return {}
+    announced: dict[str, list[Batter]] = {}
+    for side in ("away", "home"):
+        try:
+            batters = starting_batters_from_feed(feed, side)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(batters) == 9 and len({batter.player_id for batter in batters}) == 9:
+            announced[side] = batters
+    return announced
+
+
 def build_projected_lineups(
     game: SlateGame,
     *,
     season: int,
+    announced_lineups: dict[str, list[Batter]] | None = None,
 ) -> tuple[dict[str, Lineup], dict[str, str]]:
     lineups: dict[str, Lineup] = {}
     starters: dict[str, str] = {}
+    announced = (
+        _announced_batters(game.game_pk)
+        if announced_lineups is None
+        else announced_lineups
+    )
     for side in ("away", "home"):
         from src.sim.bullpen import bullpen_for_team
 
@@ -437,7 +504,8 @@ def build_projected_lineups(
         starters[side] = probable.display_name
         team_id = game.team_id_for(side)
         lineups[side] = Lineup(
-            batters=_projected_batters(team_id, game.slate_date, season),
+            batters=announced.get(side)
+            or _projected_batters(team_id, game.slate_date, season),
             starter=starter,
             bullpen=bullpen_for_team(team_id),
         )
@@ -452,7 +520,12 @@ def simulate_slate_game(
     n_sims: int,
     win_predictor: TeamStrengthPredictor,
 ) -> SlatePrediction:
-    lineups, starters = build_projected_lineups(game, season=season)
+    announced = _announced_batters(game.game_pk)
+    lineups, starters = build_projected_lineups(
+        game,
+        season=season,
+        announced_lineups=announced,
+    )
     results = simulator.simulate_many(lineups["away"], lineups["home"], n_sims)
     stats = summarize(results)
     sim_probability = stats["home_win_probability"]
@@ -463,13 +536,57 @@ def simulate_slate_game(
         if calibration is not None
         else sim_probability
     )
-    stats["home_win_probability"] = win_predictor.predict_home_probability(
-        season=season,
-        away_team_id=game.away_team_id,
-        home_team_id=game.home_team_id,
-        away_starter_id=lineups["away"].starter.player_id,
-        home_starter_id=lineups["home"].starter.player_id,
-    )
+    if "lineup_woba_edge" in win_predictor.feature_names:
+        away_active_batters, away_relievers = active_roster_ids(
+            game.away_team_id, game.slate_date
+        )
+        home_active_batters, home_relievers = active_roster_ids(
+            game.home_team_id, game.slate_date
+        )
+        if "away" in announced:
+            away_active_batters = tuple(
+                dict.fromkeys(
+                    (
+                        *away_active_batters,
+                        *(batter.player_id for batter in announced["away"]),
+                    )
+                )
+            )
+        if "home" in announced:
+            home_active_batters = tuple(
+                dict.fromkeys(
+                    (
+                        *home_active_batters,
+                        *(batter.player_id for batter in announced["home"]),
+                    )
+                )
+            )
+        stats["home_win_probability"] = win_predictor.predict_home_probability(
+            season=season,
+            away_team_id=game.away_team_id,
+            home_team_id=game.home_team_id,
+            away_starter_id=lineups["away"].starter.player_id,
+            home_starter_id=lineups["home"].starter.player_id,
+            prediction_date=date.fromisoformat(game.slate_date),
+            away_batter_ids=tuple(
+                batter.player_id for batter in lineups["away"].batters
+            ),
+            home_batter_ids=tuple(
+                batter.player_id for batter in lineups["home"].batters
+            ),
+            away_active_batter_ids=away_active_batters,
+            home_active_batter_ids=home_active_batters,
+            away_reliever_ids=away_relievers,
+            home_reliever_ids=home_relievers,
+        )
+    else:
+        stats["home_win_probability"] = win_predictor.predict_home_probability(
+            season=season,
+            away_team_id=game.away_team_id,
+            home_team_id=game.home_team_id,
+            away_starter_id=lineups["away"].starter.player_id,
+            home_starter_id=lineups["home"].starter.player_id,
+        )
     return SlatePrediction(
         game=game,
         results=results,
