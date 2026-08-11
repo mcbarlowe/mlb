@@ -40,9 +40,7 @@ from src.live.pipeline import (
 from src.live.predictor import LiveNextPitchPredictor
 from src.live.publisher import POST_PROVIDER_CHOICES, build_publisher
 from src.ml.mlflow_utils import resolve_mlflow_tracking_uri
-
-DEFAULT_PITCH_TYPE_MODEL = "models/attention_full/run_20260119_124719"
-DEFAULT_LOCATION_MODEL = "models/pitch_type_location_20260121_003206"
+from src.ml.run_dirs import resolve_location_run_dir, resolve_pitch_type_run_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,14 +73,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pitch-type-model",
         type=str,
-        default=DEFAULT_PITCH_TYPE_MODEL,
-        help="Directory of the trained pitch-type model",
+        default="auto",
+        help=(
+            "Directory of the trained pitch-type model (default 'auto': "
+            "newest complete non-quick models/pitch_type/run_*)"
+        ),
     )
     parser.add_argument(
         "--location-model",
         type=str,
-        default=DEFAULT_LOCATION_MODEL,
-        help="Directory of the conditioned location model ('' disables)",
+        default="auto",
+        help=(
+            "Directory of the conditioned location model (default 'auto': "
+            "newest complete models/pitch_type_location/pitch_type_location_*; "
+            "'' disables)"
+        ),
     )
     parser.add_argument(
         "--outcome-run-dir",
@@ -161,9 +166,17 @@ def main() -> None:
     )
 
     print("Loading models...")
+    pitch_type_model_dir = resolve_pitch_type_run_dir(args.pitch_type_model)
+    location_model_dir = (
+        resolve_location_run_dir(args.location_model)
+        if args.location_model
+        else None
+    )
+    print(f"  Pitch type model: {pitch_type_model_dir}")
+    print(f"  Location model: {location_model_dir or 'disabled'}")
     predictor = LiveNextPitchPredictor(
-        pitch_type_model_dir=args.pitch_type_model,
-        location_model_dir=args.location_model or None,
+        pitch_type_model_dir=pitch_type_model_dir,
+        location_model_dir=location_model_dir,
         device=args.device,
     )
     outcome_predictor = None

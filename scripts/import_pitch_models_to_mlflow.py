@@ -9,7 +9,6 @@ advances each ``champion`` alias to the newly registered version.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -27,13 +26,9 @@ from src.ml.mlflow_registry import (
     log_registered_pitch_model,
 )
 from src.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT, configure_mlflow
-
-PITCH_TYPE_FILES = ("final_model.pt", "feature_engine.json", "results.json")
-LOCATION_FILES = (
-    "pitch_type_location_model.pt",
-    "config.json",
-    "test_metrics.json",
-    "feature_engine.pt",
+from src.ml.run_dirs import (
+    resolve_location_run_dir,
+    resolve_pitch_type_run_dir,
 )
 
 
@@ -80,42 +75,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _explicit_dir(raw: str) -> Path:
-    path = Path(raw)
-    if not path.is_dir():
-        raise FileNotFoundError(path)
-    return path
-
-
-def resolve_pitch_type_run_dir(raw: str) -> Path:
-    if raw != "auto":
-        return _explicit_dir(raw)
-    for run_dir in sorted(Path("models/pitch_type").glob("run_*"), reverse=True):
-        if not all((run_dir / name).is_file() for name in PITCH_TYPE_FILES):
-            continue
-        results = json.loads((run_dir / "results.json").read_text())
-        if results.get("args", {}).get("quick"):
-            continue
-        return run_dir
-    raise FileNotFoundError(
-        "No complete non-quick models/pitch_type/run_* directory found; "
-        "pass --pitch-type-run-dir explicitly"
-    )
-
-
-def resolve_location_run_dir(raw: str) -> Path:
-    if raw != "auto":
-        return _explicit_dir(raw)
-    for run_dir in sorted(
-        Path("models/pitch_type_location").glob("pitch_type_location_*"),
-        reverse=True,
-    ):
-        if all((run_dir / name).is_file() for name in LOCATION_FILES):
-            return run_dir
-    raise FileNotFoundError(
-        "No complete models/pitch_type_location/pitch_type_location_* "
-        "directory found; pass --location-run-dir explicitly"
-    )
 
 
 def _run_stamp(run_dir: Path) -> str:
