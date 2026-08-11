@@ -58,6 +58,13 @@ if pgrep -f "$RUN_PATTERN" >/dev/null; then
   exit 0
 fi
 
+# Refresh pitcher movement profiles so profile-consuming models see
+# yesterday's outings; a failed refresh falls back to the existing store.
+echo "[$(date '+%F %T')] refreshing pitcher movement profiles"
+if ! "$UV_BIN" run python scripts/build_pitcher_movement_profiles.py; then
+  echo "[$(date '+%F %T')] profile refresh failed; continuing with existing store"
+fi
+
 args=(run python scripts/run_live_pipeline.py --random-game --poll-interval "$POLL_INTERVAL" --lead-minutes "$LEAD_MINUTES" --outcome-run-dir "$OUTCOME_RUN_DIR")
 if [[ -n "$TARGET_DATE" ]]; then
   args+=(--date "$TARGET_DATE")

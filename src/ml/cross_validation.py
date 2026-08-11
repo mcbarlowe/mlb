@@ -104,6 +104,7 @@ class TimeSeriesCrossValidator:
         exclude_seasons: list[str] | None = None,
         low_memory: bool = False,
         player_dropout: float = 0.0,
+        movement_profiles_dir: str | None = None,
     ):
         """
         Initialize the cross-validator.
@@ -124,6 +125,7 @@ class TimeSeriesCrossValidator:
         self.max_seq_len = max_seq_len
         self.low_memory = low_memory
         self.player_dropout = player_dropout
+        self.movement_profiles_dir = movement_profiles_dir
 
 
         all_seasons = discover_available_seasons(data_path)
@@ -171,7 +173,9 @@ class TimeSeriesCrossValidator:
 
     def _fit_feature_engine(self, seasons: list[str]) -> None:
         """Fit the feature engine on specified seasons."""
-        self.feature_engine = PitchFeatureEngine(self.data_path)
+        self.feature_engine = PitchFeatureEngine(
+            self.data_path, movement_profiles_dir=self.movement_profiles_dir
+        )
         self.feature_engine.fit_frames(self._load_season(season) for season in seasons)
         print(
             f"Feature engine fitted on {len(seasons)} seasons: "

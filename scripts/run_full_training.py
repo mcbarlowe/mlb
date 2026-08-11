@@ -130,6 +130,7 @@ def run_training(args) -> dict:
         "type_weight": args.type_weight,
         "location_weight": args.location_weight,
         "player_dropout": getattr(args, "player_dropout", 0.0),
+        "movement_profiles_dir": getattr(args, "movement_profiles_dir", None),
     }
     if args.model_type in ["lstm_attention", "enhanced_attention"]:
         config["n_attention_heads"] = args.n_attention_heads
@@ -150,6 +151,7 @@ def run_training(args) -> dict:
         test_season=args.test_season,
         low_memory=args.low_memory,
         player_dropout=getattr(args, "player_dropout", 0.0),
+        movement_profiles_dir=getattr(args, "movement_profiles_dir", None),
     )
 
     print("Data Split:")
@@ -462,6 +464,8 @@ def main():
                         help="Smoothing factor for class weights (0=uniform, 1=full inverse freq)")
     parser.add_argument("--player-dropout", type=float, default=0.0,
                         help="Probability of disguising the pitcher/batter as unknown per training at-bat")
+    parser.add_argument("--movement-profiles-dir", type=str, default=None,
+                        help="Enable pitcher movement profile features from this store directory")
 
     # Output
     parser.add_argument("--output-dir", type=str, default="models")

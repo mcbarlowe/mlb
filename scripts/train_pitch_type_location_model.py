@@ -83,6 +83,13 @@ def get_feature_columns(df: pl.DataFrame) -> list[str]:
         "ahead_x_rhb", "two_strike_x_rhb", "hitters_x_rhb", "platoon_x_breaking",
     ]
 
+    # Movement profile features ride along when the feature engine attached
+    # them (opt-in via --movement-profiles-dir); the presence filter below
+    # keeps this a no-op otherwise.
+    from src.ml.movement_profiles import movement_profile_columns
+
+    feature_cols.extend(movement_profile_columns())
+
     # Filter to columns that exist
     available = [c for c in feature_cols if c in df.columns]
     return available
@@ -289,6 +296,7 @@ def run_training(args):
         "train_seasons": args.train_seasons,
         "val_season": args.val_season,
         "test_season": args.test_season,
+        "movement_profiles_dir": getattr(args, "movement_profiles_dir", None),
     }
     print("\nConfiguration:")
     for k, v in config.items():
@@ -301,7 +309,10 @@ def run_training(args):
     print("LOADING DATA")
     print("=" * 70)
     data_path = Path(args.data_path)
-    feature_engine = PitchFeatureEngine(data_path)
+    feature_engine = PitchFeatureEngine(
+        data_path,
+        movement_profiles_dir=getattr(args, "movement_profiles_dir", None),
+    )
 
     def load_season_frame(season: str) -> pl.DataFrame:
         df = feature_engine.load_data(seasons=[season])
@@ -679,6 +690,12 @@ def main():
         type=str,
         default="auto",
         help="Computation device: auto, cpu, cuda, or mps",
+    )
+    parser.add_argument(
+        "--movement-profiles-dir",
+        type=str,
+        default=None,
+        help="Enable pitcher movement profile features from this store directory",
     )
 
     # Output arguments
