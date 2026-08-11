@@ -66,6 +66,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
     parser.add_argument(
+        "--models",
+        type=str,
+        choices=("both", "pitch-type", "location"),
+        default="both",
+        help="Which releases to register (default: both).",
+    )
+    parser.add_argument(
         "--set-champion",
         action="store_true",
         help="Point each champion alias at the newly registered version.",
@@ -124,10 +131,11 @@ def main() -> None:
     )
     print(f"MLflow tracking URI: {tracking_uri}")
 
-    releases = (
-        (PITCH_TYPE_SPEC, "import-pitch-type", resolve_pitch_type_run_dir(args.pitch_type_run_dir), load_pitch_type_release),
-        (PITCH_LOCATION_SPEC, "import-pitch-location", resolve_location_run_dir(args.location_run_dir), load_pitch_location_release),
-    )
+    releases = []
+    if args.models in ("both", "pitch-type"):
+        releases.append((PITCH_TYPE_SPEC, "import-pitch-type", resolve_pitch_type_run_dir(args.pitch_type_run_dir), load_pitch_type_release))
+    if args.models in ("both", "location"):
+        releases.append((PITCH_LOCATION_SPEC, "import-pitch-location", resolve_location_run_dir(args.location_run_dir), load_pitch_location_release))
     for spec, run_prefix, run_dir, loader in releases:
         print(f"\nImporting {spec.model_family} from {run_dir}")
         loaded = loader(run_dir)
