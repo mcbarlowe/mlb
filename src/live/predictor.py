@@ -66,15 +66,31 @@ class LiveNextPitchPredictor:
 
     def __init__(
         self,
-        pitch_type_model_dir: str | Path,
+        pitch_type_model_dir: str | Path | None = None,
         location_model_dir: str | Path | None = None,
         device: str = "cpu",
         pitch_mix_provider: Callable[[int], Mapping[str, int]] | None = None,
+        *,
+        pitch_predictor: PitchPredictor | None = None,
+        location_model: PitchTypeConditionedMDN | None = None,
+        location_feature_columns: list[str] | None = None,
     ):
+        """Bundle from prebuilt components or from local run directories.
+
+        Production serving goes through :meth:`from_mlflow_champions`;
+        directory arguments remain for debugging and offline evaluation.
+        """
         self.device = torch.device(device)
-        self.pitch_predictor = PitchPredictor.load_lstm(
-            pitch_type_model_dir, device=device
-        )
+        if pitch_predictor is not None:
+            self.pitch_predictor = pitch_predictor
+        elif pitch_type_model_dir is not None:
+            self.pitch_predictor = PitchPredictor.load_lstm(
+                pitch_type_model_dir, device=device
+            )
+        else:
+            raise ValueError(
+                "Provide pitch_predictor or pitch_type_model_dir"
+            )
         if self.pitch_predictor.feature_engine is None:
             raise FileNotFoundError(
                 f"feature_engine.json not found under {pitch_type_model_dir}"
@@ -87,10 +103,48 @@ class LiveNextPitchPredictor:
 
         self.location_model: PitchTypeConditionedMDN | None = None
         self.location_feature_columns: list[str] = []
-        if location_model_dir is not None:
+        if location_model is not None:
+            self.location_model = location_model
+            self.location_feature_columns = list(location_feature_columns or [])
+        elif location_model_dir is not None:
             self.location_model, self.location_feature_columns = (
                 self._load_location_model(Path(location_model_dir))
             )
+
+    @classmethod
+    def from_mlflow_champions(
+        cls,
+        device: str = "cpu",
+        tracking_uri: str | None = None,
+        pitch_mix_provider: Callable[[int], Mapping[str, int]] | None = None,
+        include_location: bool = True,
+    ) -> LiveNextPitchPredictor:
+        """Serve the MLflow champion versions of both pitch models."""
+        from src.ml.mlflow_artifacts import (
+            load_champion_location_model,
+            load_champion_pitch_type_predictor,
+        )
+
+        pitch_predictor, pitch_source = load_champion_pitch_type_predictor(
+            device=device, tracking_uri=tracking_uri
+        )
+        print(f"  Pitch type model: {pitch_source.describe()}")
+        location_model = None
+        location_columns: list[str] | None = None
+        if include_location:
+            location_model, location_columns, location_source = (
+                load_champion_location_model(device=device, tracking_uri=tracking_uri)
+            )
+            print(f"  Location model: {location_source.describe()}")
+        else:
+            print("  Location model: disabled")
+        return cls(
+            device=device,
+            pitch_mix_provider=pitch_mix_provider,
+            pitch_predictor=pitch_predictor,
+            location_model=location_model,
+            location_feature_columns=location_columns,
+        )
 
     def _load_location_model(
         self, model_dir: Path

@@ -40,7 +40,6 @@ from src.live.pipeline import (
 from src.live.predictor import LiveNextPitchPredictor
 from src.live.publisher import POST_PROVIDER_CHOICES, build_publisher
 from src.ml.mlflow_utils import resolve_mlflow_tracking_uri
-from src.ml.run_dirs import resolve_location_run_dir, resolve_pitch_type_run_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,20 +72,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pitch-type-model",
         type=str,
-        default="auto",
+        default="champion",
         help=(
-            "Directory of the trained pitch-type model (default 'auto': "
-            "newest complete non-quick models/pitch_type/run_*)"
+            "'champion' serves the MLflow champion version (default); "
+            "a directory path overrides it for debugging"
         ),
     )
     parser.add_argument(
         "--location-model",
         type=str,
-        default="auto",
+        default="champion",
         help=(
-            "Directory of the conditioned location model (default 'auto': "
-            "newest complete models/pitch_type_location/pitch_type_location_*; "
-            "'' disables)"
+            "'champion' serves the MLflow champion version (default); "
+            "a directory path overrides it; '' disables"
         ),
     )
     parser.add_argument(
@@ -166,19 +164,53 @@ def main() -> None:
     )
 
     print("Loading models...")
-    pitch_type_model_dir = resolve_pitch_type_run_dir(args.pitch_type_model)
-    location_model_dir = (
-        resolve_location_run_dir(args.location_model)
-        if args.location_model
-        else None
-    )
-    print(f"  Pitch type model: {pitch_type_model_dir}")
-    print(f"  Location model: {location_model_dir or 'disabled'}")
-    predictor = LiveNextPitchPredictor(
-        pitch_type_model_dir=pitch_type_model_dir,
-        location_model_dir=location_model_dir,
-        device=args.device,
-    )
+    tracking_uri = resolve_mlflow_tracking_uri()
+    if args.pitch_type_model == "champion" and args.location_model in ("champion", ""):
+        predictor = LiveNextPitchPredictor.from_mlflow_champions(
+            device=args.device,
+            tracking_uri=tracking_uri,
+            include_location=bool(args.location_model),
+        )
+    else:
+        # Debug overrides: serve explicit local run directories.
+        from src.ml.mlflow_artifacts import (
+            load_champion_location_model,
+            load_champion_pitch_type_predictor,
+        )
+
+        if args.pitch_type_model == "champion":
+            pitch_predictor, source = load_champion_pitch_type_predictor(
+                device=args.device, tracking_uri=tracking_uri
+            )
+            print(f"  Pitch type model: {source.describe()}")
+        else:
+            pitch_predictor = None
+            print(f"  Pitch type model: {args.pitch_type_model}")
+        location_model = None
+        location_columns: list[str] | None = None
+        location_dir = None
+        if args.location_model == "champion":
+            location_model, location_columns, loc_source = (
+                load_champion_location_model(
+                    device=args.device, tracking_uri=tracking_uri
+                )
+            )
+            print(f"  Location model: {loc_source.describe()}")
+        elif args.location_model:
+            location_dir = args.location_model
+            print(f"  Location model: {location_dir}")
+        else:
+            print("  Location model: disabled")
+        predictor = LiveNextPitchPredictor(
+            pitch_type_model_dir=(
+                None if pitch_predictor is not None else args.pitch_type_model
+            ),
+            location_model_dir=location_dir,
+            device=args.device,
+            pitch_predictor=pitch_predictor,
+            location_model=location_model,
+            location_feature_columns=location_columns,
+        )
     outcome_predictor = None
     if args.outcome_run_dir.lower() != "none":
         from src.outcome.inference import PitchOutcomePredictor
