@@ -274,11 +274,50 @@ def run_fit_win_calibration(args: argparse.Namespace) -> None:
     print(f"Fit-sample Brier raw {raw_brier:.4f} -> calibrated {cal_brier:.4f}")
 
 
+def collect_validation_rows_db(
+    args: argparse.Namespace, simulator, individual_bullpen: bool
+) -> list[dict]:
+    """DB-sourced validation rows (no archived feeds). The game sample is
+    seed-deterministic so aggregate vs individual bullpen is a paired A/B."""
+    from src.sim.db_games import GameDataStore
+
+    store = GameDataStore.load(args.season)
+    game_pks = store.final_game_pks(seed=args.seed, limit=args.games)
+    rows: list[dict] = []
+    for game_pk in game_pks:
+        try:
+            away = store.lineup(game_pk, "away", individual_bullpen=individual_bullpen)
+            home = store.lineup(game_pk, "home", individual_bullpen=individual_bullpen)
+        except (ValueError, KeyError):
+            continue
+        results = simulator.simulate_many(away, home, args.sims)
+        stats = summarize(results)
+        away_actual, home_actual = store.final(game_pk)
+        rows.append(
+            {
+                "game": str(game_pk),
+                "p_home": stats["home_win_probability"],
+                "sim_total": stats["mean_total_runs"],
+                "actual_total": away_actual + home_actual,
+                "home_won": home_actual > away_actual,
+            }
+        )
+        print(
+            f"{game_pk} p(home)={stats['home_win_probability']:.2f}"
+            f" sim total={stats['mean_total_runs']:.1f}"
+            f" actual {away_actual}-{home_actual}"
+        )
+    return rows
+
+
 def run_validation(args: argparse.Namespace) -> None:
     from src.sim.calibration import load_win_calibration
 
     simulator, run_dir = build_simulator(args, args.season)
-    rows = collect_validation_rows(args, simulator)
+    if getattr(args, "db", False):
+        rows = collect_validation_rows_db(args, simulator, args.bullpen == "individual")
+    else:
+        rows = collect_validation_rows(args, simulator)
 
     n = len(rows)
     if n == 0:
@@ -370,7 +409,8 @@ def _log_validation_to_mlflow(
         tracking_uri,
         require_tracking_uri=True,
     )
-    with mlflow.start_run(run_name=f"sim-validation-{time.strftime('%Y%m%d_%H%M%S')}"):
+    run_name = f"sim-validation-{args.bullpen}-{time.strftime('%Y%m%d_%H%M%S')}"
+    with mlflow.start_run(run_name=run_name):
         mlflow.log_params(
             {
                 "games": n,
@@ -378,6 +418,8 @@ def _log_validation_to_mlflow(
                 "season": args.season,
                 "seed": args.seed,
                 "outcome_run": outcome_run,
+                "bullpen": args.bullpen,
+                "source": "db" if getattr(args, "db", False) else "feeds",
             }
         )
         mlflow.log_metrics(metrics)
@@ -469,6 +511,17 @@ def parse_args() -> argparse.Namespace:
         help="Posting backend to use when --post is set (default: bluesky)",
     )
     parser.add_argument("--validate", action="store_true")
+    parser.add_argument(
+        "--bullpen",
+        choices=("aggregate", "individual"),
+        default="aggregate",
+        help="Bullpen model for --validate: single team arm vs individual relievers",
+    )
+    parser.add_argument(
+        "--db",
+        action="store_true",
+        help="Source validation games from Postgres instead of archived feeds",
+    )
     parser.add_argument("--slate", action="store_true")
     parser.add_argument("--date", type=str, default=None)
     parser.add_argument("--games", type=int, default=20)

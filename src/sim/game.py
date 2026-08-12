@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from src.sim.base_out import BaseOutEngine
 from src.sim.pa import PitchDistributionProvider, simulate_plate_appearance
@@ -44,6 +44,9 @@ class Lineup:
     # Relief corps stand-in used after the starter's pitch limit: a synthetic
     # per-team aggregate arm when available, else the league-average arm.
     bullpen: Pitcher = BULLPEN_ARM
+    # Individual bullpen arms, highest-leverage first (closer at index 0);
+    # empty falls back to the single aggregate ``bullpen`` arm above.
+    relievers: tuple[Pitcher, ...] = ()
 
     def __post_init__(self) -> None:
         if len(self.batters) != 9:
@@ -74,12 +77,52 @@ class GameResult:
         return self.home_runs > self.away_runs
 
 
+_MAX_RELIEVER_INNINGS = 2
+
+
 @dataclass
 class _PitchingStaff:
-    current: Pitcher
-    bullpen: Pitcher
+    starter: Pitcher
+    aggregate: Pitcher
+    relievers: tuple[Pitcher, ...] = ()
+    current: Pitcher | None = None
     is_starter: bool = True
     pitches: int = 0
+    _entered_inning: int = 0
+    _reliever_innings: dict[int, int] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.current is None:
+            self.current = self.starter
+
+    def take(self, inning: int, innings_total: int, pitch_limit: int) -> Pitcher:
+        """Pitcher for the next plate appearance: starter until the pitch
+        hook, then one-inning reliever rotation reserving the best arms late."""
+        if self.is_starter and self.pitches >= pitch_limit:
+            self.is_starter = False
+            self.current = self._select(inning, innings_total)
+            self._entered_inning = inning
+        elif not self.is_starter and inning != self._entered_inning:
+            self.current = self._select(inning, innings_total)
+            self._entered_inning = inning
+        return self.current
+
+    def _select(self, inning: int, innings_total: int) -> Pitcher:
+        """Reserve higher-leverage arms (earlier pool indices) for later
+        innings; cap each reliever's outing and fall back to the aggregate arm."""
+        pool = self.relievers
+        if not pool:
+            return self.aggregate
+        target = max(0, min(innings_total - inning, len(pool) - 1))
+        order = sorted(range(len(pool)), key=lambda k: (abs(k - target), k))
+        for k in order:
+            arm = pool[k]
+            if self._reliever_innings.get(arm.player_id, 0) < _MAX_RELIEVER_INNINGS:
+                self._reliever_innings[arm.player_id] = (
+                    self._reliever_innings.get(arm.player_id, 0) + 1
+                )
+                return arm
+        return self.aggregate
 
 
 @dataclass
@@ -111,20 +154,30 @@ class GameSimulator:
         cfg = self._config
         away_team = _BattingTeam(away)
         home_team = _BattingTeam(home)
-        home_staff = _PitchingStaff(home.starter, home.bullpen)  # faces away
-        away_staff = _PitchingStaff(away.starter, away.bullpen)
+        home_staff = _PitchingStaff(
+            home.starter, home.bullpen, home.relievers
+        )  # faces away
+        away_staff = _PitchingStaff(away.starter, away.bullpen, away.relievers)
 
         inning = 1
         while True:
             self._play_half_inning(
-                inning, is_top=True, batting=away_team, staff=home_staff, opponent=home_team
+                inning,
+                is_top=True,
+                batting=away_team,
+                staff=home_staff,
+                opponent=home_team,
             )
             if inning >= cfg.innings and home_team.runs > away_team.runs:
                 # Home leads after the top half of a final inning: no bottom.
                 return GameResult(away_team.runs, home_team.runs, inning)
 
             walkoff = self._play_half_inning(
-                inning, is_top=False, batting=home_team, staff=away_staff, opponent=away_team
+                inning,
+                is_top=False,
+                batting=home_team,
+                staff=away_staff,
+                opponent=away_team,
             )
             if inning >= cfg.innings and home_team.runs != away_team.runs:
                 return GameResult(away_team.runs, home_team.runs, inning)
@@ -147,23 +200,16 @@ class GameSimulator:
         runners = 2 if (cfg.ghost_runner and inning > cfg.innings) else 0
         outs = 0
         while outs < 3:
-            if staff.is_starter and staff.pitches >= cfg.starter_pitch_limit:
-                staff.current = staff.bullpen
-                staff.is_starter = False
-                staff.pitches = 0
+            pitcher = staff.take(inning, cfg.innings, cfg.starter_pitch_limit)
             provider = self._factory(
-                staff.current, batting.next_batter(), is_top, runners != 0
+                pitcher, batting.next_batter(), is_top, runners != 0
             )
             pa = simulate_plate_appearance(provider, self._rng)
             staff.pitches += pa.n_pitches
             transition = self._engine.sample(pa.outcome, runners, outs)
             runners, outs = transition.runners_after, transition.outs_after
             batting.runs += transition.runs
-            if (
-                not is_top
-                and inning >= cfg.innings
-                and batting.runs > opponent.runs
-            ):
+            if not is_top and inning >= cfg.innings and batting.runs > opponent.runs:
                 return True  # walk-off
         return False
 
