@@ -114,7 +114,9 @@ def build_location_args(
         seed=42,
         device=device,
         output_dir=str(base_output_dir / "pitch_type_location"),
-        compare_baseline=not quick,
+        # Diagnostic-only baseline arm; measured twice (~4.4% conditioning
+        # gain) and never served — enable deliberately when re-validating.
+        compare_baseline=False,
         quick=quick,
         low_memory=low_memory,
     )

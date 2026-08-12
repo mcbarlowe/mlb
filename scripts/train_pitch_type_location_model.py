@@ -518,39 +518,6 @@ def run_training(args):
             f"{pt_metrics['count']:>10,}"
         )
 
-    # =========================================================================
-    # Compare to Baseline (Optional)
-    # =========================================================================
-    if args.compare_baseline:
-        baseline_model = train_baseline_model(
-            train_loader,
-            val_loader,
-            n_features=n_features,
-            hidden_dims=args.hidden_dims,
-            n_components=args.n_components,
-            dropout=args.dropout,
-            n_epochs=args.n_epochs,
-            learning_rate=args.learning_rate,
-            device=device,
-        )
-
-        print("\n" + "=" * 70)
-        print("COMPARING TO BASELINE")
-        print("=" * 70)
-
-        comparison = compare_to_baseline(model, baseline_model, test_loader, str(device))
-
-        print(f"\nConditioned Model NLL: {comparison['conditioned_nll']:.4f}")
-        print(f"Baseline Model NLL:    {comparison['baseline_nll']:.4f}")
-        print(f"NLL Improvement:       {comparison['nll_improvement']:.4f}")
-        print(f"NLL Improvement %:     {comparison['nll_improvement_pct']:.2f}%")
-
-        test_metrics["baseline_comparison"] = comparison
-
-        # Save baseline model
-        baseline_path = output_dir / "baseline_model.pt"
-        torch.save(baseline_model.state_dict(), baseline_path)
-        print(f"\nSaved baseline model to: {baseline_path}")
 
     # =========================================================================
     # Save Results
@@ -593,6 +560,45 @@ def run_training(args):
         "pitcher_repertoire_size": feature_engine.pitcher_repertoire_size,
     }, fe_path)
     print(f"Saved feature engine to: {fe_path}")
+
+    # =========================================================================
+    # Compare to Baseline (Optional, off by default)
+    # =========================================================================
+    # Runs AFTER the release artifacts are on disk so a baseline failure can
+    # never lose a trained model. Purely diagnostic; never used in production.
+    if args.compare_baseline:
+        baseline_model = train_baseline_model(
+            train_loader,
+            val_loader,
+            n_features=n_features,
+            hidden_dims=args.hidden_dims,
+            n_components=args.n_components,
+            dropout=args.dropout,
+            n_epochs=args.n_epochs,
+            learning_rate=args.learning_rate,
+            device=device,
+        )
+
+        print("\n" + "=" * 70)
+        print("COMPARING TO BASELINE")
+        print("=" * 70)
+
+        comparison = compare_to_baseline(model, baseline_model, test_loader, str(device))
+
+        print(f"\nConditioned Model NLL: {comparison['conditioned_nll']:.4f}")
+        print(f"Baseline Model NLL:    {comparison['baseline_nll']:.4f}")
+        print(f"NLL Improvement:       {comparison['nll_improvement']:.4f}")
+        print(f"NLL Improvement %:     {comparison['nll_improvement_pct']:.2f}%")
+
+        test_metrics["baseline_comparison"] = comparison
+
+        # Save baseline model and refresh the metrics artifact with the
+        # comparison attached.
+        baseline_path = output_dir / "baseline_model.pt"
+        torch.save(baseline_model.state_dict(), baseline_path)
+        print(f"\nSaved baseline model to: {baseline_path}")
+        with open(metrics_path, "w") as f:
+            json.dump(test_metrics, f, indent=2)
 
     print("\n" + "=" * 70)
     print("TRAINING COMPLETE")
