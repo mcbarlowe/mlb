@@ -25,3 +25,6 @@ wheels/
 /mlruns/
 /mlartifacts/
 /artifacts/
+
+# Training/run logs
+*.log
