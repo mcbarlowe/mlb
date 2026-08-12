@@ -227,3 +227,50 @@ def fit_win_calibration(
         intercept=anchor_logit * (1.0 - slope),
         slope=slope,
     )
+
+
+DEFAULT_PA_OUTCOME_CALIBRATION_PATH = Path("models/sim/pa_outcome_calibration.json")
+
+
+@dataclass(frozen=True)
+class PAOutcomeCalibration:
+    """Per-side multipliers on the emergent 9-class PA-outcome distribution.
+
+    Applied to a matchup's closed-form PA-outcome distribution (see
+    ``src.sim.pa.pa_outcome_distribution``) with ``apply_multipliers`` and
+    renormalized, so the aggregate simulated PA-outcome mix matches league
+    rates -- the input the base-out engine consumes. Unlike per-pitch result
+    multipliers, this pins walk and strikeout rates directly rather than via
+    count dynamics, which is where per-pitch calibration distorts walks.
+    """
+
+    multipliers: dict[str, dict[str, float]]  # "top" | "bottom" -> class -> x
+
+    def for_side(self, is_top_half: bool) -> dict[str, float]:
+        side = "top" if is_top_half else "bottom"
+        return dict(self.multipliers.get(side, {}))
+
+    @classmethod
+    def load(
+        cls, path: Path = DEFAULT_PA_OUTCOME_CALIBRATION_PATH
+    ) -> PAOutcomeCalibration:
+        payload = json.loads(Path(path).read_text())
+        return cls(multipliers=payload["multipliers"])
+
+    def save(
+        self, path: Path = DEFAULT_PA_OUTCOME_CALIBRATION_PATH, meta: dict | None = None
+    ) -> None:
+        payload: dict = {"multipliers": self.multipliers}
+        if meta:
+            payload["meta"] = meta
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def load_pa_outcome_calibration(
+    path: Path = DEFAULT_PA_OUTCOME_CALIBRATION_PATH,
+) -> PAOutcomeCalibration | None:
+    """Load the fitted PA-outcome calibration, or None when not fitted yet."""
+    if not Path(path).exists():
+        return None
+    return PAOutcomeCalibration.load(path)

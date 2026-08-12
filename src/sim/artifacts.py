@@ -24,6 +24,7 @@ SIM_INPUT_FILES = [
     "team_bullpens.json",
     "sim_calibration.json",
     "win_calibration.json",
+    "pa_outcome_calibration.json",
 ]
 
 # Files without which the simulator cannot run at all.

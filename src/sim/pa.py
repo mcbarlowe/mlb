@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from src.sim.count_machine import apply_pitch_result
+from src.sim.count_machine import PA_OUTCOMES, apply_pitch_result
 
 RESULT_CLASSES = [
     "ball",
@@ -30,6 +30,57 @@ RESULT_CLASSES = [
 ]
 EVENT_CLASSES = ["out", "single", "double", "triple", "home_run", "reached_on_error"]
 MAX_PITCHES_PER_PA = 25
+
+
+def pa_outcome_distribution(
+    result_by_count: Mapping[tuple[int, int], Mapping[str, float]],
+    event_by_count: Mapping[tuple[int, int], Mapping[str, float]],
+) -> dict[str, float]:
+    """Closed-form PA-outcome distribution for one matchup's per-count tables.
+
+    Solves the count machine as an absorbing Markov chain (the 12 transient
+    balls-strikes states plus the terminal PA outcomes) and returns the
+    probability of each ``count_machine.PA_OUTCOMES`` class for a PA started at
+    0-0. This is the distribution the base-out engine actually consumes, so a
+    calibration layer can target it directly instead of per-pitch marginals,
+    which do not pin the emergent walk/strikeout rates.
+    """
+    import numpy as np
+
+    def idx(balls: int, strikes: int) -> int:
+        return balls * 3 + strikes
+
+    n_states = 12
+    out_index = {name: i for i, name in enumerate(PA_OUTCOMES)}
+    trans = np.zeros((n_states, n_states))
+    absorb = np.zeros((n_states, len(PA_OUTCOMES)))
+    for balls in range(4):
+        for strikes in range(3):
+            i = idx(balls, strikes)
+            r = result_by_count[(balls, strikes)]
+            ball = r.get("ball", 0.0)
+            strike = r.get("called_strike", 0.0) + r.get("swinging_strike", 0.0)
+            foul = r.get("foul", 0.0)
+            if balls < 3:
+                trans[i, idx(balls + 1, strikes)] += ball
+            else:
+                absorb[i, out_index["walk"]] += ball
+            if strikes < 2:
+                trans[i, idx(balls, strikes + 1)] += strike + foul
+            else:
+                absorb[i, out_index["strikeout"]] += strike
+                trans[i, i] += foul  # two-strike foul stays in the count
+            absorb[i, out_index["hit_by_pitch"]] += r.get("hit_by_pitch", 0.0)
+            in_play = r.get("in_play", 0.0)
+            event = event_by_count[(balls, strikes)]
+            for cls in EVENT_CLASSES:
+                absorb[i, out_index[cls]] += in_play * event.get(cls, 0.0)
+    solution = np.linalg.solve(np.eye(n_states) - trans, absorb)
+    start = solution[idx(0, 0)]
+    total = float(start.sum())
+    if total <= 0.0:
+        raise ValueError("Degenerate PA-outcome distribution")
+    return {name: float(start[out_index[name]] / total) for name in PA_OUTCOMES}
 
 
 class PitchDistributionProvider(Protocol):
@@ -133,6 +184,7 @@ class MatchupOutcomeProvider:
         | Mapping[tuple[int, int], Mapping[str, float]]
         | None = None,
         event_multipliers: Mapping[str, float] | None = None,
+        pa_outcome_multipliers: Mapping[str, float] | None = None,
     ):
         from src.sim.calibration import apply_multipliers
 
@@ -162,12 +214,22 @@ class MatchupOutcomeProvider:
                 count: apply_multipliers(probs, dict(event_multipliers))
                 for count, probs in self._event.items()
             }
+        self._pa_outcome_dist: dict[str, float] | None = None
+        if pa_outcome_multipliers:
+            base = pa_outcome_distribution(self._result, self._event)
+            self._pa_outcome_dist = apply_multipliers(
+                base, dict(pa_outcome_multipliers)
+            )
 
     def result_probabilities(self, balls: int, strikes: int) -> dict[str, float]:
         return self._result[(balls, strikes)]
 
     def event_probabilities(self, balls: int, strikes: int) -> dict[str, float]:
         return self._event[(balls, strikes)]
+
+    def calibrated_pa_outcomes(self) -> dict[str, float] | None:
+        """League-calibrated 9-class PA-outcome distribution, or None."""
+        return self._pa_outcome_dist
 
 
 def _sample(probabilities: dict[str, float], classes: list[str], rng: random.Random) -> str:
@@ -190,14 +252,21 @@ def simulate_plate_appearance(
         n_pitches += 1
         if n_pitches > MAX_PITCHES_PER_PA:
             raise RuntimeError("Plate appearance failed to terminate")
-        result = _sample(provider.result_probabilities(balls, strikes), RESULT_CLASSES, rng)
+        result = _sample(
+            provider.result_probabilities(balls, strikes), RESULT_CLASSES, rng
+        )
         transition = apply_pitch_result(balls, strikes, result)
         if transition.terminal is None:
             balls, strikes = transition.balls, transition.strikes
             continue
         if transition.in_play:
-            event = _sample(
+            emergent = _sample(
                 provider.event_probabilities(balls, strikes), EVENT_CLASSES, rng
             )
-            return PAResult(event, n_pitches, balls, strikes)
-        return PAResult(transition.terminal, n_pitches, balls, strikes)
+        else:
+            emergent = transition.terminal
+        break
+    getter = getattr(provider, "calibrated_pa_outcomes", None)
+    calibrated = getter() if getter is not None else None
+    outcome = _sample(calibrated, PA_OUTCOMES, rng) if calibrated else emergent
+    return PAResult(outcome, n_pitches, balls, strikes)

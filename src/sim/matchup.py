@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 
 from src.outcome.inference import OutcomeGameState, PitchOutcomePredictor
-from src.sim.calibration import SimCalibration
+from src.sim.calibration import PAOutcomeCalibration, SimCalibration
 from src.sim.game import Batter, Pitcher
 from src.sim.pa import MatchupOutcomeProvider
 from src.sim.pitch_mix import PitchMixProfiles
@@ -38,6 +38,7 @@ class MatchupProviderFactory:
         n_locations: int = 12,
         seed: int = 0,
         calibration: SimCalibration | None = None,
+        pa_outcome_calibration: PAOutcomeCalibration | None = None,
     ):
         self._predictor = outcome_predictor
         self._mix = mix_profiles
@@ -45,6 +46,7 @@ class MatchupProviderFactory:
         self._n_locations = n_locations
         self._rng = random.Random(seed)
         self._calibration = calibration
+        self._pa_calibration = pa_outcome_calibration
         self._cache: dict[tuple[int, int, bool, bool], MatchupOutcomeProvider] = {}
 
     def __call__(
@@ -95,12 +97,18 @@ class MatchupProviderFactory:
             event_multipliers = self._calibration.event_multipliers(
                 is_top_half, stretch
             )
+        pa_outcome_multipliers = (
+            self._pa_calibration.for_side(is_top_half)
+            if self._pa_calibration is not None
+            else None
+        )
         provider = MatchupOutcomeProvider(
             self._predictor,
             state,
             inputs,
             result_multipliers=result_multipliers,
             event_multipliers=event_multipliers,
+            pa_outcome_multipliers=pa_outcome_multipliers,
         )
         self._cache[key] = provider
         return provider
