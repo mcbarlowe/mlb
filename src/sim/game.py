@@ -95,34 +95,62 @@ class _PitchingStaff:
         if self.current is None:
             self.current = self.starter
 
-    def take(self, inning: int, innings_total: int, pitch_limit: int) -> Pitcher:
-        """Pitcher for the next plate appearance: starter until the pitch
-        hook, then one-inning reliever rotation reserving the best arms late."""
+    def take(
+        self,
+        inning: int,
+        innings_total: int,
+        pitch_limit: int,
+        lead: int = 0,
+        next_bat_side: str = "R",
+    ) -> Pitcher:
+        """Pitcher for the next plate appearance: starter until the pitch hook,
+        then leverage-ordered one-inning reliever rotation."""
         if self.is_starter and self.pitches >= pitch_limit:
             self.is_starter = False
-            self.current = self._select(inning, innings_total)
+            self.current = self._select(inning, innings_total, lead, next_bat_side)
             self._entered_inning = inning
         elif not self.is_starter and inning != self._entered_inning:
-            self.current = self._select(inning, innings_total)
+            self.current = self._select(inning, innings_total, lead, next_bat_side)
             self._entered_inning = inning
         return self.current
 
-    def _select(self, inning: int, innings_total: int) -> Pitcher:
-        """Reserve higher-leverage arms (earlier pool indices) for later
-        innings; cap each reliever's outing and fall back to the aggregate arm."""
+    def _select(
+        self, inning: int, innings_total: int, lead: int, next_bat_side: str
+    ) -> Pitcher:
+        """Pick a reliever: reserve the closer (index 0) for save-type spots in
+        the final inning(s), match leverage tier to how late it is, break ties by
+        platoon handedness, cap each outing, fall back to the aggregate arm."""
         pool = self.relievers
         if not pool:
             return self.aggregate
-        target = max(0, min(innings_total - inning, len(pool) - 1))
-        order = sorted(range(len(pool)), key=lambda k: (abs(k - target), k))
-        for k in order:
-            arm = pool[k]
-            if self._reliever_innings.get(arm.player_id, 0) < _MAX_RELIEVER_INNINGS:
-                self._reliever_innings[arm.player_id] = (
-                    self._reliever_innings.get(arm.player_id, 0) + 1
-                )
-                return arm
-        return self.aggregate
+        n = len(pool)
+        available = [
+            k
+            for k in range(n)
+            if self._reliever_innings.get(pool[k].player_id, 0) < _MAX_RELIEVER_INNINGS
+        ]
+        if not available:
+            return self.aggregate
+        # Save-type spot: final inning(s), pitching team ahead or tied by <=3.
+        save_spot = inning >= innings_total and 0 <= lead <= 3
+        usable = [k for k in available if not (k == 0 and not save_spot)]
+        if not usable:
+            usable = available  # only the closer remains
+        target = max(0, min(innings_total - inning, n - 1))
+        usable.sort(key=lambda k: (abs(k - target), k))
+        best_distance = abs(usable[0] - target)
+        tier = [k for k in usable if abs(k - target) == best_distance]
+        chosen = tier[0]
+        if next_bat_side in ("L", "R") and len(tier) > 1:
+            for k in tier:
+                if pool[k].throw_side == next_bat_side:
+                    chosen = k
+                    break
+        arm = pool[chosen]
+        self._reliever_innings[arm.player_id] = (
+            self._reliever_innings.get(arm.player_id, 0) + 1
+        )
+        return arm
 
 
 @dataclass
@@ -200,7 +228,11 @@ class GameSimulator:
         runners = 2 if (cfg.ghost_runner and inning > cfg.innings) else 0
         outs = 0
         while outs < 3:
-            pitcher = staff.take(inning, cfg.innings, cfg.starter_pitch_limit)
+            due = batting.lineup.batters[batting.slot % 9]
+            lead = opponent.runs - batting.runs
+            pitcher = staff.take(
+                inning, cfg.innings, cfg.starter_pitch_limit, lead, due.bat_side
+            )
             provider = self._factory(
                 pitcher, batting.next_batter(), is_top, runners != 0
             )

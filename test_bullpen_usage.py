@@ -70,3 +70,33 @@ def test_one_reliever_per_inning_no_midinning_churn():
     first = staff.take(8, 9, 90)
     # same inning, another PA -> same arm
     assert staff.take(8, 9, 90) is first
+
+
+def test_closer_only_in_save_spots():
+    blowout = _staff(POOL)
+    blowout.is_starter = False
+    blowout._entered_inning = 0
+    assert blowout.take(9, 9, 90, lead=10).player_id != 10  # not a save spot
+    trailing = _staff(POOL)
+    trailing.is_starter = False
+    trailing._entered_inning = 0
+    assert trailing.take(9, 9, 90, lead=-2).player_id != 10  # trailing
+    save = _staff(POOL)
+    save.is_starter = False
+    save._entered_inning = 0
+    assert save.take(9, 9, 90, lead=1).player_id == 10  # one-run save
+
+
+def test_platoon_tiebreak_within_leverage_tier():
+    # closer(R), two R middles, one L middle
+    pool = (Pitcher(10, "R"), Pitcher(11, "R"), Pitcher(12, "R"), Pitcher(13, "L"))
+    left = _staff(pool)
+    left.is_starter = False
+    left._entered_inning = 0
+    left._reliever_innings[12] = 2  # exhaust the exact-target arm -> tier {1,3}
+    assert left.take(7, 9, 90, lead=0, next_bat_side="L").player_id == 13
+    right = _staff(pool)
+    right.is_starter = False
+    right._entered_inning = 0
+    right._reliever_innings[12] = 2
+    assert right.take(7, 9, 90, lead=0, next_bat_side="R").player_id == 11
