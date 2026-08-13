@@ -501,6 +501,7 @@ def build_projected_lineups(
     )
     for side in ("away", "home"):
         from src.sim.bullpen import bullpen_for_team
+        from src.sim.db_games import trailing_reliever_pool
 
         probable = game.probable_for(side)
         if probable.player_id is not None:
@@ -509,11 +510,13 @@ def build_projected_lineups(
             starter = BULLPEN_ARM
         starters[side] = probable.display_name
         team_id = game.team_id_for(side)
+        relievers = trailing_reliever_pool(team_id, game.slate_date, season)
         lineups[side] = Lineup(
             batters=announced.get(side)
             or _projected_batters(team_id, game.slate_date, season),
             starter=starter,
             bullpen=bullpen_for_team(team_id),
+            relievers=relievers,
         )
     return lineups, starters
 
