@@ -59,7 +59,7 @@ ON CONFLICT (game_pk, bookmaker, market, line_type) DO UPDATE SET
 def _dt(value) -> datetime:
     if isinstance(value, datetime):
         return value
-    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return datetime.fromisoformat(str(value))
 
 
 def main() -> None:

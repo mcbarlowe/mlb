@@ -73,7 +73,7 @@ def fetch_snapshot(api_key: str, when: str, attempts: int = 4) -> tuple[dict, in
 
 
 def _iso(ts: str) -> datetime:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    return datetime.fromisoformat(ts)
 
 
 def main() -> None:
