@@ -48,11 +48,11 @@ def snapshot_times(start: str, end: str, times: list[str], next_times: list[str]
     return sorted(set(stamps))
 
 
-def fetch_snapshot(api_key: str, when: str, attempts: int = 4) -> tuple[dict, int]:
+def fetch_snapshot(api_key: str, when: str, markets: str = "h2h", attempts: int = 4) -> tuple[dict, int]:
     params = {
         "apiKey": api_key,
         "regions": "us",
-        "markets": "h2h",
+        "markets": markets,
         "oddsFormat": "american",
         "date": when,
     }
@@ -87,6 +87,7 @@ def main() -> None:
                         help="same-day UTC snapshot times (comma HH:MM)")
     parser.add_argument("--next-times", default="00:30",
                         help="next-day UTC snapshot times for late games (comma HH:MM)")
+    parser.add_argument("--markets", choices=("h2h", "totals"), default="h2h")
     args = parser.parse_args()
 
     api_key = os.environ.get("ODDS_API_KEY")
@@ -103,7 +104,7 @@ def main() -> None:
     best: dict[str, dict] = {}
     total_cost = 0
     for i, when in enumerate(stamps, 1):
-        payload, cost = fetch_snapshot(api_key, when)
+        payload, cost = fetch_snapshot(api_key, when, args.markets)
         total_cost += cost
         snap_ts = payload.get("timestamp")
         snap_dt = _iso(snap_ts) if snap_ts else _iso(when)
@@ -133,31 +134,45 @@ def main() -> None:
             )
         time.sleep(0.2)
 
-    # explode per-book into rows
+    # explode per-book into rows (schema depends on market)
     rows: list[dict] = []
     for rec in best.values():
         for book in rec["bookmakers"]:
-            h2h = next((m for m in book.get("markets", []) if m.get("key") == "h2h"), None)
-            if not h2h:
-                continue
-            prices = {o["name"]: o["price"] for o in h2h.get("outcomes", [])}
-            home_ml = prices.get(rec["home_team"])
-            away_ml = prices.get(rec["away_team"])
-            if home_ml is None or away_ml is None:
+            mkt = next(
+                (m for m in book.get("markets", []) if m.get("key") == args.markets),
+                None,
+            )
+            if not mkt:
                 continue
             commence_dt = _iso(rec["commence_time"])
-            rows.append({
+            base = {
                 "game_id": rec["game_id"],
                 "commence_time": rec["commence_time"],
                 "game_date_utc": commence_dt.date().isoformat(),
                 "away_team": rec["away_team"],
                 "home_team": rec["home_team"],
                 "bookmaker": book["key"],
-                "home_ml": int(home_ml),
-                "away_ml": int(away_ml),
                 "snapshot_time": rec["snapshot_time"],
-                "book_last_update": h2h.get("last_update"),
-            })
+                "book_last_update": mkt.get("last_update"),
+            }
+            if args.markets == "h2h":
+                prices = {o["name"]: o["price"] for o in mkt.get("outcomes", [])}
+                home_ml = prices.get(rec["home_team"])
+                away_ml = prices.get(rec["away_team"])
+                if home_ml is None or away_ml is None:
+                    continue
+                rows.append({**base, "home_ml": int(home_ml), "away_ml": int(away_ml)})
+            else:  # totals
+                outs = {o.get("name"): o for o in mkt.get("outcomes", [])}
+                over, under = outs.get("Over"), outs.get("Under")
+                if not over or not under or over.get("point") is None:
+                    continue
+                rows.append({
+                    **base,
+                    "total_point": float(over["point"]),
+                    "over_ml": int(over["price"]),
+                    "under_ml": int(under["price"]),
+                })
 
     frame = pl.DataFrame(rows)
     frame.write_parquet(args.out)
