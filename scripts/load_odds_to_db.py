@@ -49,7 +49,7 @@ UPSERT = """
 INSERT INTO {schema}.odds
     (game_pk, game_date, away_team_id, home_team_id, bookmaker, market,
      line_type, home_ml, away_ml, snapshot_time, source)
-VALUES (%s,%s,%s,%s,%s,'h2h','close',%s,%s,%s,'the-odds-api')
+VALUES (%s,%s,%s,%s,%s,'h2h',%s,%s,%s,%s,'the-odds-api')
 ON CONFLICT (game_pk, bookmaker, market, line_type) DO UPDATE SET
     home_ml=EXCLUDED.home_ml, away_ml=EXCLUDED.away_ml,
     snapshot_time=EXCLUDED.snapshot_time, ingested_at=now();
@@ -67,6 +67,7 @@ def main() -> None:
     ap.add_argument("--stage", default="data/odds/odds_2024_stage.parquet")
     ap.add_argument("--season", type=int, default=2024)
     ap.add_argument("--max-hours", type=float, default=12.0)
+    ap.add_argument("--line-type", choices=("close", "open"), default="close")
     args = ap.parse_args()
 
     staged = pl.read_parquet(args.stage)
@@ -134,7 +135,7 @@ def main() -> None:
                 continue
             game_pk, hid, aid, commence = match
             params.append((
-                game_pk, commence.date(), aid, hid, row["bookmaker"],
+                game_pk, commence.date(), aid, hid, row["bookmaker"], args.line_type,
                 int(row["home_ml"]), int(row["away_ml"]),
                 _dt(row["snapshot_time"]) if row["snapshot_time"] else None,
             ))
@@ -144,7 +145,10 @@ def main() -> None:
 
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT count(DISTINCT game_pk), count(*) FROM {c.schema}.odds"
+            f"""SELECT count(DISTINCT o.game_pk), count(*) FROM {c.schema}.odds o
+                JOIN {c.schema}.games g USING(game_pk)
+                WHERE g.season::int=%s AND o.line_type=%s""",
+            (args.season, args.line_type),
         )
         distinct_pk, total_rows = cur.fetchone()
         cur.execute(

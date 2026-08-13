@@ -31,16 +31,16 @@ SNAPSHOT_HHMM = ["16:30", "20:30"]
 NEXT_DAY_HHMM = ["00:30"]
 
 
-def snapshot_times(start: str, end: str) -> list[str]:
+def snapshot_times(start: str, end: str, times: list[str], next_times: list[str]) -> list[str]:
     d0 = datetime.fromisoformat(start).replace(tzinfo=UTC)
     d1 = datetime.fromisoformat(end).replace(tzinfo=UTC)
     stamps: list[str] = []
     day = d0
     while day <= d1:
-        for hhmm in SNAPSHOT_HHMM:
+        for hhmm in times:
             h, m = (int(x) for x in hhmm.split(":"))
             stamps.append(day.replace(hour=h, minute=m).strftime("%Y-%m-%dT%H:%M:%SZ"))
-        for hhmm in NEXT_DAY_HHMM:
+        for hhmm in next_times:
             h, m = (int(x) for x in hhmm.split(":"))
             nxt = day + timedelta(days=1)
             stamps.append(nxt.replace(hour=h, minute=m).strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -83,15 +83,21 @@ def main() -> None:
     parser.add_argument("--out", default="/tmp/odds_2024_stage.parquet")
     parser.add_argument("--dry-run-days", type=int, default=0,
                         help="only fetch this many days (validation)")
+    parser.add_argument("--times", default="16:30,20:30",
+                        help="same-day UTC snapshot times (comma HH:MM)")
+    parser.add_argument("--next-times", default="00:30",
+                        help="next-day UTC snapshot times for late games (comma HH:MM)")
     args = parser.parse_args()
 
     api_key = os.environ.get("ODDS_API_KEY")
     if not api_key:
         raise SystemExit("ODDS_API_KEY not set in environment")
 
-    stamps = snapshot_times(args.start, args.end)
+    times = [t for t in args.times.split(",") if t]
+    next_times = [t for t in args.next_times.split(",") if t]
+    stamps = snapshot_times(args.start, args.end, times, next_times)
     if args.dry_run_days:
-        stamps = stamps[: args.dry_run_days * (len(SNAPSHOT_HHMM) + len(NEXT_DAY_HHMM))]
+        stamps = stamps[: args.dry_run_days * max(1, len(times) + len(next_times))]
 
     # per game_id -> best (latest snapshot <= commence) record
     best: dict[str, dict] = {}
