@@ -482,7 +482,7 @@ def load_completed_games(
         SELECT
             g.game_pk,
             g.season::int AS season,
-            COALESCE(NULLIF(g.game_datetime, ''), g.game_date) AS game_datetime,
+            COALESCE(g.game_datetime, g.game_date) AS game_datetime,
             g.away_team_id,
             g.home_team_id,
             s.away_runs,

@@ -292,3 +292,67 @@ def _timedelta_days(days: int):
     from datetime import timedelta
 
     return timedelta(days=days)
+
+
+def trailing_reliever_pool(
+    team_id: int,
+    slate_date: str,
+    season: int,
+    *,
+    window_days: int = _BULLPEN_WINDOW_DAYS,
+    max_arms: int = _MAX_RELIEVERS,
+) -> tuple[Pitcher, ...]:
+    """Live production bullpen pool for ``team_id`` as of ``slate_date``.
+
+    One targeted Postgres query (no whole-season load): the team's relievers
+    over the trailing window before the slate date, ranked closer-first by the
+    same leverage proxy the validation store uses. Leak-free by construction
+    (only games strictly before the slate date). Returns ``()`` on any failure
+    so callers fall back to the aggregate arm.
+    """
+    from datetime import date as date_cls
+    from datetime import timedelta
+
+    as_of = date_cls.fromisoformat(slate_date)
+    window_start = as_of - timedelta(days=window_days)
+    try:
+        conn, schema = _connect()
+    except Exception:
+        return ()
+    try:
+        rows = _query(
+            conn,
+            f"""
+            SELECT p.player_id,
+                   SUM(COALESCE(p.saves,0)) AS sv,
+                   SUM(COALESCE(p.holds,0)) AS hld,
+                   SUM(COALESCE(p.gamesfinished,0)) AS gf,
+                   SUM(COALESCE(p.battersfaced,0)) AS bf,
+                   MAX(pl.pitch_hand_code) AS hand
+            FROM {schema}.pitching p
+            JOIN {schema}.games g ON g.game_pk = p.game_pk
+            JOIN {schema}.players pl ON pl.player_id = p.player_id
+            WHERE g.season::int = %s AND g.game_type = 'R'
+              AND g.game_date >= %s AND g.game_date < %s
+              AND COALESCE(p.gamesstarted,0) = 0 AND COALESCE(p.gamespitched,0) >= 1
+              AND (
+                    (p.team_type = 'away' AND g.away_team_id = %s)
+                    OR (p.team_type = 'home' AND g.home_team_id = %s)
+                  )
+            GROUP BY p.player_id
+            """,
+            (season, window_start.isoformat(), as_of.isoformat(), team_id, team_id),
+        )
+    except Exception:
+        return ()
+    finally:
+        conn.close()
+    # leverage = saves*3 + games-finished*2 + holds; tie-break on batters faced
+    ranked = sorted(
+        rows,
+        key=lambda r: (
+            -(int(r[1]) * 3 + int(r[3]) * 2 + int(r[2])),
+            -int(r[4]),
+        ),
+    )[:max_arms]
+    return tuple(Pitcher(int(r[0]), (r[5] or "R")) for r in ranked)
