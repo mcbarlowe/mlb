@@ -165,6 +165,8 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--engine-games", type=int, default=20000)
     parser.add_argument("--tracking-uri", type=str, default="http://10.0.0.171:5001")
+    parser.add_argument("--out", default="models/sim/pa_outcome_calibration.json",
+                        help="output calibration path")
     args = parser.parse_args()
 
     started = time.time()
@@ -196,6 +198,7 @@ def main() -> None:
 
     calibration = PAOutcomeCalibration(multipliers=multipliers)
     calibration.save(
+        path=Path(args.out),
         meta={
             "season": args.season,
             "matchups": len(matchups),
@@ -220,7 +223,7 @@ def main() -> None:
         r_league = engine_runs(engine, league[side], rng, args.engine_games)
         print(f"        runs/team-game  raw={r_raw:.3f}  calibrated={r_cal:.3f}  "
               f"league={r_league:.3f}  (actual {runs['per_team']:.3f})")
-    print(f"\nSaved models/sim/pa_outcome_calibration.json in {time.time()-started:.0f}s")
+    print(f"\nSaved {args.out} in {time.time()-started:.0f}s")
 
 
 if __name__ == "__main__":

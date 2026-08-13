@@ -62,11 +62,53 @@ def consensus_american(season: int) -> dict[str, dict[int, tuple[float, float]]]
         out[lt][pk] = (decimal_to_american(hd), decimal_to_american(ad))
     return out
 
+def walkforward_home_probs(test_season: int, train_seasons):
+    """Leak-free OOS home-win probs: champion feature recipe, logistic refit
+    on train_seasons only (never the test season)."""
+    import json as _json
 
-def build_rows(season: int):
+    import pandas as pd
+    from mlflow.artifacts import download_artifacts
+    from mlflow.tracking import MlflowClient
+    from sklearn.linear_model import LogisticRegression
+
+    from src.sim.team_strength import (
+        StrengthConfig,
+        build_feature_frame,
+        load_completed_games,
+    )
+
+    train_seasons = tuple(int(s) for s in train_seasons)
+    if int(test_season) in train_seasons:
+        raise SystemExit("test season must not be in train seasons")
+    uri = "http://10.0.0.171:5001"
+    client = MlflowClient(tracking_uri=uri)
+    v = client.get_model_version_by_alias("mlb-team-strength-win", "champion")
+    cp = download_artifacts(run_id=v.run_id, artifact_path="model_contract.json",
+                            tracking_uri=uri)
+    contract = _json.loads(Path(cp).read_text())
+    features = list(contract["features"])
+    sc = contract["strength_config"]
+    config = StrengthConfig(**{k: sc[k] for k in (
+        "initial_elo", "elo_k", "elo_home_advantage", "elo_season_regression",
+        "initial_runs_per_game", "run_alpha", "run_season_regression",
+        "starter_prior_ip", "starter_season_decay")})
+    games = load_completed_games(start_season=2015, end_season=int(test_season))
+    frame, _ = build_feature_frame(games, config)
+    train = frame[frame["season"].isin(train_seasons)]
+    test = frame[frame["season"] == int(test_season)]
+    model = LogisticRegression(C=1.0, max_iter=1000)
+    model.fit(train[features], train["home_won"])
+    probs = model.predict_proba(test[features])[:, 1]
+    return pd.DataFrame(
+        {"game_pk": test["game_pk"].to_numpy(), "model_prob_home": probs}
+    )
+
+
+def build_rows(season: int, probs):
     """Games present in open + close + model + result."""
     finals = load_finals([season]).set_index("game_pk")
-    probs = champion_home_probs([season]).set_index("game_pk")["model_prob_home"]
+    probs = probs.set_index("game_pk")["model_prob_home"]
     odds = consensus_american(season)
     rows = []
     for pk, (oh, oa) in odds["open"].items():
@@ -105,14 +147,23 @@ def main() -> None:
     ap.add_argument("--season", type=int, default=2025)
     ap.add_argument("--edges", default="0.0,0.02,0.03,0.05")
     ap.add_argument("--devig", default="proportional", choices=("proportional", "shin"))
+    ap.add_argument("--walkforward-train", default=None,
+                    help="comma seasons to refit logistic on (OOS); omit=champion")
     args = ap.parse_args()
 
-    rows = build_rows(args.season)
+    if args.walkforward_train:
+        train = [int(s) for s in args.walkforward_train.split(",")]
+        probs = walkforward_home_probs(args.season, train)
+        model_desc = f"walk-forward OOS (train {train})"
+    else:
+        probs = champion_home_probs([args.season])
+        model_desc = "champion (may be in-sample)"
+    rows = build_rows(args.season, probs)
     edges = [float(x) for x in args.edges.split(",")]
     open_games = games_take_open(rows)
     close_games = games_take_close(rows)
 
-    print(f"Backtest {args.season}: {len(rows)} games (model + open + close + result)")
+    print(f"Backtest {args.season}: {len(rows)} games | model: {model_desc}")
     print(f"De-vig: {args.devig}.  Primary: bet CONSENSUS OPEN, CLV vs consensus close.\n")
 
     print("=== Bet at OPEN | flat 1u ===")

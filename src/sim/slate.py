@@ -261,6 +261,7 @@ def build_day_ahead_simulator(
     seed: int = 42,
     outcome_run_dir: str = "auto",
     tracking_uri: str | None = None,
+    pa_calibration_path: str | Path | None = None,
 ) -> tuple[GameSimulator, Path]:
     """Load the outcome-model chain, pitch-mix tables, and base-out engine."""
     from src.sim.artifacts import ensure_sim_artifacts
@@ -288,7 +289,11 @@ def build_day_ahead_simulator(
     predictor = PitchOutcomePredictor(run_dir, profiles_dir=profiles_dir)
     mix = PitchMixProfiles.load(seed=seed)
     calibration = SimCalibration.load() if DEFAULT_CALIBRATION_PATH.exists() else None
-    pa_calibration = load_pa_outcome_calibration()
+    pa_calibration = (
+        load_pa_outcome_calibration(Path(pa_calibration_path))
+        if pa_calibration_path
+        else load_pa_outcome_calibration()
+    )
     factory = MatchupProviderFactory(
         predictor,
         mix,

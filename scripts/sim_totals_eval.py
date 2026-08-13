@@ -74,6 +74,8 @@ def main() -> None:
     ap.add_argument("--sims", type=int, default=500)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--edge", type=float, default=0.03, help="flat-bet edge threshold")
+    ap.add_argument("--pa-calibration", default=None,
+                    help="off-season PA calibration path (OOS totals test)")
     args = ap.parse_args()
 
     import os
@@ -83,6 +85,7 @@ def main() -> None:
     simulator, _ = build_day_ahead_simulator(
         season=args.season, seed=args.seed, outcome_run_dir="auto",
         tracking_uri=os.environ.get("MLFLOW_TRACKING_URI"),
+        pa_calibration_path=args.pa_calibration,
     )
 
     candidates = [pk for pk in store.final_game_pks(args.seed, 10_000) if pk in market]
