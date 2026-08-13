@@ -19,6 +19,7 @@ import random
 import sys
 import time
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
@@ -35,7 +36,9 @@ from src.sim.slate import build_day_ahead_simulator
 SIDES = {True: "top", False: "bottom"}
 
 
-def league_pa_by_side(season: int) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
+def league_pa_by_side(
+    seasons: Sequence[int],
+) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
     """League PA-outcome distribution split by batting side, plus runs/team-game."""
     from src.database.postgres_handler import PostgresHandler
 
@@ -49,11 +52,11 @@ def league_pa_by_side(season: int) -> tuple[dict[str, dict[str, float]], dict[st
                 SELECT event_type, COUNT(*) FROM (
                     SELECT game_pk, at_bat_index, MAX(event_type) AS event_type
                     FROM mlb.pitches
-                    WHERE season = %s AND game_type = 'R' AND half_inning = %s
+                    WHERE season = ANY(%s) AND game_type = 'R' AND half_inning = %s
                     GROUP BY game_pk, at_bat_index
                 ) t GROUP BY event_type
                 """,
-                (season, half),
+                (list(seasons), half),
             )
             counts: Counter = Counter()
             for event_type, n in cur.fetchall():
@@ -66,17 +69,17 @@ def league_pa_by_side(season: int) -> tuple[dict[str, dict[str, float]], dict[st
             """
             SELECT SUM(runs), COUNT(DISTINCT game_pk) FROM linescore
             WHERE game_pk IN (
-                SELECT game_pk FROM mlb.pitches WHERE season = %s AND game_type = 'R'
+                SELECT game_pk FROM mlb.pitches WHERE season = ANY(%s) AND game_type = 'R'
             )
             """,
-            (season,),
+            (list(seasons),),
         )
         total_runs, n_games = cur.fetchone()
     runs = {"per_team": total_runs / (2 * n_games)}
     return dists, runs
 
 
-def sample_matchups(season: int, n: int, rng: random.Random) -> list[tuple]:
+def sample_matchups(seasons: Sequence[int], n: int, rng: random.Random) -> list[tuple]:
     from src.database.postgres_handler import PostgresHandler
 
     handler = PostgresHandler()
@@ -88,13 +91,13 @@ def sample_matchups(season: int, n: int, rng: random.Random) -> list[tuple]:
                 SELECT game_pk, at_bat_index, MAX(pitcher_id) AS pitcher_id,
                        MAX(batter_id) AS batter_id, MAX(throw_side) AS throw_side,
                        MAX(bat_side) AS bat_side, MAX(half_inning) AS half_inning
-                FROM mlb.pitches WHERE season = %s AND game_type = 'R'
+                FROM mlb.pitches WHERE season = ANY(%s) AND game_type = 'R'
                 GROUP BY game_pk, at_bat_index
             ) t
             WHERE throw_side IS NOT NULL AND bat_side IS NOT NULL
             GROUP BY pitcher_id, batter_id, throw_side, bat_side, half_inning
             """,
-            (season,),
+            (list(seasons),),
         )
         rows = cur.fetchall()
     population = [
@@ -161,6 +164,8 @@ def engine_runs(engine: BaseOutEngine, dist: dict[str, float], rng, n_games: int
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--season", type=int, default=2024)
+    parser.add_argument("--seasons", default=None,
+                        help="comma prior seasons (trailing window); overrides --season")
     parser.add_argument("--matchups", type=int, default=1500)
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--engine-games", type=int, default=20000)
@@ -168,27 +173,30 @@ def main() -> None:
     parser.add_argument("--out", default="models/sim/pa_outcome_calibration.json",
                         help="output calibration path")
     args = parser.parse_args()
+    seasons = ([int(s) for s in args.seasons.split(",")]
+               if args.seasons else [args.season])
+    model_season = max(seasons)
 
     started = time.time()
     rng = random.Random(23)
-    league, runs = league_pa_by_side(args.season)
-    print(f"Actual runs/team-game {args.season}: {runs['per_team']:.3f}")
+    league, runs = league_pa_by_side(seasons)
+    print(f"Actual runs/team-game {seasons}: {runs['per_team']:.3f}")
 
     sim, _ = build_day_ahead_simulator(
-        season=args.season, tracking_uri=args.tracking_uri
+        season=model_season, tracking_uri=args.tracking_uri
     )
     # Fit against per-pitch-calibrated providers only (no existing PA layer).
     factory = MatchupProviderFactory(
         sim._factory._predictor,
         sim._factory._mix,
-        season=args.season,
+        season=model_season,
         seed=23,
         calibration=sim._factory._calibration,
         pa_outcome_calibration=None,
     )
     engine = sim._engine
 
-    matchups = sample_matchups(args.season, args.matchups, rng)
+    matchups = sample_matchups(seasons, args.matchups, rng)
     print(f"Sampled {len(matchups):,} matchups; computing closed-form PA distributions")
     base = base_distributions(factory, matchups, rng)
 
@@ -200,7 +208,7 @@ def main() -> None:
     calibration.save(
         path=Path(args.out),
         meta={
-            "season": args.season,
+            "seasons": seasons,
             "matchups": len(matchups),
             "iterations": args.iterations,
             "created": time.strftime("%Y-%m-%d %H:%M:%S"),

@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.betting.odds import no_vig_two_way
 from src.database import PostgresConfig
+from src.sim.contact_environment import ContactEnvironment, parse_weather
 from src.sim.db_games import GameDataStore
 from src.sim.slate import build_day_ahead_simulator
 
@@ -57,6 +58,29 @@ def market_totals(season: int) -> dict[int, tuple[float, float]]:
         for pk in pts
     }
 
+def game_environments(season: int) -> dict[int, tuple]:
+    """game_pk -> (venue_id, GameWeather) for the contact environment."""
+    c = PostgresConfig.from_env()
+    conn = psycopg.connect(
+        dbname=c.dbname, user=c.user, password=c.password,
+        host=c.host, port=c.port, connect_timeout=15,
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""SELECT game_pk, venue_id, weather_temp, weather_wind,
+                           weather_condition
+                    FROM {c.schema}.games WHERE season::int=%s""",
+                (season,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return {
+        int(pk): (int(v) if v is not None else None, parse_weather(t, w, cond))
+        for pk, v, t, w, cond in rows
+    }
+
 
 def brier(p, o):
     return (p - o) ** 2
@@ -87,6 +111,9 @@ def main() -> None:
         tracking_uri=os.environ.get("MLFLOW_TRACKING_URI"),
         pa_calibration_path=args.pa_calibration,
     )
+    contact_env = ContactEnvironment.load(args.season)
+    envs = game_environments(args.season) if contact_env else {}
+    print(f"contact environment: {'ON' if contact_env else 'OFF (no park factors)'}")
 
     candidates = [pk for pk in store.final_game_pks(args.seed, 10_000) if pk in market]
     rng = random.Random(args.seed)
@@ -102,7 +129,13 @@ def main() -> None:
             home = store.lineup(pk, "home", individual_bullpen=True)
         except (ValueError, KeyError):
             continue
-        results = simulator.simulate_many(away, home, args.sims)
+        environment = None
+        if contact_env:
+            venue_id, weather = envs.get(pk, (None, None))
+            environment = contact_env.multipliers(venue_id, weather)
+        results = simulator.simulate_many(
+            away, home, args.sims, environment=environment
+        )
         totals = [r.away_runs + r.home_runs for r in results]
         n = len(totals)
         over = sum(1 for t in totals if t > point)

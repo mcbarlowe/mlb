@@ -53,8 +53,8 @@ class Lineup:
             raise ValueError(f"Lineup needs 9 batters, got {len(self.batters)}")
 
 
-# provider_factory(pitcher, batter, is_top_half, stretch) -> distributions
-ProviderFactory = Callable[[Pitcher, Batter, bool, bool], PitchDistributionProvider]
+# provider_factory(pitcher, batter, is_top_half, stretch, times_through) -> provider
+ProviderFactory = Callable[..., PitchDistributionProvider]
 
 
 @dataclass(frozen=True)
@@ -90,6 +90,7 @@ class _PitchingStaff:
     pitches: int = 0
     _entered_inning: int = 0
     _reliever_innings: dict[int, int] = field(default_factory=dict)
+    _batters_faced: dict[int, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.current is None:
@@ -233,8 +234,14 @@ class GameSimulator:
             pitcher = staff.take(
                 inning, cfg.innings, cfg.starter_pitch_limit, lead, due.bat_side
             )
+            faced = staff._batters_faced.get(pitcher.player_id, 0)
+            staff._batters_faced[pitcher.player_id] = faced + 1
             provider = self._factory(
-                pitcher, batting.next_batter(), is_top, runners != 0
+                pitcher,
+                batting.next_batter(),
+                is_top,
+                runners != 0,
+                times_through=faced // 9 + 1,
             )
             pa = simulate_plate_appearance(provider, self._rng)
             staff.pitches += pa.n_pitches
@@ -245,7 +252,16 @@ class GameSimulator:
                 return True  # walk-off
         return False
 
-    def simulate_many(self, away: Lineup, home: Lineup, n: int) -> list[GameResult]:
+    def simulate_many(
+        self,
+        away: Lineup,
+        home: Lineup,
+        n: int,
+        environment: dict[str, float] | None = None,
+    ) -> list[GameResult]:
+        setter = getattr(self._factory, "set_environment", None)
+        if setter is not None:
+            setter(environment)
         return [self.simulate(away, home) for _ in range(n)]
 
 

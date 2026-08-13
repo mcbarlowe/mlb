@@ -195,7 +195,7 @@ def _engine() -> BaseOutEngine:
 def test_all_strikeout_game_reaches_cap_and_ties():
     provider = FixedDistributionProvider({"called_strike": 1.0}, {"out": 1.0})
     sim = GameSimulator(
-        lambda p, b, top, stretch=False: provider,
+        lambda p, b, top, stretch=False, times_through=2: provider,
         _engine(),
         rng=random.Random(0),
         config=GameConfig(max_innings=12),
@@ -215,7 +215,7 @@ def test_home_dominant_game_ends_without_bottom_nine():
         {"called_strike": 0.9, "in_play": 0.1}, {"home_run": 1.0}
     )
 
-    def factory(pitcher: Pitcher, batter: Batter, is_top: bool, stretch: bool = False):
+    def factory(pitcher, batter, is_top, stretch=False, times_through=2):
         return away_provider if is_top else home_provider
 
     sim = GameSimulator(factory, _engine(), rng=random.Random(1))
@@ -245,7 +245,7 @@ def test_extra_innings_walkoff_with_ghost_runner():
     single_provider = FixedDistributionProvider({"in_play": 1.0}, {"single": 1.0})
     innings_seen: list[int] = []
 
-    def factory(pitcher: Pitcher, batter: Batter, is_top: bool, stretch: bool = False):
+    def factory(pitcher, batter, is_top, stretch=False, times_through=2):
         # Home team strikes out through regulation, singles in extras.
         if is_top:
             return k_provider
@@ -269,7 +269,7 @@ def test_starter_pitch_limit_hands_off_to_bullpen():
     pitchers_seen: list[int] = []
     provider = FixedDistributionProvider({"called_strike": 1.0}, {"out": 1.0})
 
-    def factory(pitcher: Pitcher, batter: Batter, is_top: bool, stretch: bool = False):
+    def factory(pitcher, batter, is_top, stretch=False, times_through=2):
         if is_top:
             pitchers_seen.append(pitcher.player_id)
         return provider

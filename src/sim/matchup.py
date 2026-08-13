@@ -47,7 +47,19 @@ class MatchupProviderFactory:
         self._rng = random.Random(seed)
         self._calibration = calibration
         self._pa_calibration = pa_outcome_calibration
-        self._cache: dict[tuple[int, int, bool, bool], MatchupOutcomeProvider] = {}
+        self._cache: dict[
+            tuple[int, int, bool, bool, int], MatchupOutcomeProvider
+        ] = {}
+        self._env_multipliers: dict[str, float] | None = None
+
+    def set_environment(self, env_multipliers: dict[str, float] | None) -> None:
+        """Per-game contact-environment multipliers (park x weather).
+
+        Environment is constant within a game but varies across games that
+        share this factory, so setting it clears the provider cache.
+        """
+        self._env_multipliers = env_multipliers or None
+        self._cache.clear()
 
     def __call__(
         self,
@@ -55,8 +67,10 @@ class MatchupProviderFactory:
         batter: Batter,
         is_top_half: bool,
         stretch: bool = False,
+        times_through: int = 2,
     ) -> MatchupOutcomeProvider:
-        key = (pitcher.player_id, batter.player_id, is_top_half, stretch)
+        tt = 3 if times_through > 3 else (max(times_through, 1))
+        key = (pitcher.player_id, batter.player_id, is_top_half, stretch, tt)
         provider = self._cache.get(key)
         if provider is not None:
             return provider
@@ -74,7 +88,7 @@ class MatchupProviderFactory:
             is_top_half=is_top_half,
             score_diff=0,
             season=self._season,
-            times_through_order=2,
+            times_through_order=tt,
             pitcher_id=pitcher.player_id,
             batter_id=batter.player_id,
             throw_side=pitcher.throw_side,
@@ -102,6 +116,11 @@ class MatchupProviderFactory:
             if self._pa_calibration is not None
             else None
         )
+        if self._env_multipliers:
+            combined = dict(pa_outcome_multipliers) if pa_outcome_multipliers else {}
+            for cls_, m in self._env_multipliers.items():
+                combined[cls_] = combined.get(cls_, 1.0) * m
+            pa_outcome_multipliers = combined
         provider = MatchupOutcomeProvider(
             self._predictor,
             state,
