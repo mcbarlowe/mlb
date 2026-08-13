@@ -88,6 +88,8 @@ def main() -> None:
     parser.add_argument("--next-times", default="00:30",
                         help="next-day UTC snapshot times for late games (comma HH:MM)")
     parser.add_argument("--markets", choices=("h2h", "totals"), default="h2h")
+    parser.add_argument("--keep", choices=("latest", "earliest"), default="latest",
+                        help="per game keep latest (close) or earliest (open) snapshot")
     args = parser.parse_args()
 
     api_key = os.environ.get("ODDS_API_KEY")
@@ -116,8 +118,11 @@ def main() -> None:
                 continue  # snapshot after first pitch: not a pre-game line
             gid = game["id"]
             prev = best.get(gid)
-            if prev is not None and snap_dt <= prev["_snap_dt"]:
-                continue
+            if prev is not None:
+                if args.keep == "latest" and snap_dt <= prev["_snap_dt"]:
+                    continue
+                if args.keep == "earliest" and snap_dt >= prev["_snap_dt"]:
+                    continue
             best[gid] = {
                 "_snap_dt": snap_dt,
                 "game_id": gid,
