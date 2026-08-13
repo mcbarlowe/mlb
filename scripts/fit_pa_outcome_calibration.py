@@ -161,6 +161,34 @@ def engine_runs(engine: BaseOutEngine, dist: dict[str, float], rng, n_games: int
     return total / n_games
 
 
+def match_runs_scalar(
+    base: list[dict[str, float]],
+    mult: dict[str, float],
+    engine: BaseOutEngine,
+    target: float,
+    n_games: int = 6000,
+) -> dict[str, float]:
+    """Boost the 'out' multiplier so calibrated engine runs match the actual
+    league runs/team-game. The base-out engine over-produces runs on the pure
+    league PA mix, so matching runs (not just the mix) removes that level bias.
+    """
+    lo, hi = 0.5, 4.0
+    result = dict(mult)
+    for _ in range(14):
+        s = (lo + hi) / 2.0
+        trial = dict(mult)
+        trial["out"] = mult["out"] * s
+        r = engine_runs(engine, _aggregate(base, trial), random.Random(999), n_games)
+        result = trial
+        if abs(r - target) < 0.02:
+            break
+        if r > target:  # too many runs -> need more outs
+            lo = s
+        else:
+            hi = s
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--season", type=int, default=2024)
@@ -172,6 +200,8 @@ def main() -> None:
     parser.add_argument("--tracking-uri", type=str, default="http://10.0.0.171:5001")
     parser.add_argument("--out", default="models/sim/pa_outcome_calibration.json",
                         help="output calibration path")
+    parser.add_argument("--match-runs", action="store_true",
+                        help="also match actual runs/team-game (fix base-out level bias)")
     args = parser.parse_args()
     seasons = ([int(s) for s in args.seasons.split(",")]
                if args.seasons else [args.season])
@@ -203,6 +233,10 @@ def main() -> None:
     multipliers: dict[str, dict[str, float]] = {}
     for side in ("top", "bottom"):
         multipliers[side] = fit_side(base[side], league[side], args.iterations)
+        if args.match_runs:
+            multipliers[side] = match_runs_scalar(
+                base[side], multipliers[side], engine, runs["per_team"]
+            )
 
     calibration = PAOutcomeCalibration(multipliers=multipliers)
     calibration.save(
@@ -211,6 +245,7 @@ def main() -> None:
             "seasons": seasons,
             "matchups": len(matchups),
             "iterations": args.iterations,
+            "match_runs": args.match_runs,
             "created": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
     )
