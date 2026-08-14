@@ -7,8 +7,6 @@ from numbers import Real
 from pathlib import Path
 from typing import Any
 
-import mlflow
-
 DEFAULT_MLFLOW_TRACKING_URI = "http://10.0.0.171:5001"
 DEFAULT_MLFLOW_EXPERIMENT = "mlb-model-training-shared"
 
@@ -48,6 +46,7 @@ def configure_mlflow(
         )
     if not resolved_tracking_uri:
         resolved_tracking_uri = f"sqlite:///{Path('mlflow.db').resolve()}"
+    import mlflow
     mlflow.set_tracking_uri(resolved_tracking_uri)
     mlflow.set_experiment(experiment_name)
     return resolved_tracking_uri
@@ -93,6 +92,7 @@ def build_metric_dict(data: Mapping[str, Any], prefix: str = "") -> dict[str, fl
 
 
 def log_path_if_exists(path: Path, artifact_path: str | None = None) -> None:
+    import mlflow
     if not path.exists():
         return
     if path.is_file():
