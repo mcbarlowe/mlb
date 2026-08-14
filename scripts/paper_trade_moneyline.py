@@ -25,6 +25,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.betting.ingest import team_abbrev_to_id
+from src.betting.paper_trade_store import upsert_paper_trade_rows
 from src.betting.paper_trading import (
     PaperOddsLine,
     PaperTradePick,
@@ -401,6 +402,8 @@ def parse_args() -> argparse.Namespace:
         default="output/paper_trades/moneyline_paper_trades.csv",
     )
     parser.add_argument("--replace-date", action="store_true")
+    parser.add_argument("--no-db-log", action="store_true")
+    parser.add_argument("--no-csv-log", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -487,7 +490,16 @@ def main() -> None:
     _print_rows(rows)
 
     if args.dry_run:
-        print("dry-run: no paper-trade rows written")
+        print("dry-run: no paper-trade rows written to DB or CSV")
+        return
+    if not args.no_db_log:
+        db_inserted = upsert_paper_trade_rows(rows)
+        print(
+            "inserted "
+            f"{db_inserted} rows into paper_trades; "
+            f"skipped_db_existing={len(rows) - db_inserted}"
+        )
+    if args.no_csv_log:
         return
     written, skipped_existing = _write_picks(
         path=Path(args.out),

@@ -26,6 +26,7 @@ from src.betting.paper_settlement import (
     settle_paper_trade_row,
     summarize_paper_trade_rows,
 )
+from src.betting.paper_trade_store import normalize_paper_trade_row
 from src.betting.paper_trading import PaperOddsLine, select_moneyline_paper_trade
 
 
@@ -394,3 +395,37 @@ def test_paper_trade_summary_aggregates_settled_rows():
     assert math.isclose(summary.profit_units, 0.4)
     assert math.isclose(summary.roi, 0.1)
     assert summary.clv_rows == 2
+
+
+def test_normalize_paper_trade_row_coerces_db_values():
+    normalized = normalize_paper_trade_row(
+        {
+            "strategy_version": "strategy",
+            "paper_date": "2026-08-14",
+            "snapshot_time_utc": "2026-08-14T12:00:00+00:00",
+            "game_pk": "123",
+            "game_time": "",
+            "away_team": "BAL",
+            "home_team": "TB",
+            "away_team_id": "110",
+            "home_team_id": "139",
+            "side": "away",
+            "model_prob_home": "0.430000",
+            "selected_model_prob": "0.570000",
+            "edge": "0.070000",
+            "best_books": "draftkings|fanduel",
+            "best_ml": "154.0",
+            "best_decimal": "2.540000",
+            "best_fair_prob": "0.500000",
+            "stake_units": "2.8647",
+            "close_ml": "",
+        }
+    )
+
+    assert normalized["game_pk"] == 123
+    assert normalized["game_time"] is None
+    assert normalized["away_team_id"] == 110
+    assert normalized["best_books"] == ["draftkings", "fanduel"]
+    assert math.isclose(normalized["best_ml"], 154.0)
+    assert normalized["close_ml"] is None
+    assert normalized["status"] == "open"
