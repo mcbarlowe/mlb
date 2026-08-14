@@ -21,6 +21,12 @@ from src.betting.odds import (
     prob_to_american,
     two_way_overround,
 )
+from src.betting.paper_settlement import (
+    moneyline_profit,
+    settle_paper_trade_row,
+    summarize_paper_trade_rows,
+)
+from src.betting.paper_trading import PaperOddsLine, select_moneyline_paper_trade
 
 
 def test_american_decimal_conversions():
@@ -267,3 +273,124 @@ def test_line_shopping_kelly_sizes_each_execution_price():
     assert summary.n_bets == 1
     assert bets[0].best_stake > bets[0].consensus_stake
     assert 0.0 < bets[0].best_stake <= 0.05
+
+
+def test_paper_trade_selects_best_price_and_kelly_stake():
+    pick = select_moneyline_paper_trade(
+        model_prob_home=0.60,
+        odds_lines=(
+            PaperOddsLine("book_a", home_ml=100, away_ml=100),
+            PaperOddsLine("book_b", home_ml=120, away_ml=-140),
+        ),
+        edge_threshold=0.05,
+        staking="kelly",
+        bankroll_units=100.0,
+    )
+
+    assert pick is not None
+    assert pick.side == "home"
+    assert pick.best_books == ("book_b",)
+    assert pick.best_ml == 120
+    assert math.isclose(pick.best_decimal, 2.2)
+    assert 0.0 < pick.stake_units <= 5.0
+
+
+def test_paper_trade_flat_stake_and_tied_best_books():
+    pick = select_moneyline_paper_trade(
+        model_prob_home=0.60,
+        odds_lines=(
+            PaperOddsLine("book_a", home_ml=120, away_ml=-140),
+            PaperOddsLine("book_b", home_ml=120, away_ml=-140),
+        ),
+        edge_threshold=0.05,
+        staking="flat",
+        bankroll_units=50.0,
+        flat_stake_units=2.5,
+    )
+
+    assert pick is not None
+    assert pick.best_books == ("book_a", "book_b")
+    assert math.isclose(pick.stake_fraction, 0.05)
+    assert math.isclose(pick.stake_units, 2.5)
+
+
+def test_paper_trade_skips_when_edge_below_threshold():
+    pick = select_moneyline_paper_trade(
+        model_prob_home=0.51,
+        odds_lines=(PaperOddsLine("book_a", home_ml=100, away_ml=100),),
+        edge_threshold=0.05,
+    )
+
+    assert pick is None
+
+
+def _paper_settlement_row(side: str = "home") -> dict[str, str]:
+    return {
+        "side": side,
+        "best_decimal": "2.200000",
+        "stake_units": "2.0000",
+        "best_fair_prob": "0.500000",
+        "status": "open",
+    }
+
+
+def test_moneyline_profit_settles_selected_side():
+    assert math.isclose(
+        moneyline_profit(
+            side="away",
+            best_decimal=2.5,
+            stake_units=2.0,
+            home_won=False,
+        ),
+        3.0,
+    )
+    assert math.isclose(
+        moneyline_profit(
+            side="away",
+            best_decimal=2.5,
+            stake_units=2.0,
+            home_won=True,
+        ),
+        -2.0,
+    )
+
+
+def test_settle_paper_trade_row_fills_result_profit_and_clv():
+    settled = settle_paper_trade_row(
+        _paper_settlement_row(),
+        home_won=True,
+        close_home_ml=-120,
+        close_away_ml=100,
+    )
+
+    assert settled["status"] == "settled"
+    assert settled["result"] == "win"
+    assert math.isclose(float(settled["profit_units"]), 2.4)
+    assert settled["close_ml"] == "-120.0"
+    assert float(settled["close_fair_prob"]) > 0.5
+    assert float(settled["clv"]) > 0.0
+
+
+def test_paper_trade_summary_aggregates_settled_rows():
+    win = settle_paper_trade_row(
+        _paper_settlement_row("home"),
+        home_won=True,
+        close_home_ml=-120,
+        close_away_ml=100,
+    )
+    loss = settle_paper_trade_row(
+        _paper_settlement_row("away"),
+        home_won=True,
+        close_home_ml=-120,
+        close_away_ml=100,
+    )
+
+    summary = summarize_paper_trade_rows([win, loss, {"status": "open"}])
+
+    assert summary.rows == 3
+    assert summary.open_rows == 1
+    assert summary.settled_rows == 2
+    assert math.isclose(summary.total_staked, 4.0)
+    assert math.isclose(summary.profit_units, 0.4)
+    assert math.isclose(summary.roi, 0.1)
+    assert summary.clv_rows == 2
