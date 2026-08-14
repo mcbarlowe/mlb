@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Settle moneyline paper-trade CSV rows and print performance."""
+"""Settle moneyline paper-trade CSV or DB rows and print performance."""
 
 from __future__ import annotations
 
@@ -17,6 +17,10 @@ from src.betting.odds import american_to_decimal, decimal_to_american
 from src.betting.paper_settlement import (
     settle_paper_trade_row,
     summarize_paper_trade_rows,
+)
+from src.betting.paper_trade_store import (
+    load_paper_trade_rows,
+    update_paper_trade_settlement_rows,
 )
 from src.database import PostgresConfig, PostgresHandler
 
@@ -207,6 +211,7 @@ def _print_report(rows: Sequence[Mapping[str, str]]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--path", type=Path, default=DEFAULT_PAPER_PATH)
+    parser.add_argument("--db", action="store_true", help="read/update mlb.paper_trades")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--report-only", action="store_true")
     return parser.parse_args()
@@ -214,14 +219,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    rows, existing_fields = _read_csv(args.path)
+    db_config = PostgresConfig.from_env()
+    if args.db:
+        rows = load_paper_trade_rows(db_config=db_config)
+        existing_fields = list(rows[0].keys()) if rows else []
+    else:
+        rows, existing_fields = _read_csv(args.path)
     if args.report_only:
         _print_report(rows)
         return
 
     settled_rows, updated, missing_final, missing_close = _settle_rows(
         rows,
-        db_config=PostgresConfig.from_env(),
+        db_config=db_config,
     )
     print(
         f"Settlement scan: updated={updated} "
@@ -229,7 +239,20 @@ def main() -> None:
     )
     _print_report(settled_rows)
     if args.dry_run:
-        print("dry-run: no paper-trade rows written")
+        target = "DB" if args.db else "CSV"
+        print(f"dry-run: no paper-trade rows written to {target}")
+        return
+    changed_rows = [
+        new
+        for old, new in zip(rows, settled_rows, strict=True)
+        if new != old
+    ]
+    if args.db:
+        db_updated = update_paper_trade_settlement_rows(
+            changed_rows,
+            db_config=db_config,
+        )
+        print(f"updated {db_updated} DB paper_trade rows")
         return
     _write_csv(args.path, settled_rows, _fieldnames(existing_fields, settled_rows))
     print(f"wrote settled rows to {args.path}")

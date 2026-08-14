@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import date, datetime
 from typing import Any
 
 from psycopg import sql
@@ -11,7 +12,9 @@ from src.database import PostgresConfig, PostgresHandler
 
 __all__ = [
     "ensure_paper_trades_table",
+    "load_paper_trade_rows",
     "normalize_paper_trade_row",
+    "update_paper_trade_settlement_rows",
     "upsert_paper_trade_rows",
 ]
 
@@ -212,3 +215,90 @@ def upsert_paper_trade_rows(
                 cursor.execute(query, values)
                 inserted += max(0, cursor.rowcount)
     return inserted
+
+
+DB_TO_ROW = {
+    "snapshot_time": "snapshot_time_utc",
+}
+
+
+def _db_value_to_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return "|".join(str(item) for item in value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)
+
+
+def load_paper_trade_rows(
+    *,
+    db_config: PostgresConfig | None = None,
+) -> list[dict[str, str]]:
+    """Load DB paper trades as CSV-shaped rows for shared settlement helpers."""
+    query = sql.SQL("SELECT {columns} FROM paper_trades ORDER BY snapshot_time, game_pk").format(
+        columns=sql.SQL(", ").join(sql.Identifier(column) for column in INSERT_COLUMNS)
+    )
+    with PostgresHandler(db_config) as db:
+        ensure_paper_trades_table(db)
+        with db.connection.cursor() as cursor:
+            cursor.execute(query)
+            names = [
+                DB_TO_ROW.get(description.name, description.name)
+                for description in cursor.description or ()
+            ]
+            return [
+                {
+                    key: _db_value_to_text(value)
+                    for key, value in zip(names, values, strict=True)
+                }
+                for values in cursor.fetchall()
+            ]
+
+
+def update_paper_trade_settlement_rows(
+    rows: Sequence[Mapping[str, str]],
+    *,
+    db_config: PostgresConfig | None = None,
+) -> int:
+    """Update settlement fields for existing DB paper-trade rows."""
+    if not rows:
+        return 0
+    query = sql.SQL(
+        """
+        UPDATE paper_trades
+        SET status = %s,
+            close_ml = %s,
+            close_fair_prob = %s,
+            clv = %s,
+            result = %s,
+            profit_units = %s,
+            updated_at = now()
+        WHERE strategy_version = %s
+          AND game_pk = %s
+        """
+    )
+    updated = 0
+    with PostgresHandler(db_config) as db:
+        ensure_paper_trades_table(db)
+        with db.connection.cursor() as cursor:
+            for row in rows:
+                normalized = normalize_paper_trade_row(row)
+                cursor.execute(
+                    query,
+                    (
+                        normalized["status"],
+                        normalized["close_ml"],
+                        normalized["close_fair_prob"],
+                        normalized["clv"],
+                        normalized["result"],
+                        normalized["profit_units"],
+                        normalized["strategy_version"],
+                        normalized["game_pk"],
+                    ),
+                )
+                updated += max(0, cursor.rowcount)
+    return updated
