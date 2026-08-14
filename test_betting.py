@@ -7,6 +7,11 @@ from src.betting.backtest import (
     backtest_moneyline,
     kelly_fraction,
 )
+from src.betting.line_shopping import (
+    BookLine,
+    LineShoppingGame,
+    line_shop_moneyline,
+)
 from src.betting.odds import (
     american_to_decimal,
     american_to_prob,
@@ -167,3 +172,98 @@ def test_closing_only_has_zero_clv():
     _, bets = backtest_moneyline([game], edge_threshold=0.02, staking="flat")
     assert bets[0].clv_prob == 0.0
     assert bets[0].beat_close is False
+
+
+def _line_shop_game() -> LineShoppingGame:
+    return LineShoppingGame(
+        game_pk=11,
+        season=2025,
+        model_prob_home=0.60,
+        consensus_open_home=100,
+        consensus_open_away=100,
+        consensus_close_home=-110,
+        consensus_close_away=-110,
+        open_lines=(
+            BookLine("book_a", home_ml=110, away_ml=-130),
+            BookLine("book_b", home_ml=120, away_ml=-140),
+        ),
+        close_lines=(BookLine("book_b", home_ml=-110, away_ml=-110),),
+        home_won=True,
+    )
+
+
+def test_line_shopping_uses_best_price_for_consensus_side():
+    summary, bets = line_shop_moneyline([_line_shop_game()], edge_threshold=0.02)
+
+    assert summary.n_bets == 1
+    assert bets[0].side == "home"
+    assert bets[0].source_book == "book_b"
+    assert bets[0].source_books == ("book_b",)
+    assert math.isclose(summary.consensus_net_profit, 1.0)
+    assert math.isclose(summary.best_net_profit, 1.2)
+    assert math.isclose(summary.roi_lift, 0.2)
+    assert summary.best_avg_clv_vs_consensus_close > summary.consensus_avg_clv
+
+
+def test_line_shopping_exposes_tied_best_sources():
+    game = LineShoppingGame(
+        game_pk=12,
+        season=2025,
+        model_prob_home=0.60,
+        consensus_open_home=100,
+        consensus_open_away=100,
+        consensus_close_home=-110,
+        consensus_close_away=-110,
+        open_lines=(
+            BookLine("book_a", home_ml=120, away_ml=-140),
+            BookLine("book_b", home_ml=120, away_ml=-140),
+        ),
+        close_lines=(BookLine("book_b", home_ml=-110, away_ml=-110),),
+        home_won=True,
+    )
+
+    _, bets = line_shop_moneyline([game], edge_threshold=0.02)
+
+    assert bets[0].source_books == ("book_a", "book_b")
+    assert bets[0].source_book == "book_b"
+
+
+def test_line_shopping_reports_source_book_close_clv():
+    summary, bets = line_shop_moneyline([_line_shop_game()], edge_threshold=0.02)
+
+    assert bets[0].best_clv_vs_source_close is not None
+    assert bets[0].best_beat_source_close is True
+    assert summary.source_close_n == 1
+    assert summary.best_avg_clv_vs_source_close > 0.0
+    assert summary.best_pct_beat_source_close == 1.0
+
+
+def test_line_shopping_skips_below_threshold():
+    game = _line_shop_game()
+    low_edge_game = LineShoppingGame(
+        game_pk=game.game_pk,
+        season=game.season,
+        model_prob_home=0.51,
+        consensus_open_home=game.consensus_open_home,
+        consensus_open_away=game.consensus_open_away,
+        consensus_close_home=game.consensus_close_home,
+        consensus_close_away=game.consensus_close_away,
+        open_lines=game.open_lines,
+        close_lines=game.close_lines,
+        home_won=game.home_won,
+    )
+
+    summary, bets = line_shop_moneyline([low_edge_game], edge_threshold=0.02)
+
+    assert summary.n_bets == 0
+    assert bets == []
+
+
+def test_line_shopping_kelly_sizes_each_execution_price():
+    summary, bets = line_shop_moneyline(
+        [_line_shop_game()], edge_threshold=0.02, staking="kelly"
+    )
+
+    assert summary.n_bets == 1
+    assert bets[0].best_stake > bets[0].consensus_stake
+    assert 0.0 < bets[0].best_stake <= 0.05
