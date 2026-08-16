@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>BARLOWE_SEASON_PROJECTION_MAX_REFRESH_GAMES</key>
+		<string>500</string>
+		<key>BARLOWE_SEASON_PROJECTION_POST</key>
+		<string>1</string>
+		<key>BARLOWE_SEASON_PROJECTION_POST_PROVIDER</key>
+		<string>x</string>
+		<key>BARLOWE_SEASON_PROJECTION_REFRESH_LOOKBACK_DAYS</key>
+		<string>3</string>
+		<key>BARLOWE_SEASON_PROJECTION_TRIALS</key>
+		<string>5000</string>
+		<key>BARLOWE_SEASON_PROJECTION_TUNE_TRIALS</key>
+		<string>1000</string>
+		<key>MLFLOW_TRACKING_URI</key>
+		<string>http://10.0.0.171:5001</string>
+		<key>PATH</key>
+		<string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>PYTHONUNBUFFERED</key>
+		<string>1</string>
+		<key>UV_PYTHON_PREFERENCE</key>
+		<string>managed</string>
+	</dict>
+	<key>Label</key>
+	<string>com.barloweanalytics.daily-season-projection</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/matthewbarlowe/code/python/mlb/scripts/run_daily_season_projection.sh</string>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>StandardErrorPath</key>
+	<string>/Users/matthewbarlowe/Library/Logs/BarloweAnalytics/daily-season-projection.err.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/matthewbarlowe/Library/Logs/BarloweAnalytics/daily-season-projection.out.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>8</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/matthewbarlowe/code/python/mlb</string>
+</dict>
+</plist>

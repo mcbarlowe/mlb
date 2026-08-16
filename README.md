@@ -176,6 +176,44 @@ Use the provided verification script:
 uv run python verify_database.py
 ```
 
+### 6. Backtest Season Projections
+
+Use the season projection backtest to evaluate preseason division and playoff forecasts against final standings. The script writes model, flat-schedule baseline, improvement, calibration, summary CSVs, and optional playoff-probability graphics. Add `--market-win-totals resources/season_win_totals_2022_2025.csv` to blend pre-Opening-Day season win totals into the game simulation.
+
+```bash
+uv run python scripts/backtest_season_projections.py \
+  --seasons 2022 2023 2024 2025 \
+  --trials 5000 \
+  --tune-trials 1000 \
+  --out output/season_projection_default_backtest.csv \
+  --calibration-out output/season_projection_default_backtest_calibration.csv \
+  --summary-out output/season_projection_default_backtest_summary.csv \
+  --graphics-out-dir output/season_projection_default_graphics
+```
+
+Daily live-season graphics:
+
+```bash
+# Refresh pre-cutoff games, render current-season JPEGs, and dry-run the social post
+uv run python scripts/run_daily_season_projection.py
+
+# Publish the generated playoff-odds and playoff-stage graphics to X
+uv run python scripts/run_daily_season_projection.py --post --post-provider x
+```
+
+The daily runner bounds data mutation to current-season regular-season games that are either non-final before `--as-of` or within `--refresh-lookback-days` of it. It overwrites those raw live-feed JSON files, force-refreshes only those `game_pk`s into PostgreSQL, refuses to project while pre-`--as-of` games remain non-final, writes `output/season_projection_<season>/season_<season>_model_*.{csv,jpg}`, and records the posted ID in the output directory so a same-day relaunch does not duplicate the X post.
+
+
+Optional tuning knobs:
+- `--team-prior-scale-grid`: candidate prior-season team-strength offsets.
+- `--market-win-totals`: optional CSV with `season`, `win_total`, and `team_id`, `abbreviation`, or `team_name`.
+- `--market-prior-scale-grid`: candidate preseason market win-total offsets.
+- `--market-prior-min-tune-seasons`: prior seasons with market data required before tuning nonzero market scales.
+- `--schedule-strength-scale-grid`: candidate remaining-schedule-strength offsets.
+- `--calibrate-playoff-probs`: fit anchored playoff-probability calibration on prior seasons.
+- `--graphics-out-dir`: optional directory for per-season playoff-probability and playoff-stage JPEG graphics.
+
+
 ## Project Structure
 
 ```
@@ -442,7 +480,7 @@ The promotion gate uses at least three walk-forward season folds through the hel
 uv run python scripts/evaluate_team_strength.py
 ```
 
-`scripts/run_daily_sim_slate.sh` is the launchd-friendly wrapper; it reads `BARLOWE_DAILY_SIM_*` environment variables for posting, posting provider, polling cadence, state/output directories, optional date overrides, and `BARLOWE_DAILY_SIM_WIN_MODEL`. The wrapper defaults to `BARLOWE_DAILY_SIM_POST_PROVIDER=both` and `mlb-team-strength-win`. The installed `com.barloweanalytics.daily-sim-slate` LaunchAgent runs at 09:00 local time and uses the shared MLflow HTTP service. `scripts/run_daily_random_live_game.sh` uses the same provider mechanism for `BARLOWE_RANDOM_GAME_*`.
+`scripts/run_daily_sim_slate.sh` is the launchd-friendly wrapper; it reads `BARLOWE_DAILY_SIM_*` environment variables for posting, posting provider, polling cadence, state/output directories, optional date overrides, and `BARLOWE_DAILY_SIM_WIN_MODEL`. The wrapper defaults to `BARLOWE_DAILY_SIM_POST_PROVIDER=both` and `mlb-team-strength-win`. The installed `com.barloweanalytics.daily-sim-slate` LaunchAgent runs at 09:00 local time and uses the shared MLflow HTTP service. `scripts/run_daily_random_live_game.sh` uses the same provider mechanism for `BARLOWE_RANDOM_GAME_*`. `scripts/run_daily_season_projection.sh` uses `BARLOWE_SEASON_PROJECTION_*`; the installed `com.barloweanalytics.daily-season-projection` LaunchAgent runs at 08:30 local time and posts the daily season projection to X by default.
 
 
 ## Performance Notes
