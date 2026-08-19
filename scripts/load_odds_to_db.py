@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.database import PostgresConfig
 
-# Odds API uses current names; teams table still has some stale names.
+# Odds API historical data uses old names; map to current database names
 NAME_ALIASES = {
-    "Cleveland Guardians": "Cleveland Indians",
+    "Cleveland Indians": "Cleveland Guardians",  # Pre-2022 name
     "Miami Marlins": "Florida Marlins",
 }
 
@@ -67,8 +67,17 @@ def main() -> None:
     ap.add_argument("--stage", default="data/odds/odds_2024_stage.parquet")
     ap.add_argument("--season", type=int, default=2024)
     ap.add_argument("--max-hours", type=float, default=12.0)
-    ap.add_argument("--line-type", choices=("close", "open"), default="close")
+    # true_close comes from scripts/fetch_closing_lines.py, ~4 minutes before first pitch,
+    # as distinct from close, which the fixed-cadence pull leaves a median 2.5h out.
+    ap.add_argument(
+        "--line-type", choices=("close", "open", "true_close"), default="close"
+    )
+    ap.add_argument(
+        "--game-types", default="R",
+        help="comma-separated MLB game type codes to match against (e.g. R or F,D,L,W)",
+    )
     args = ap.parse_args()
+    game_types = [t.strip().upper() for t in args.game_types.split(",") if t.strip()]
 
     staged = pl.read_parquet(args.stage)
     c = PostgresConfig.from_env()
@@ -82,12 +91,13 @@ def main() -> None:
         # full-name -> team_id (restrict to MLB via games participation below)
         cur.execute(f"SELECT team_id, team_name FROM {c.schema}.teams")
         name_to_id = {str(n): int(i) for i, n in cur.fetchall()}
-        # 2024 regular-season schedule for pk matching
+        # season schedule for pk matching
         cur.execute(
             f"""SELECT game_pk, game_datetime, home_team_id, away_team_id
                 FROM {c.schema}.games
-                WHERE season::int=%s AND game_type='R' AND game_datetime IS NOT NULL""",
-            (args.season,),
+                WHERE season::int=%s AND game_type = ANY(%s)
+                  AND game_datetime IS NOT NULL""",
+            (args.season, game_types),
         )
         pair_games: dict[tuple[int, int], list[tuple[int, datetime]]] = {}
         for game_pk, gdt, home_id, away_id in cur.fetchall():
@@ -152,8 +162,8 @@ def main() -> None:
         )
         distinct_pk, total_rows = cur.fetchone()
         cur.execute(
-            f"SELECT count(*) FROM {c.schema}.games WHERE season::int=%s AND game_type='R'",
-            (args.season,),
+            f"SELECT count(*) FROM {c.schema}.games WHERE season::int=%s AND game_type = ANY(%s)",
+            (args.season, game_types),
         )
         reg_games = cur.fetchone()[0]
     conn.close()
@@ -165,7 +175,8 @@ def main() -> None:
     print(f"upserted rows: {upserts}")
     print(
         f"mlb.odds now: {total_rows} rows over {distinct_pk} games "
-        f"(coverage {distinct_pk}/{reg_games} = {distinct_pk / reg_games:.1%} of {args.season} regular games)"
+        f"(coverage {distinct_pk}/{reg_games} = {distinct_pk / reg_games:.1%} "
+        f"of {args.season} game types {','.join(game_types)})"
     )
 
 

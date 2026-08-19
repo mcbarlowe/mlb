@@ -442,13 +442,17 @@ def load_completed_games(
     start_season: int = 2015,
     end_season: int,
     include_rosters: bool = True,
+    game_types: tuple[str, ...] = ("R",),
     db_config: PostgresConfig | None = None,
 ) -> list[CompletedGame]:
-    """Load regular-season finals with each starter's game line."""
+    """Load finals (regular season by default) with each starter's game line."""
     start_season = int(start_season)
     end_season = int(end_season)
     if end_season < start_season:
         raise ValueError("end_season must be at least start_season")
+    if not game_types or any(len(t) != 1 or not t.isalpha() for t in game_types):
+        raise ValueError("game_types must be single-letter MLB game type codes")
+    game_type_list = ", ".join(f"'{t}'" for t in game_types)
     query = f"""
         WITH scores AS (
             SELECT
@@ -504,7 +508,7 @@ def load_completed_games(
         FROM games AS g
         JOIN scores AS s USING (game_pk)
         JOIN starters AS p USING (game_pk)
-        WHERE g.game_type = 'R'
+        WHERE g.game_type IN ({game_type_list})
           AND g.abstract_game_state = 'Final'
           AND g.season::int BETWEEN {start_season} AND {end_season}
           AND s.away_runs <> s.home_runs
@@ -531,7 +535,7 @@ def load_completed_games(
         FROM batting AS b
         JOIN games AS g USING (game_pk)
         LEFT JOIN players USING (player_id)
-        WHERE g.game_type = 'R'
+        WHERE g.game_type IN ({game_type_list})
           AND g.abstract_game_state = 'Final'
           AND g.season::int BETWEEN {start_season} AND {end_season}
           AND b.player_id IS NOT NULL
@@ -551,7 +555,7 @@ def load_completed_games(
             COALESCE(p.numberofpitches, 0)::int AS pitches
         FROM pitching AS p
         JOIN games AS g USING (game_pk)
-        WHERE g.game_type = 'R'
+        WHERE g.game_type IN ({game_type_list})
           AND g.abstract_game_state = 'Final'
           AND g.season::int BETWEEN {start_season} AND {end_season}
           AND COALESCE(p.gamesstarted, 0) = 0
