@@ -379,6 +379,70 @@ def load_park_factors(path: Path) -> dict[str, dict[int, float]]:
     }
 
 
+MODEL_NAME = "mlb-prop-rate-estimator"
+MLFLOW_CACHE = Path(__file__).parent.parent / "models/mlflow_cache/prop_rate_estimator"
+DEFAULT_TRACKING_URI = "http://10.0.0.171:5001"
+
+
+def default_tracking_uri() -> str:
+    """Shared HTTP tracking server; env honored only when it is an HTTP URI
+    (the artifact resolver needs the REST API, not a raw DB store URI)."""
+    env = os.environ.get("MLFLOW_TRACKING_URI", "")
+    return env if env.startswith(("http://", "https://")) else DEFAULT_TRACKING_URI
+
+
+def resolve_registry_artifacts(tracking_uri: str) -> tuple[Path | None, Path | None, str]:
+    """Resolve the @champion generation's artifacts from the MLflow registry.
+
+    Returns (curves_path, parks_path, provenance). Downloads the champion's
+    registered aging-curve/park-factor artifacts into a per-version cache
+    (models/mlflow_cache/prop_rate_estimator/v<N>/). Server unreachable ->
+    newest cached champion. Champion generation != this code's
+    STRATEGY_VERSION, or nothing cached -> (None, None, reason) and the
+    caller falls back to the repo-local artifact files.
+    """
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "5")
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
+    try:
+        from mlflow.artifacts import download_artifacts
+        from mlflow.tracking import MlflowClient
+
+        client = MlflowClient(tracking_uri=tracking_uri)
+        v = client.get_model_version_by_alias(MODEL_NAME, "champion")
+        strategy = v.tags.get("strategy_version", "?")
+        if strategy != STRATEGY_VERSION:
+            return None, None, (
+                f"registry champion v{v.version} is {strategy} but this code is "
+                f"{STRATEGY_VERSION}; using repo-local artifacts"
+            )
+        cache = MLFLOW_CACHE / f"v{v.version}"
+        curves = cache / "estimator/aging_curves.json"
+        parks = cache / "estimator/park_factors.json"
+        if not (curves.exists() and parks.exists()):
+            cache.mkdir(parents=True, exist_ok=True)
+            download_artifacts(run_id=v.run_id, artifact_path="estimator",
+                               dst_path=str(cache), tracking_uri=tracking_uri)
+        return (
+            curves if curves.exists() else None,
+            parks if parks.exists() else None,
+            f"mlflow @champion v{v.version} ({strategy})",
+        )
+    except Exception as exc:
+        if MLFLOW_CACHE.exists():
+            for cdir in sorted(MLFLOW_CACHE.glob("v*"),
+                               key=lambda p: int(p.name[1:]), reverse=True):
+                curves = cdir / "estimator/aging_curves.json"
+                parks = cdir / "estimator/park_factors.json"
+                if curves.exists() and parks.exists():
+                    return curves, parks, (
+                        f"mlflow cache {cdir.name} "
+                        f"(registry unreachable: {type(exc).__name__})"
+                    )
+        return None, None, (
+            f"registry unavailable ({type(exc).__name__}); using repo-local artifacts"
+        )
+
+
 def curve_at(curve: dict[int, float], age: float) -> float:
     ages = sorted(curve)
     a = min(max(age, ages[0]), ages[-1])
@@ -490,16 +554,15 @@ def main() -> None:
     ap.add_argument("--recency-half-life", type=float, default=400.0,
                     help="within-window exponential decay half-life in games; "
                          "calibrated jointly with aging on 2024+2025; <=0 disables")
-    ap.add_argument("--aging-curves",
-                    default=str(Path(__file__).parent.parent
-                                / "models/props/aging_curves.json"),
-                    help="aging-curve JSON from scripts/build_prop_aging_curves.py; "
-                         "missing file disables the aging adjustment")
-    ap.add_argument("--park-factors",
-                    default=str(Path(__file__).parent.parent
-                                / "models/props/park_factors.json"),
-                    help="park-factor JSON from scripts/build_prop_park_factors.py; "
-                         "missing file disables the park adjustment")
+    ap.add_argument("--model-source", choices=("registry", "local"),
+                    default="registry",
+                    help="registry = resolve @champion artifacts from MLflow "
+                         "(per-version cache, offline fallback); local = repo files")
+    ap.add_argument("--mlflow-tracking-uri", default=default_tracking_uri())
+    ap.add_argument("--aging-curves", default=None,
+                    help="explicit aging-curve JSON (overrides registry resolution)")
+    ap.add_argument("--park-factors", default=None,
+                    help="explicit park-factor JSON (overrides registry resolution)")
     ap.add_argument("--min-gp", type=int, default=150,
                     help="min pooled recent games before a rate is alert-worthy")
     ap.add_argument("--max-alerts", type=int, default=8, help="max plays per text")
@@ -592,10 +655,23 @@ def main() -> None:
         return
 
     lines_by_norm = load_game_lines(sorted({r["player"] for r in rows}), args.season)
-    curves = load_aging_curves(Path(args.aging_curves))
+    repo = Path(__file__).parent.parent
+    curves_path = Path(args.aging_curves) if args.aging_curves else repo / "models/props/aging_curves.json"
+    parks_path = Path(args.park_factors) if args.park_factors else repo / "models/props/park_factors.json"
+    provenance = "repo-local artifacts"
+    if args.model_source == "registry" and not (args.aging_curves or args.park_factors):
+        reg_curves, reg_parks, provenance = resolve_registry_artifacts(
+            args.mlflow_tracking_uri
+        )
+        if reg_curves is not None:
+            curves_path = reg_curves
+        if reg_parks is not None:
+            parks_path = reg_parks
+    print(f"estimator artifacts: {provenance}")
+    curves = load_aging_curves(curves_path)
     if not curves:
         print("note: aging curves unavailable - aging adjustment disabled")
-    parks = load_park_factors(Path(args.park_factors))
+    parks = load_park_factors(parks_path)
     if not parks:
         print("note: park factors unavailable - park adjustment disabled")
     team_abbrev, team_ids = team_directory()

@@ -17,6 +17,7 @@ START_HOUR="${BARLOWE_PROP_SHOP_START_HOUR:-8}"
 END_HOUR="${BARLOWE_PROP_SHOP_END_HOUR:-23}"
 NOTIFY_METHOD="${BARLOWE_PROP_SHOP_NOTIFY_METHOD:-both}"
 NTFY_TOPIC="${BARLOWE_PROP_SHOP_NTFY_TOPIC:-barlowe-props-c47d9e2a51b3}"
+MODEL_SOURCE="${BARLOWE_PROP_SHOP_MODEL_SOURCE:-registry}"
 cd "$REPO_DIR"
 
 HOUR_ET="$(TZ=America/New_York date '+%-H')"
@@ -45,6 +46,7 @@ fi
 args=(run python scripts/shop_batter_props.py
       --notify --recipient "$RECIPIENT"
       --notify-method "$NOTIFY_METHOD" --ntfy-topic "$NTFY_TOPIC"
+      --model-source "$MODEL_SOURCE"
       --min-ev "$MIN_EV" --min-gp "$MIN_GP"
       --market-min-ev "$MARKET_MIN_EV" --shrink-k "$SHRINK_K"
       --recency-half-life "$HALF_LIFE")
