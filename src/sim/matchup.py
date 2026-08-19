@@ -16,7 +16,6 @@ from src.outcome.inference import OutcomeGameState, PitchOutcomePredictor
 from src.sim.calibration import PAOutcomeCalibration, SimCalibration
 from src.sim.game import Batter, Pitcher
 from src.sim.pa import MatchupOutcomeProvider
-from src.sim.pitch_mix import PitchMixProfiles
 
 DEFAULT_SZ_TOP = 3.4
 DEFAULT_SZ_BOTTOM = 1.6
@@ -33,7 +32,7 @@ class MatchupProviderFactory:
     def __init__(
         self,
         outcome_predictor: PitchOutcomePredictor,
-        mix_profiles: PitchMixProfiles,
+        mix_profiles,
         season: int,
         n_locations: int = 12,
         seed: int = 0,
@@ -44,6 +43,9 @@ class MatchupProviderFactory:
         self._mix = mix_profiles
         self._season = season
         self._n_locations = n_locations
+        self._seed = seed
+        # Retained only for callers that still expect a factory-level stream. Location
+        # sampling deliberately does not use it; see __call__.
         self._rng = random.Random(seed)
         self._calibration = calibration
         self._pa_calibration = pa_outcome_calibration
@@ -96,12 +98,33 @@ class MatchupProviderFactory:
             sz_top=DEFAULT_SZ_TOP,
             sz_bottom=DEFAULT_SZ_BOTTOM,
         )
-        inputs = self._mix.inputs_by_count(
-            pitcher.player_id,
-            n_locations=self._n_locations,
-            rng=self._rng,
-            stretch=stretch,
-        )
+        # Location sampling is seeded from the matchup key rather than drawn from a shared
+        # stateful stream. With a shared stream a matchup's locations depend on how many other
+        # matchups were built before it, so clearing the cache between games (see
+        # set_environment) rebuilt the same matchup with different locations, and identical seeds
+        # produced different simulations. Keying the stream makes construction idempotent and
+        # order-independent.
+        rng = random.Random(f"{self._seed}|{key}")
+        matchup_inputs = getattr(self._mix, "inputs_for_matchup", None)
+        if matchup_inputs is None:
+            inputs = self._mix.inputs_by_count(
+                pitcher.player_id,
+                n_locations=self._n_locations,
+                rng=rng,
+                stretch=stretch,
+            )
+        else:
+            inputs = matchup_inputs(
+                pitcher_id=pitcher.player_id,
+                throw_side=pitcher.throw_side,
+                batter_id=batter.player_id,
+                bat_side=state.bat_side,
+                is_top_half=is_top_half,
+                times_through=tt,
+                n_locations=self._n_locations,
+                rng=rng,
+                stretch=stretch,
+            )
         result_multipliers = None
         event_multipliers = None
         if self._calibration is not None:

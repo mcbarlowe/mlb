@@ -108,8 +108,13 @@ def build_feature_frame(
     sums marginalize the outcome probabilities over the predicted pitch
     distribution.
     """
+    # Accumulated in sorted key order so the float sum does not depend on the caller's dict
+    # ordering. Several upstream dicts are built from set unions or polars group_by output, whose
+    # order varies between processes, and an order-dependent sum here differs by 1 ULP. That was
+    # enough to flip weighted location draws and make two identically seeded simulations diverge.
     canonical: dict[str, float] = {}
-    for code, prob in type_probabilities.items():
+    for code in sorted(type_probabilities):
+        prob = type_probabilities[code]
         mapped = canonicalize_pitch_type(code)
         if mapped is None or prob <= 0:
             continue
@@ -229,13 +234,31 @@ class PitchOutcomePredictor:
         features: pl.DataFrame,
         feature_columns: list[str],
     ) -> np.ndarray:
-        pandas_frame = features.select(feature_columns).to_pandas()
-        for column in CATEGORICAL_FEATURES:
-            if column in pandas_frame.columns:
-                pandas_frame[column] = pandas_frame[column].fillna("unknown").astype(str)
-        numeric = [column for column in feature_columns if column not in CATEGORICAL_FEATURES]
-        pandas_frame[numeric] = pandas_frame[numeric].astype("float64")
-        return model.predict_proba(pandas_frame)
+        """Score one feature frame.
+
+        Casting is done in polars in a single pass. Assigning dtypes column by column on a pandas
+        frame cost roughly 34 ``_set_item`` calls per invocation, which dominated simulation
+        runtime: 75.8s of pandas overhead against 53.1s of actual inference in a profile of three
+        games.
+
+        ``thread_count=1`` is required for reproducibility, not just speed. CatBoost manages its
+        own thread pool, so ``OMP_NUM_THREADS`` does not constrain it, and parallel reduction
+        makes the summation order vary between runs. The resulting bitwise differences in
+        probability cascade, because the simulator compares uniform draws against cumulative
+        distributions, so two runs with an identical seed diverged into different game
+        trajectories. These batches are a few dozen rows, far too small to benefit from
+        parallelism anyway.
+        """
+        casts = [
+            (
+                pl.col(column).cast(pl.Utf8).fill_null("unknown")
+                if column in CATEGORICAL_FEATURES
+                else pl.col(column).cast(pl.Float64)
+            )
+            for column in feature_columns
+        ]
+        frame = features.select(feature_columns).with_columns(casts)
+        return model.predict_proba(frame.to_pandas(), thread_count=1)
 
     def predict(
         self,
