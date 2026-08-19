@@ -1,0 +1,31 @@
+season,abbreviation,team_name,projected_wins,total_games,source,fangraphs_short_name,fangraphs_team_id,fg_current_wins,fg_games_played,fg_remaining_games,fg_rest_of_season_win_probability,fg_projected_final_wins
+2026,ARI,Arizona Diamondbacks,81.911294,162,fangraphs_depth_charts_projected_standings_2026-08-16,Diamondbacks,15,66,124,38,0.505625,85.213760
+2026,ATL,Atlanta Braves,86.566474,162,fangraphs_depth_charts_projected_standings_2026-08-16,Braves,16,73,123,39,0.534361,93.840077
+2026,BAL,Baltimore Orioles,80.076590,162,fangraphs_depth_charts_projected_standings_2026-08-16,Orioles,2,60,123,39,0.494300,79.277698
+2026,BOS,Boston Red Sox,86.761633,162,fangraphs_depth_charts_projected_standings_2026-08-16,Red Sox,3,66,123,39,0.535566,86.887060
+2026,CHC,Chicago Cubs,86.690556,162,fangraphs_depth_charts_projected_standings_2026-08-16,Cubs,17,72,124,38,0.535127,92.334822
+2026,CIN,Cincinnati Reds,74.774188,162,fangraphs_depth_charts_projected_standings_2026-08-16,Reds,18,59,122,40,0.461569,77.462763
+2026,CLE,Cleveland Guardians,81.411531,162,fangraphs_depth_charts_projected_standings_2026-08-16,Guardians,5,60,124,38,0.502540,79.096532
+2026,COL,Colorado Rockies,66.914898,162,fangraphs_depth_charts_projected_standings_2026-08-16,Rockies,19,49,123,39,0.413055,65.109142
+2026,CWS,Chicago White Sox,74.605156,162,fangraphs_depth_charts_projected_standings_2026-08-16,White Sox,4,64,122,40,0.460526,82.421026
+2026,DET,Detroit Tigers,80.436056,162,fangraphs_depth_charts_projected_standings_2026-08-16,Tigers,6,60,123,39,0.496519,79.364236
+2026,HOU,Houston Astros,82.047676,162,fangraphs_depth_charts_projected_standings_2026-08-16,Astros,21,63,124,38,0.506467,82.245751
+2026,KC,Kansas City Royals,74.945340,162,fangraphs_depth_charts_projected_standings_2026-08-16,Royals,7,50,124,38,0.462626,67.579771
+2026,LAA,Los Angeles Angels,71.058625,162,fangraphs_depth_charts_projected_standings_2026-08-16,Angels,1,49,124,38,0.438633,65.668073
+2026,LAD,Los Angeles Dodgers,96.813346,162,fangraphs_depth_charts_projected_standings_2026-08-16,Dodgers,22,74,124,38,0.597613,96.709303
+2026,MIA,Miami Marlins,78.053352,162,fangraphs_depth_charts_projected_standings_2026-08-16,Marlins,20,63,124,38,0.481811,81.308811
+2026,MIL,Milwaukee Brewers,87.338287,162,fangraphs_depth_charts_projected_standings_2026-08-16,Brewers,23,76,124,38,0.539125,96.486759
+2026,MIN,Minnesota Twins,79.798424,162,fangraphs_depth_charts_projected_standings_2026-08-16,Twins,8,60,124,38,0.492583,78.718149
+2026,NYM,New York Mets,82.961714,162,fangraphs_depth_charts_projected_standings_2026-08-16,Mets,25,55,124,38,0.512109,74.460155
+2026,NYY,New York Yankees,88.021576,162,fangraphs_depth_charts_projected_standings_2026-08-16,Yankees,9,68,123,39,0.543343,89.190379
+2026,OAK,Oakland Athletics,69.957992,162,fangraphs_depth_charts_projected_standings_2026-08-16,Athletics,10,48,123,39,0.431839,64.841739
+2026,PHI,Philadelphia Phillies,90.689644,162,fangraphs_depth_charts_projected_standings_2026-08-16,Phillies,26,66,124,38,0.559813,87.272880
+2026,PIT,Pittsburgh Pirates,85.749534,162,fangraphs_depth_charts_projected_standings_2026-08-16,Pirates,27,60,125,37,0.529318,79.584770
+2026,SD,San Diego Padres,82.219524,162,fangraphs_depth_charts_projected_standings_2026-08-16,Padres,29,66,124,38,0.507528,85.286061
+2026,SEA,Seattle Mariners,89.324768,162,fangraphs_depth_charts_projected_standings_2026-08-16,Mariners,11,58,124,38,0.551387,78.952723
+2026,SF,San Francisco Giants,76.506431,162,fangraphs_depth_charts_projected_standings_2026-08-16,Giants,30,51,123,39,0.472262,69.418215
+2026,STL,St. Louis Cardinals,77.108083,162,fangraphs_depth_charts_projected_standings_2026-08-16,Cardinals,28,62,123,39,0.475976,80.563057
+2026,TB,Tampa Bay Rays,84.893136,162,fangraphs_depth_charts_projected_standings_2026-08-16,Rays,12,74,122,40,0.524032,94.961268
+2026,TEX,Texas Rangers,82.136484,162,fangraphs_depth_charts_projected_standings_2026-08-16,Rangers,13,61,124,38,0.507015,80.266583
+2026,TOR,Toronto Blue Jays,80.002687,162,fangraphs_depth_charts_projected_standings_2026-08-16,Blue Jays,14,61,125,37,0.493844,79.272219
+2026,WSH,Washington Nationals,73.612616,162,fangraphs_depth_charts_projected_standings_2026-08-16,Nationals,24,60,125,37,0.454399,76.812758

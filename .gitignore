@@ -28,3 +28,9 @@ wheels/
 
 # Training/run logs
 *.log
+
+# Editor and MCP tool workspace metadata
+.serena/
+
+# Created when an "mlflow-artifacts:" URI is used as a relative filesystem path
+mlflow-artifacts:/

@@ -1,516 +1,348 @@
-# MLB Data Pipeline
+# MLB Betting Model
 
-A comprehensive ETL pipeline for extracting, transforming, and loading MLB baseball game data from the MLB Stats API into a local PostgreSQL analytical schema.
+An MLB data pipeline, pitch-level Monte Carlo simulator, and team-strength win model, built to
+find a tradeable edge in baseball betting markets — and the record of what happened when every
+component was measured against real prices.
 
-## Features
+**Pipeline, schema, setup, and operational runbooks:** [`docs/PIPELINE.md`](docs/PIPELINE.md).
+**Full evidence for the claims below:** [`docs/FINDINGS.md`](docs/FINDINGS.md).
 
-- **Complete Game Data Extraction**: Fetch schedules and detailed live feed data from MLB Stats API
-- **Pitch-Level Analytics**: Extract granular pitch-by-pitch data including PITCHf/x metrics, spin rates, break angles, and velocities
-- **Star Schema Database**: Normalized relational database with proper foreign key constraints
-- **Boxscore Statistics**: Full batting, pitching, and fielding statistics for every game
-- **Dimension Tables**: Teams, venues, players, and reference data properly normalized
-- **High Performance**: Processes 21,000+ games with 6M+ pitches in a local PostgreSQL schema
-- **Data Quality**: Foreign key constraints ensure referential integrity across all tables
+---
 
-## Database Schema
+## Verdict
 
-The pipeline creates a star schema optimized for analytical queries:
+**There is no deployable prediction edge in this repository.** One edge is verified, and it is an
+execution edge rather than a forecasting one. Six model/market pairs have now been tested against
+real closing prices. All six failed.
 
-### Dimension Tables
-- **teams** (45 rows): Team information including league, division, and venue
-- **venues** (82 rows): Stadium details with location, capacity, and field dimensions
-- **players** (10,001 rows): Player biographical and physical information
-- **Reference tables**: Positions, pitch types, event types, game types
+| Component | Status | Measurement |
+|---|---|---|
+| Line shopping across books | **VERIFIED** | +2.1pp, all six seasons, saturates at 5 accounts |
+| Never bet June | **VERIFIED** | 12/12 negative cells; 91% of the gap is the market sharpening |
+| Flat staking | **CORRECT BY DEFAULT** | Kelly amplifies loss when the edge estimate is negative |
+| Team-strength moneyline model | **FAILED** | market more accurate on the bet subset, interval excludes zero |
+| Full-game totals via pitch sim | **FAILED** | sim Brier worse by +0.0032 on 574 non-push games; ROI −1.5% on 372 bets |
+| First-five totals | **FAILED** | no open→close improvement, 3.60% shopped hold |
+| Pitcher strikeout props | **FAILED** | no bias across 8,785 graded starts, −0.25% ± 0.47% |
+| Division / playoff-field / pennant futures | **FAILED** | flat 1u: −8.16%, −7.98%, +7.24% (fade side, CI [−18.6, +34.8]) after fixing six defects |
 
-### Fact Tables
-- **games** (21,643 rows): Game-level facts with FKs to teams and venues
-- **pitches** (5,999,516 rows): Pitch-by-pitch data with PITCHf/x metrics, linked to games
-- **linescore** (381,170 rows): Inning-by-inning scoring data
-- **batting** (184,534 rows): Player batting statistics per game
-- **pitching** (38,773 rows): Player pitching statistics per game
-- **fielding** (46,103 rows): Player fielding statistics per game
+The infrastructure is the asset. The measurement discipline is the deliverable. The forecasts are
+not tradeable.
 
-### Key Relationships
+---
 
-Foreign key relationships ensure data integrity:
+## Rule 1: shop every price across at least five books
 
-- **games.away_team_id** → teams.team_id
-- **games.home_team_id** → teams.team_id
-- **games.venue_id** → venues.venue_id
-- **pitches.game_pk** → games.game_pk
+The only reproducible positive result in this project.
 
-## Installation
+| Metric | Single book | Best of 5 |
+|---|---:|---:|
+| Moneyline hold | 4.10% | ~1.40% |
+| Effect on realised ROI | baseline | **+2.1pp** |
 
-This project uses [uv](https://github.com/astral-sh/uv) for dependency management and targets a local PostgreSQL database by default.
+Present in every season 2021–2026, ranging +1.9pp to +2.3pp. Gains saturate at five accounts; a
+sixth adds nothing measurable. This is structural rather than statistical — taking the best of
+several two-sided quotes mechanically reduces the vig paid. It is also the entire difference
+between the headline moneyline results of −1.92% and +0.18%.
 
-```bash
-# Clone the repository
-git clone <your-repo-url>
-cd mlb
+Panel is `PANEL_PRIORITY[:5]` in `scripts/backtest_moneyline_lineshop.py`. Execution must clear
+the best available price on the side being bet, never the consensus.
 
-# Install runtime and development tooling
-uv sync --group dev
-```
+**Operational caveat.** Best-of-five is a *price-feed* maximum, not a fill. Real accounts carry
+lower limits, stale openers get pulled or voided, and shopping is precisely what triggers limits.
+Realised execution lands below this ceiling.
 
-Default database target:
+---
 
-- database: `postgres`
-- schema: `mlb`
-- host: local socket / libpq defaults
-Override the target with `MLB_DB_NAME`, `MLB_DB_USER`, `MLB_DB_PASSWORD`, `MLB_DB_HOST`, `MLB_DB_PORT`, and `MLB_DB_SCHEMA`.
+## Rule 2: never bet June
 
-## Usage
+The best-evidenced structural finding here, and the only subgroup effect that survived every guard
+applied to it.
 
-### 1. Extract Game Schedules
+| Guard | Result |
+|---|---|
+| Bonferroni for 6 months | z = −3.12 against a 2.64 threshold |
+| Permutation test on month spread | observed range 18.51%, p = 0.003 |
+| Threshold monotonicity | negative at 1/2/3/4/5/7% edge |
+| Second training window | negative 6/6 seasons for 2015+ as well as 2018+, so 12/12 |
+| Independent metric | corr(monthly Brier gap, monthly ROI) = −0.964, computed on all games |
 
-First, fetch game schedules for desired seasons:
+Pooled June ROI is −10.49% on 983 bets. No other month is unanimous: Mar/Apr 8/12, May 2/12,
+Jul 4/12, Aug 5/12, Sep/Oct 6/12. **Only June.**
 
-```python
-from datetime import UTC, datetime
-from pathlib import Path
-import json
+### The mechanism is the market, not the model
 
-from src.endpoints.schedule import Schedule
+This determines whether the rule generalises, and it inverts the obvious reading.
 
-schedule_api = Schedule()
-for season in range(2009, datetime.now(tz=UTC).year + 1):
-    data = schedule_api.get(season=season, sportId=1)
+| Forecaster | June | non-June | vs own baseline |
+|---|---:|---:|---:|
+| Model | 0.242168 | 0.241986 | +0.000182 |
+| Market | 0.238889 | 0.240764 | **−0.001875** |
 
-    output_path = Path(f"data/raw/schedules/schedule_{season}.json")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+**91% of the June gap is the market sharpening; 9% is model degradation.** The model is flat in
+June — the price gets materially better. June is the cleanest information environment of the
+season: roughly 60–70 games of current-season data, rosters and bullpen roles settled, spring
+uncertainty gone, and it precedes both July deadline churn and September call-ups and tanking. A
+sharp market exploits that; season-to-date aggregates do not gain proportionally.
 
-    with open(output_path, "w") as f:
-        json.dump(data, f)
-```
+"Avoid where the counterparty is sharpest" has a causal story. "Avoid where I look weakest" does
+not, and would have been the wrong diagnosis here.
 
-### 2. Extract Live Feed Data
+### What the rule buys
 
-Extract detailed game data for all scheduled games:
+| Configuration | Bets | Pooled ROI | Bet-subset Brier gap |
+|---|---:|---:|---|
+| All months | 5,699 | −1.99% | +0.003217 [+0.001702, +0.004696] |
+| June removed | 4,716 | **−0.22%** | +0.002517 [+0.000915, +0.004085] |
 
-```bash
-python src/etl/get_live_feeds.py
-```
+It converts a clear loser into a breakeven. It does not create an edge: the ROI interval still
+includes zero, and the accuracy test remains significant against us.
 
-This will:
-- Read all schedule files from `data/raw/schedules/`
-- Extract live feed JSON for each game
-- Save to `data/raw/livefeeds/{season}/{game_id}.json`
+---
 
-### 3. Load Data into PostgreSQL
+## Rule 3: flat stakes, and only with a negative expectation accepted
 
-Run the complete ETL pipeline to populate the configured PostgreSQL schema:
+Kelly and every fractional-Kelly variant size *up* on larger estimated edge. When the edge
+estimate is biased positive — the measured condition here — that concentrates stake on the worst
+bets. Flat 1u is correct for a strategy with no established edge, because it minimises the
+variance of a known-negative process instead of maximising growth of an imaginary positive one.
 
-```bash
-uv run python -m src.etl.load_to_database
-```
+Do not run Kelly against these edge estimates. The edge term is not merely uncertain; it is
+directionally wrong on the bet subset.
 
-This process:
-1. Creates all database tables in the configured schema
-2. Loads reference data (positions, pitch types, etc.)
-3. Processes all live feed JSON files
-4. Loads dimension data (teams, venues, players)
-5. Loads fact data (games, pitches, boxscore stats)
-6. Creates indexes for query performance
-7. Vacuums and analyzes managed tables
+---
 
-By default the ETL writes to the `mlb` schema in the local `postgres` database.
+## The arithmetic that decides all of it
 
-### 3a. Resumable Backfill
-
-Use the resumable backfill script when you want a long-running load that:
-- downloads missing season schedules asynchronously
-- downloads missing live feed JSON files asynchronously
-- shows `tqdm` progress while files are fetched and while games are backfilled
-- records completion state in `backfill_game_progress`
-- skips already completed games on the next run
-- rewrites a game's fact rows inside a transaction before marking it complete
-
-```bash
-uv run python scripts/backfill_postgres.py
-```
-
-For the initial historical load, use the bulk historical mode:
-
-```bash
-uv run python scripts/backfill_postgres.py --bulk-historical
-```
-
-Bulk mode keeps season-level resume state in `bulk_backfill_progress`, but it skips work by checking which `game_pk` values already exist in `mlb.games`: fully loaded seasons are skipped on rerun, and partial seasons continue with only the missing games.
-
-Pass a different live-feed root explicitly if needed:
-
-```bash
-uv run python scripts/backfill_postgres.py /path/to/livefeeds
-```
-
-### 4. Query the Database
-
-```python
-from src.database import PostgresConfig, PostgresHandler
-
-db_config = PostgresConfig.from_env()
-
-with PostgresHandler(db_config) as db:
-    query = """
-    SELECT
-        pitch_type,
-        COUNT(*) as pitches,
-        ROUND(AVG(pitch_start_speed), 1) as avg_speed,
-        ROUND(AVG(spin_rate), 0) as avg_spin
-    FROM pitches
-    WHERE pitch_start_speed IS NOT NULL
-    GROUP BY pitch_type
-    ORDER BY pitches DESC
-    LIMIT 10
-    """
-
-    result = db.query(query)
-    print(result)
-```
-
-### 5. Verify Database Contents
-
-Use the provided verification script:
-
-```bash
-uv run python verify_database.py
-```
-
-### 6. Backtest Season Projections
-
-Use the season projection backtest to evaluate preseason division and playoff forecasts against final standings. The script writes model, flat-schedule baseline, improvement, calibration, summary CSVs, and optional playoff-probability graphics. Add `--market-win-totals resources/season_win_totals_2022_2025.csv` to blend pre-Opening-Day season win totals into the game simulation.
-
-```bash
-uv run python scripts/backtest_season_projections.py \
-  --seasons 2022 2023 2024 2025 \
-  --trials 5000 \
-  --tune-trials 1000 \
-  --out output/season_projection_default_backtest.csv \
-  --calibration-out output/season_projection_default_backtest_calibration.csv \
-  --summary-out output/season_projection_default_backtest_summary.csv \
-  --graphics-out-dir output/season_projection_default_graphics
-```
-
-Daily live-season graphics:
-
-```bash
-# Refresh pre-cutoff games, render current-season JPEGs, and dry-run the social post
-uv run python scripts/run_daily_season_projection.py
-
-# Publish the generated playoff-odds and playoff-stage graphics to X
-uv run python scripts/run_daily_season_projection.py --post --post-provider x
-```
-
-The daily runner bounds data mutation to current-season regular-season games that are either non-final before `--as-of` or within `--refresh-lookback-days` of it. It overwrites those raw live-feed JSON files, force-refreshes only those `game_pk`s into PostgreSQL, refuses to project while pre-`--as-of` games remain non-final, writes `output/season_projection_<season>/season_<season>_model_*.{csv,jpg}`, and records the posted ID in the output directory so a same-day relaunch does not duplicate the X post.
-
-
-Optional tuning knobs:
-- `--team-prior-scale-grid`: candidate prior-season team-strength offsets.
-- `--market-win-totals`: optional CSV with `season`, `win_total`, and `team_id`, `abbreviation`, or `team_name`.
-- `--market-prior-scale-grid`: candidate preseason market win-total offsets.
-- `--market-prior-min-tune-seasons`: prior seasons with market data required before tuning nonzero market scales.
-- `--schedule-strength-scale-grid`: candidate remaining-schedule-strength offsets.
-- `--calibrate-playoff-probs`: fit anchored playoff-probability calibration on prior seasons.
-- `--graphics-out-dir`: optional directory for per-season playoff-probability and playoff-stage JPEG graphics.
-
-
-## Project Structure
+Breakeven requires the model to be more accurate than the price by enough to cover the shopped
+hold. Measured on exactly the games the strategy bets (|edge| ≥ 3%, non-June, six seasons):
 
 ```
-mlb/
-├── data/
-│   ├── raw/
-│   │   ├── schedules/              # Season schedules (JSON)
-│   │   └── livefeeds/              # Raw game data (JSON)
-│   │       └── {season}/
-│   │           └── {game_id}.json
-│   ├── processed/
-│   │   └── livefeeds/              # Transformed data (Parquet)
-│   └── exports/                    # Optional Parquet exports from Postgres tables
-├── src/
-│   ├── endpoints/                  # MLB API endpoint classes
-│   │   ├── base_api.py            # Base API interface
-│   │   ├── schedule.py            # Schedule endpoint
-│   │   ├── live_feed.py           # Live feed endpoint
-│   │   └── ...                    # Reference data endpoints
-│   ├── data/                       # Data transformation classes
-│   │   ├── game_feed_data.py      # Pitch data transformer
-│   │   ├── game_data.py           # Game fact transformer
-│   │   ├── team_data.py           # Team dimension transformer
-│   │   ├── venue_data.py          # Venue dimension transformer
-│   │   ├── player_data.py         # Player dimension transformer
-│   │   ├── boxscore_data.py       # Boxscore statistics transformer
-│   │   └── linescore_data.py      # Linescore transformer
-│   ├── database/
-│   │   └── postgres_handler.py    # PostgreSQL schema operations
-│   └── etl/
-│       ├── get_live_feeds.py       # Live feed extraction script
-│       ├── load_to_database.py     # One-shot PostgreSQL load script
-│       └── postgres_backfill.py    # Resumable PostgreSQL backfill logic
-├── scripts/
-│   └── backfill_postgres.py        # CLI entry point for resumable backfills
-├── examples/                       # Usage examples
-├── test_game_dimensions.py         # Star schema relationship tests
-├── test_game_pitches_relation.py   # FK constraint tests
-├── test_postgres_backfill.py       # Resume/backfill regression test
-├── verify_database.py              # Database verification
-└── README.md
+model Brier   0.244081
+market Brier  0.241564
+gap          +0.002517    95% CI [+0.000915, +0.004085]    market wins, significant
 ```
 
-## Data Dictionary
+The model is **less** accurate than the price on the games it selects — and not by an
+unmeasurable amount. The interval excludes zero across 4,716 bets.
 
-### Pitches Table (Core Analytical Table)
+### Selection makes it worse, not better
 
-Key columns include:
+| Sample | Model minus market Brier |
+|---|---:|
+| All games, non-June | +0.001222 |
+| Bet subset, non-June | **+0.002517** |
 
-**Game Context:**
-- `game_pk`: Game identifier (FK to games)
-- `season`: Season year
-- `game_date`: Date of game
-- `inning`, `half_inning`: Inning information
+Filtering to disagreements **doubles** the deficit. This is the winner's curse: betting large
+positive disagreement selects a mixture of *market is wrong* and *model is wrong high*, and the
+second term dominates. Confirmed independently by a λ-shrinkage sweep, where shrinking the model
+toward the price improved accuracy monotonically while bet volume and profit collapsed to zero
+together — accuracy purchased by reproducing the market's own information cannot pay.
 
-**Players:**
-- `pitcher_id`, `pitcher_name`, `throw_side`: Pitcher details
-- `batter_id`, `batter_name`, `bat_side`: Batter details
+The consequence is general: no threshold, month, feature set, or training window fixes this,
+because the selection step itself is anti-predictive. Raising the edge threshold past 5% was
+measured and fails (7% flat, 10% at −14.84%).
 
-**Pitch Metrics:**
-- `pitch_type`: Pitch type (FF, SL, CH, etc.)
-- `pitch_start_speed`: Release velocity (mph)
-- `spin_rate`: Spin rate (rpm)
-- `spin_direction`: Spin axis angle
-- `break_vertical`, `break_horizontal`: Break measurements (inches)
-- `px`, `pz`: Pitch location coordinates
-- `pitch_zone`: Strike zone location (1-14)
+---
 
-**PITCHf/x Physics:**
-- `x0`, `y0`, `z0`: Initial position (ft)
-- `vx0`, `vy0`, `vz0`: Initial velocity (ft/s)
-- `ax`, `ay`, `az`: Acceleration (ft/s squared)
-- `pfxX`, `pfxZ`: Horizontal/vertical movement
+## Market selection
 
-**Outcome:**
-- `event`: Play result (single, strikeout, etc.)
-- `description`: Pitch call
-- `is_strike`, `is_ball`, `is_in_play`: Outcome flags
+From the 34-market hold survey (`scripts/survey_mlb_market_holds.py`), ranked by the edge needed
+to break even. Lower is more attackable.
 
-## Development
+| Market | Per-book | Shopped | Breakeven | Status |
+|---|---:|---:|---:|---|
+| h2h (moneyline) | 4.10% | 1.40% | **0.70%** | tested, no edge |
+| Full-game totals | 4.71% | 2.48% | 1.24% | tested, no edge |
+| Run line / spreads | 4.29% | 2.41% | 1.20% | untested, poor prior |
+| Pitcher strikeouts | 6.80% | 3.45% | 1.66% | tested, no bias |
+| Totals 1st inning (NRFI) | 6.49% | 3.69% | 1.85% | untested, needs backfill |
+| First-five totals | 6.52% | 3.60% | 1.80% | tested, no edge |
+| Batter props | 5.4–7.1% | 2.5–3.5% | 2.5–3.5% | too expensive |
+| Season win totals | no odds stored | n/a | ~4.8% at −110 | tested, no accuracy edge |
 
-### Adding New API Endpoints
+**Hold rises monotonically with how exotic the market is.** The cheapest markets are the most
+liquid and most sharply priced; the expensive ones frequently have a single book quoting them, so
+no shopping is possible. There is no market that is both cheap to trade and inattentively priced.
 
-All API endpoints inherit from `BaseAPI`:
+Do not bet futures. Every tested futures market loses once six defects are corrected:
+multi-winner de-vig normalised to a single winner (inflating edges 6×/12×/18×), hardcoded outcomes
+containing a fabricated 2023 Seattle division title, a pennant probability summing to 4.0 where
+2.0 is required, a corrupted `teams.division_name` placing Houston in the NL Central, an
+era-blind playoff field, and a stale-snapshot scrape. See
+[`docs/FUTURES_AUDIT.md`](docs/FUTURES_AUDIT.md).
 
-```python
-from src.endpoints.base_api import BaseAPI
+The **era-blind playoff field**: `simulate_season` defaulted to three wild cards per league for
+every season, simulating a 12-team field in 2016–2021 when only 10 berths existed. That overstated
+every team's playoff probability by exactly 2/30 before 2022 and, because the de-vig target shared
+the assumption, fabricated edge on the fade side. The tell was a mean model playoff probability of
+exactly 0.4000 in all nine seasons. Both are now era-aware and agree with
+`scripts/futures_outcomes.py`; the de-vig check is self-proving, since a correctly normalised
+market must show zero bias, and it moved from +0.0370 to −0.0000 [−0.0495, +0.0490].
 
-class MyEndpoint(BaseAPI):
-    def __init__(self):
-        self.base_url = "https://statsapi.mlb.com/api/v1/my_endpoint"
+The **stale-snapshot scrape**: `_find_preseason_column` in `scripts/scrape_covers_all_futures.py`
+only ever saw the group-header row, found no month name in it, and fell through to "first column
+after Team". The number of preseason snapshots and of blank leading columns both vary by season, so
+six of twelve division seasons held in-season prices — 2013, 2021 and 2022 from June 1, and 2014,
+2017 and 2023 from May 1, each matching 30/30. Those seasons compared a March-15 projection against
+a market holding one to two months of results the model did not have. Fixed by reading the
+`Preseason` group colspan and taking the last preseason column; the fixed parser reproduces all six
+previously-clean seasons exactly. `scripts/reload_futures_preseason_odds.py` rewrote all thirteen
+seasons at their true snapshot, non-destructively, since `load_latest_futures_odds` selects
+`MAX(snapshot_time)` and every true date falls after the `03-24` label the stale rows carry.
+Division moved from −10.07% to −8.16%, and 2021 flipped sign from −56.2% to +23.1%.
 
-    def get(self, **params):
-        return self._request("GET", params=params)
+**Pre-registered test.** 2026 preseason division odds are now stored (`2026-03-25` snapshot,
+30 teams, source `covers.com-preseason`). 2026 playoff outcomes do not exist until October, so the
+test cannot run yet. It is worth running because both instruments agreed in direction on the
+2024–2025 window — accuracy moved from a significant market advantage of +0.02439 [+0.00517,
++0.04428] in 2016–2023 to an indistinguishable −0.00360 in 2024–2025, and ROI from −8.83% to
++24.71% — while neither difference reached significance and the window was chosen after seeing the
+table. One genuinely out-of-sample season is the cheapest way to break that tie.
+
+**Provenance caveat.** `make_playoffs` and `miss_playoffs` odds carry the `covers.com` source tag
+but cannot be reproduced from it: the archive exposes only world-series, pennant and division
+pages, and `a=po` silently serves the division page. They do pass a strong internal check, with
+per-team implied probabilities summing to 1.037–1.064 across all nine seasons, a realistic 4–6%
+two-sided hold, so the prices are genuine market quotes rather than synthesised. Their snapshot
+timing is nonetheless unverified, which is exactly the defect that corrupted half the division
+history, so treat the +7.24% fade result as unverified rather than merely weak.
+
+Playoff-field calibration is worth recording separately, because it is a live model defect rather
+than a betting result. Across 270 team-seasons the mean bias is now exactly zero, but the tails
+are badly overdispersed: teams the model rates 0.75–0.90 to reach the playoffs actually do so
+61.5% of the time, and teams it rates below 0.10 reach them 9.8% of the time. The season simulator
+carries no injuries, trades, or in-season regression, so its probabilities are too extreme. The
+exploitable direction is to fade the model's own strong favourites — which its edge rule can never
+generate, since it only bets where the model disagrees with the price in the model's favour.
+
+---
+
+## What is explicitly NOT justified
+
+These configurations look profitable and are hindsight selection. They are recorded so nobody
+re-derives them and mistakes them for findings.
+
+| Configuration | Reported | Why it fails |
+|---|---:|---|
+| 2025+2026 only, June removed | +6.59% [+0.94%, +12.59%] | best 2 of 6 seasons chosen after seeing results; paired Brier on those same 1,378 bets is −0.0007 ± 0.003, i.e. nothing |
+| May + Aug only | +5.36% [+0.62%, +10.30%] | 15 month-pairs available; the companion Mar/Apr exclusion is 8/12 mixed, refuting the method |
+| Excluding Jun + Mar/Apr | +2.00% | Mar/Apr is not unanimous in either training window |
+| Recency window 2018+ over 2015+ | +1.40% claimed | paired test gives −0.68pp, CI [−0.048, +0.035], worse in 4 of 6 seasons |
+| Futures, 2022–2025 window | +37.66% | the full 12-season range gives −3.37% |
+| `miss_playoffs` fade, quarter-Kelly | +16.25% | Kelly sized winning heavy favourites to 0.000u, so 2017 returned exactly −100% from a 55% win rate; flat 1u gives +7.24%, and the era-blind playoff field was fabricating the rest |
+| `miss_playoffs` fade, flat 1u | +7.24% | CI [−18.6%, +34.8%]; 5/9 seasons; monotonicity broke once the era bug was fixed; one 19-bet bucket carries it; ~190 seasons needed to resolve |
+| Season win totals, 3+ win edge | +16.88% | model MAE 7.840 vs line MAE 7.810, difference +0.030 [−0.814, +0.868], so no accuracy basis; every threshold CI includes zero; 2025 alone carries it at +43.18% |
+| Season win totals, all bets | +8.62% | 2/4 seasons positive; assumes −110 with no stored odds and no shopping possible, and real win-total juice is frequently −115/−125 |
+| Positive CLV at the 5% threshold | evidence of skill | non-monotone across thresholds; the closing line is only 0.0003 Brier better than the open |
+
+The pattern is identical every time: a subset with a nominally significant interval, an interval
+that ignores the selection, and collapse when the sample is extended.
+
+**A configuration selected on ROI must be validated by an accuracy test on the same games.** ROI
+discards the probability and keeps only win/loss; paired Brier keeps the magnitude and is the
+stronger instrument. When they disagree, the accuracy test wins.
+
+---
+
+## If you bet anyway
+
+Expect to lose approximately the shopped hold. Size from that, not from an edge estimate.
+
+- Flat 1u. No Kelly, no progression.
+- Best price across five books, always.
+- No June.
+- Moneyline only. Every other market is more expensive and none has been shown attackable.
+- Treat it as paid entertainment, or as data collection for the movement work below — not as an
+  investment.
+
+Measured pooled expectation with all three rules applied: **−0.22% per unit staked**, interval
+[−3.25%, +2.92%]. Indistinguishable from breakeven, and the best honest estimate available.
+
+---
+
+## What would change the verdict
+
+One category remains untested with a plausible route to information the price lacks.
+
+**Market-dynamics data.** The oracle test established a real ceiling: perfect foresight of the
+closing line, betting at the open, returns **+6.14% [+1.14%, +10.94%]** on 1,566 bets restricted
+to games whose line moves at least three points. That is statistically significant, and it is the
+only positive result in this project that is not an artifact of selection.
+
+It is unreachable with current inputs. The target is continuous — `logit(close) − logit(open)` —
+carrying far more statistical power per game than binary win/loss. Four features survived a
+Bonferroni residual screen against it (`model_disagree`, `book_dispersion`, `lead_hours`,
+`n_books`), yet the best predicted-movement standard deviation is **0.0206 logits against the
+0.1200 required**, a 5.8σ shortfall, and predicted movement never once reaches the threshold
+across 6,988 games. ROI degrades monotonically as predicted-movement confidence rises.
+
+Closing that gap needs data this repository does not have and cannot derive: lineup announcement
+timestamps, injury-feed latency, per-book move logs, and betting-percentage splits. **That is a
+purchasing decision, not a modelling one.** Everything reachable by compute has been tested.
+
+---
+
+## Reproduction
+
+```sh
+# Month scoping, ROI by season, and the June mechanism decomposition
+uv run python scripts/test_june_scoped.py
+uv run python scripts/test_june_scoped.py --seasons 2025,2026
+
+# Month-by-month with all six multiplicity guards
+uv run python scripts/analyze_monthly_performance.py
+
+# The training-window recency claim, paired and structurally leak-free
+uv run python scripts/test_training_window_recency.py
+
+# Market hold survey across 34 MLB markets
+uv run python scripts/survey_mlb_market_holds.py --dates 2025-06-10,2025-07-15,2025-08-05
+
+# Oracle ceiling and the line-movement screen
+uv run python scripts/test_beat_the_opener_ceiling.py
+uv run python scripts/screen_movement_signal.py
+
+# Moneyline backtest with and without line shopping
+uv run python scripts/backtest_moneyline_lineshop.py
+
+# Futures at flat 1u with season-consistency, threshold and odds-bucket guards
+uv run python scripts/review_futures_flat.py
+
+# Playoff-field calibration on 270 team-seasons; catches the era-blind wild-card defect
+uv run python scripts/test_playoff_calibration.py
+
+# Verify every futures snapshot is a true preseason column, then reload if not
+uv run python scripts/reload_futures_preseason_odds.py            # dry run
+uv run python scripts/reload_futures_preseason_odds.py --write
 ```
 
-### Adding New Transformers
+---
 
-Data transformers follow a consistent pattern:
+## Model registry
 
-```python
-import pandas as pd
+Registered model `mlb-team-strength-win` on the shared MLflow service, experiment
+`mlb-model-training-shared`.
 
-class MyDataTransformer:
-    def __init__(self):
-        self.data_types = {
-            "field1": int,
-            "field2": str,
-            # ... define schema
-        }
+| Version | Fit window | Features | Holdout | Gate | Alias |
+|---|---|---:|---|---|---|
+| v1 | 2021–2024 | 5 | 2025 | passed | `champion` |
+| v3 | 2018–2024 | 8 | 2025 | failed | — |
+| v4 | 2021–2024 | 8 | 2025 | failed | — |
 
-    def transform(self, data: dict) -> pd.DataFrame:
-        # Extract and flatten data
-        records = self._extract_records(data)
-        df = pd.DataFrame(records)
-        return df.astype(self.data_types)
+Versions 3 and 4 are recorded challengers. Neither should be promoted. All four cells of the
+feature × window grid fall within 0.000290 Brier of one another, and no pairwise difference is
+significant — the grid is smaller than its own noise, and the gap to the market (+0.001572 pooled)
+is over five times the entire grid's width.
 
-    def save_to_db(self, df: pd.DataFrame, db_handler, if_exists: str = "append"):
-        db_handler.insert_dataframe(df, "my_table", if_exists=if_exists)
-```
+The gate requires a positive 95% paired date-block lower bound against the incumbent across
+walk-forward folds, with no material single-season regression. **That gate is what prevented every
+claim in the "not justified" table from reaching deployment**, and it correctly failed v3 despite
+a better point estimate and wins in all four folds.
 
-### Code Quality
-
-```bash
-# Format code
-uv run black .
-
-# Lint the PostgreSQL ETL surface
-uv run ruff check src/database src/etl/get_live_feeds.py src/etl/load_to_database.py src/etl/postgres_backfill.py scripts/backfill_postgres.py examples/database_examples.py test_game_dimensions.py test_game_pitches_relation.py test_postgres_backfill.py verify_database.py
-
-# Type-check the PostgreSQL ETL surface with the local .venv
-uv run basedpyright
-```
-
-### Running Tests
-
-```bash
-# Sample-data regression tests against PostgreSQL
-uv run pytest -q test_game_dimensions.py test_game_pitches_relation.py test_postgres_backfill.py
-
-# Verify the configured PostgreSQL schema
-uv run python verify_database.py
-```
-
-### MLflow Training
-
-Train the documented pitch type and conditioned location models with MLflow tracking from PostgreSQL:
-
-```bash
-uv run python scripts/train_models_with_mlflow.py
-```
-
-Defaults:
-
-- training data source: `postgres`
-- tracking URI: `http://10.0.0.171:5001`
-- experiment: `mlb-model-training-shared`
-- artifact transport: remote clients upload through the iMac MLflow HTTP server
-- artifact storage on iMac: `/Users/matthewbarlowe/mlflow-artifacts/`
-- train seasons: `2018, 2019, 2021, 2022, 2023`
-- validation season: `2024`
-- test season: `2025`
-
-Shared multi-machine setup:
-
-- MLflow metadata lives in the local PostgreSQL `mlflow` schema on the iMac; use the direct Postgres URI only as the iMac server's `--backend-store-uri`.
-- The server's SQLAlchemy backend URI uses `postgresql+psycopg2`; MLflow 3.14 binds model-version strings incompatibly with the `psycopg` v3 driver and breaks registered-model detail pages.
-- The iMac runs `mlflow server` on `http://10.0.0.171:5001` with artifact serving enabled and `/Users/matthewbarlowe/mlflow-artifacts/` as `--artifacts-destination`.
-- The LaunchAgent allows `http://10.0.0.171:5001` as a CORS origin; without it, browser run searches fail even though direct MLflow client queries succeed.
-- `mlb-model-training-shared` is the production/import experiment for the live stack (pitch type, location, and outcome models).
-- `mlb-model-training` is the legacy direct-database experiment. Keep its historical runs, but do not target it for new multi-machine training.
-- The MacBook Pro and MacBook Air should use `MLFLOW_TRACKING_URI=http://10.0.0.171:5001`, not the direct Postgres URI, so artifact uploads go through the iMac server.
-- Training entrypoints default to the shared HTTP URI and experiment. If you intentionally want a local SQLite run, pass it explicitly with `--mlflow-tracking-uri sqlite:///...`.
-- `scripts/run_outcome_training.sh` remains available as a convenience helper; it resolves `MLFLOW_TRACKING_URI` from the current shell or `~/.zshrc` and then launches `scripts/train_outcome_models.py`.
-- To register an existing paired outcome run, use `uv run python scripts/import_outcome_models_to_mlflow.py --run-dir <run-dir> --profiles-dir <profiles-dir> --set-champion`.
-
-Outcome-model versioning and promotion:
-
-```bash
-# Train and retain immutable candidate versions.
-uv run python scripts/train_outcome_models.py --register-models
-
-# Train, register, and promote the pair when both stages pass.
-uv run python scripts/train_outcome_models.py --set-champion
-```
-
-- Stage A is registered as `mlb-pitch-result-stage-a`; Stage B is registered as `mlb-in-play-event-stage-b`. Each native CatBoost package includes its model, feature/class contract, metrics, profile stores, input example, signature, and explicit dependencies.
-- Both versions share one `outcome_release_id`, source run, contract version, and pinned `sim_inputs_run_id`. Production resolves the two `champion` aliases and rejects partial or incompatible alias updates.
-- Promotion requires both stages to beat their conditional validation and test log-loss baselines and to carry finite validation/test Brier, log-loss, and accuracy metrics. Failed candidates remain versioned but do not move either alias.
-- The production simulator downloads the immutable registered-model versions into `models/outcome/mlflow_cache/` and loads the exact simulator-input run pinned by that release.
-
-Win-model versioning and comparison:
-
-```bash
-uv run python scripts/evaluate_team_strength.py --log-mlflow --set-champion
-```
-
-- Every evaluation logs the fitted estimator, exact ordered feature contract, training/holdout datasets, coefficients, rolling-fold evidence, paired date-block bootstrap intervals, promotion result, and dependencies.
-- Contract v2 adds recency- and age-adjusted projected-lineup wOBA (scaled per 10 wOBA points) plus individual bullpen FIP and recent-workload availability to the existing Elo, run-form, and starter features. Active rosters filter injuries, transactions, and call-ups; unseen players use league priors.
-- Win-probability estimators use the logged-model name `win_probability_model` and `model_collection=win_probability_models`; `model_family=team_strength_win` identifies this implementation. The stable registered-model identifier remains `mlb-team-strength-win`.
-- Every candidate creates an immutable registered-model version. Production resolves only the `champion` alias. The loader supports both the five-feature v1 contract and eight-feature v2 contract, so a v2 candidate can be logged without invalidating the current v1 champion.
-- `--set-champion` advances the alias only when the candidate's 95% paired date-block lower bounds improve both Brier score and log loss over walk-forward v1 and league-home-rate baselines across at least three seasons, with no material single-season regression. Failed candidates remain versioned and the command exits nonzero.
-- Compare runs through `rolling_evaluation.json`, the `rolling_*` MLflow metrics, and immutable registered-model version tags. `latest_logged_version` identifies the newest candidate; `champion_version` identifies production.
-- `models/`, `output/`, `catboost_info/`, and local MLflow stores are generated working data and are intentionally ignored by Git. Production outcome artifacts bootstrap from shared MLflow when absent; other local model paths must be produced by training or downloaded explicitly.
-
-The PostgreSQL training source must already contain the required seasons before this command will run.
-
-Use `--low-memory` for historical retrains on memory-constrained machines; it streams season-sized chunks instead of materializing the entire training window at once.
-The regression tests use `example_json_files/example_live_feed.json`; they do not require a populated `data/` checkout.
-
-### Live Next-Pitch Prediction
-
-Predict the next pitch of in-progress games and publish pitch cards to Bluesky, X, or both:
-
-```bash
-# Dry run for today's schedule: waits for first pitch, polls live games,
-# saves cards to output/live_cards/<game_pk>/ without posting
-uv run python scripts/run_live_pipeline.py
-
-# Post to X
-uv run python scripts/run_live_pipeline.py --post --post-provider x
-
-# Cross-post to Bluesky and X
-uv run python scripts/run_live_pipeline.py --post --post-provider both
-
-# Follow one game only
-uv run python scripts/run_live_pipeline.py --game-pk 823514
-```
-
-How it works:
-
-1. Reads the MLB schedule for the target date and sleeps until `--lead-minutes` before the earliest first pitch.
-2. Polls each game's live feed every `--poll-interval` seconds (via `DailyPipeline.monitor_all_games`), starting each game automatically when it goes live.
-3. On every new pitch state, builds the current at-bat sequence plus a pending-pitch row, predicts the next pitch type and location, and renders a pitch card.
-4. Posts the card once per at-bat by default (`--post-cadence pitch` posts on every pitch; `--max-posts-per-game` caps volume).
-
-Model defaults point to local working copies in `models/attention_full/run_20260119_124719` (pitch type) and `models/pitch_type_location_20260121_003206` (location). These generated files are not version-controlled; train or download the artifacts before a fresh checkout runs this pipeline, and override them with `--pitch-type-model` / `--location-model` when needed.
-
-Bluesky posting uses `BLUESKY_HANDLE` (e.g. `pitchbot.bsky.social`) and `BLUESKY_APP_PASSWORD` (create one at bsky.app -> Settings -> App Passwords; never use the main account password). X posting accepts either OAuth 1.0a user-context credentials (`X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`) or OAuth 2.0 user-context credentials (`X_API_CLIENT_ID`, `X_API_CLIENT_SECRET`, plus `X_API_ACCESS_TOKEN` or `X_API_OAUTH2_ACCESS_TOKEN`; add `X_API_REFRESH_TOKEN` or `X_API_OAUTH2_REFRESH_TOKEN` if you want unattended posting to survive token expiry). Without `--post`, the pipeline runs in dry-run mode and only saves card images.
-
-### Daily Game Simulation Board
-
-Generate one morning board image covering every preview game on the slate:
-
-```bash
-# Dry run: build the board image and write probable-starter state locally
-uv run python scripts/run_daily_sim_slate.py
-
-# Cross-post the board to Bluesky and X, then keep polling preview games for probable-starter changes
-uv run python scripts/run_daily_sim_slate.py --post --post-provider both --watch-starters
-```
-
-How it works:
-
-1. Resolves the outcome-model artifacts with `--outcome-run-dir auto`: shared MLflow production runs first when `MLFLOW_TRACKING_URI` is set, then `models/outcome/latest_run.txt`, then the newest local `models/outcome/run_*` directory.
-2. Loads the gate-passed `champion_version` of the registered MLflow model selected by `--win-model-name` (default `mlb-team-strength-win`), then rebuilds its chronological Elo, run-form, starter, lineup-projection, individual-bullpen, and recent-workload state from PostgreSQL through games before the slate date. Missing or inconsistent champion metadata stops the job rather than silently fitting another model.
-3. Fetches that day's preview games from the MLB schedule with hydrated probable starters.
-4. Uses the team-strength model for published win odds and the pitch/outcome Monte Carlo chain for score distributions, then renders the combined board to `output/sim_cards/daily/daily_sim_<date>.jpg`.
-5. Stores the probable-starter snapshot and published board ID in `output/sim_state/daily_sim_<date>.json`. A same-day restart reuses that post instead of publishing a duplicate; with `--watch-starters`, it resumes polling and posts a fresh one-game card only when a probable starter changes.
-
-The promotion gate uses at least three walk-forward season folds through the held-out season. A candidate must have positive 95% paired date-block bootstrap lower bounds for Brier-score and log-loss improvement over both the v1 champion contract and the fixed league-home-rate baseline, with no material single-season regression:
-
-```bash
-uv run python scripts/evaluate_team_strength.py
-```
-
-`scripts/run_daily_sim_slate.sh` is the launchd-friendly wrapper; it reads `BARLOWE_DAILY_SIM_*` environment variables for posting, posting provider, polling cadence, state/output directories, optional date overrides, and `BARLOWE_DAILY_SIM_WIN_MODEL`. The wrapper defaults to `BARLOWE_DAILY_SIM_POST_PROVIDER=both` and `mlb-team-strength-win`. The installed `com.barloweanalytics.daily-sim-slate` LaunchAgent runs at 09:00 local time and uses the shared MLflow HTTP service. `scripts/run_daily_random_live_game.sh` uses the same provider mechanism for `BARLOWE_RANDOM_GAME_*`. `scripts/run_daily_season_projection.sh` uses `BARLOWE_SEASON_PROJECTION_*`; the installed `com.barloweanalytics.daily-season-projection` LaunchAgent runs at 08:30 local time and posts the daily season projection to X by default.
-
-
-## Performance Notes
-
-- **PostgreSQL Performance**: Local relational queries stay fast once indexes are built on key columns
-- **ETL Speed**: Processes ~21,000 games in approximately 30-45 minutes
-- **Memory Efficient**: Processes games one at a time to minimize memory usage
-- **Indexes**: Automatically creates indexes on frequently queried columns (game_pk, player_ids)
-
-## Data Sources
-
-All data is sourced from the official MLB Stats API:
-- **Base URL**: `https://statsapi.mlb.com/api/v1/`
-- **Documentation**: [MLB Stats API Docs](https://appac.github.io/mlb-data-api-docs/)
-- **Rate Limiting**: Be respectful of API rate limits when extracting data
-
-## License
-
-This project is for educational and analytical purposes. MLB data is subject to [MLB's copyright and data usage policies](https://www.mlb.com/official-information/terms-of-use).
-
-## Acknowledgments
-
-- MLB Stats API for providing comprehensive baseball data
-- PostgreSQL for providing the local relational storage engine
-- The baseball analytics community for inspiring this work
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For issues, questions, or feature requests, please open an issue on GitHub.
+Do not hand-register model versions. A prior artifact was created with
+`create_model_version(source="runs:/<id>/")` and no `run_id`, producing an entry that failed 9 of
+the loader's 15 validation gates, logged only `train_accuracy`, and could never be loaded. Use
+`scripts/evaluate_team_strength.py --log-mlflow`, which logs the ordered feature contract,
+training and holdout datasets, coefficients, rolling-fold evidence, bootstrap intervals, and the
+promotion result.
