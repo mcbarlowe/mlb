@@ -72,7 +72,14 @@ STAT_COLUMNS = (
     "hits", "doubles", "triples", "homeruns", "totalbases",
     "rbi", "runs", "baseonballs", "stolenbases", "strikeouts",
 )
-STRATEGY_VERSION = "props-decay400-age-k50-mkt"
+# Markets whose estimates get conditioned on starts (PA>=3), expected PA, and
+# park (calibrated 2024+2025: fixes the under-side composition bias, hits-family
+# Brier improves). HR stays on the all-games estimator: conditioning measurably
+# does not help there (rare event; PA leverage negligible vs estimator noise).
+CONDITIONED_MARKETS = frozenset(STAT_FNS) - {"batter_home_runs"}
+START_PA = 3
+EXP_PA_WINDOW = 30  # trailing starts used for tonight's expected-PA estimate
+STRATEGY_VERSION = "props-cond-v3"
 PAPER_DDL = """
 CREATE TABLE IF NOT EXISTS {schema}.prop_paper_bets (
     alert_date date NOT NULL,
@@ -177,7 +184,7 @@ def collect_prices(event: dict) -> dict[tuple[str, str, float], dict[str, dict[s
 class PlayerLines(NamedTuple):
     """Chronological per-game lines plus the player's age today."""
 
-    lines: list[tuple[int, float, dict[str, int]]]
+    lines: list[tuple[int, float, int, dict[str, int]]]  # (season, age, pa, stats)
     age_now: float
 
 
@@ -207,6 +214,7 @@ def load_game_lines(names: list[str], season: int) -> dict[str, PlayerLines]:
             f"""
             SELECT b.player_id, g.season::int AS season,
                    g.game_date::date AS game_date, p.birth_date::date AS birth_date,
+                   COALESCE(b.plateappearances, 0)::int AS pa,
                    {cols}
             FROM {c.schema}.batting b
             JOIN {c.schema}.games g USING (game_pk)
@@ -220,7 +228,7 @@ def load_game_lines(names: list[str], season: int) -> dict[str, PlayerLines]:
             (list(pid_to_norm), season - RECENT_SEASONS + 1, season),
         )
         col_names = [d.name for d in cur.description]
-        per_pid: dict[int, list[tuple[int, float, dict[str, int]]]] = {}
+        per_pid: dict[int, list[tuple[int, float, int, dict[str, int]]]] = {}
         births: dict[int, date | None] = {}
         for row in cur.fetchall():
             rec = dict(zip(col_names, row))
@@ -232,7 +240,8 @@ def load_game_lines(names: list[str], season: int) -> dict[str, PlayerLines]:
                 if birth is not None else float("nan")
             )
             per_pid.setdefault(pid, []).append(
-                (int(rec["season"]), age, {col: int(rec[col]) for col in STAT_COLUMNS})
+                (int(rec["season"]), age, int(rec["pa"]),
+                 {col: int(rec[col]) for col in STAT_COLUMNS})
             )
     conn.close()
 
@@ -273,8 +282,8 @@ def db_latest_final() -> date | None:
     return row[0] if row else None
 
 
-def team_abbrevs() -> dict[str, str]:
-    """Full team name -> abbreviation from mlb.teams."""
+def team_directory() -> tuple[dict[str, str], dict[str, int]]:
+    """Full team name -> (abbreviation, team_id) from mlb.teams."""
     c = PostgresConfig.from_env()
     conn = psycopg.connect(
         dbname=c.dbname, user=c.user, password=c.password,
@@ -282,15 +291,19 @@ def team_abbrevs() -> dict[str, str]:
     )
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT team_name, abbreviation FROM {c.schema}.teams WHERE sport_id = 1"
+            f"SELECT team_name, abbreviation, team_id FROM {c.schema}.teams "
+            f"WHERE sport_id = 1"
         )
-        out = {str(n): str(a) for n, a in cur.fetchall()}
+        rows = cur.fetchall()
     conn.close()
-    return out
+    return (
+        {str(n): str(a) for n, a, _ in rows},
+        {str(n): int(t) for n, _, t in rows},
+    )
 
 
 def rate_over(
-    lines: list[tuple[int, float, dict[str, int]]],
+    lines: list[tuple[int, float, int, dict[str, int]]],
     stat_fn: Callable[[dict[str, int]], int],
     point: float,
     season: int | None,
@@ -300,7 +313,7 @@ def rate_over(
 
     ``lines`` is chronological; ``last_n`` keeps only the most recent games.
     """
-    rows = [stats for yr, _age, stats in lines if season is None or yr == season]
+    rows = [stats for yr, _age, _pa, stats in lines if season is None or yr == season]
     if last_n:
         rows = rows[-last_n:]
     if not rows:
@@ -310,25 +323,32 @@ def rate_over(
 
 
 def decayed_over(
-    lines: list[tuple[int, float, dict[str, int]]],
+    lines: list[tuple[int, float, int, dict[str, int]]],
     stat_fn: Callable[[dict[str, int]], int],
     point: float,
     lam: float,
-) -> tuple[float, float, float]:
-    """Exponentially decayed (successes, games, weighted mean age).
+) -> tuple[float, float, float, float]:
+    """Exponentially decayed (successes, games, mean age, mean PA).
 
     ``lines`` is chronological, so the newest game carries weight 1 and a game
     g games back carries lam**g. lam=1 reproduces plain counts.
     """
-    s = w = a = 0.0
-    for _, age, stats in lines:
+    s = w = a = p = 0.0
+    for _, age, pa, stats in lines:
         s = lam * s + (1.0 if stat_fn(stats) > point else 0.0)
         w = lam * w + 1.0
         a = lam * a + (0.0 if math.isnan(age) else age)
+        p = lam * p + pa
     if w <= 0.0:
-        return 0.0, 0.0, float("nan")
+        return 0.0, 0.0, float("nan"), float("nan")
     has_age = bool(lines) and not math.isnan(lines[0][1])
-    return s, w, (a / w if has_age else float("nan"))
+    return s, w, (a / w if has_age else float("nan")), p / w
+
+
+def expected_pa(lines: list[tuple[int, float, int, dict[str, int]]]) -> float:
+    """Mean PA over the player's most recent starts (tonight's role proxy)."""
+    recent = [pa for _, _, pa, _ in lines[-EXP_PA_WINDOW:]]
+    return sum(recent) / len(recent) if recent else float("nan")
 
 
 def load_aging_curves(path: Path) -> dict[str, dict[int, float]]:
@@ -342,6 +362,20 @@ def load_aging_curves(path: Path) -> dict[str, dict[int, float]]:
     return {
         key: {int(age): float(v) for age, v in curve.items()}
         for key, curve in payload.get("curves", {}).items()
+    }
+
+
+def load_park_factors(path: Path) -> dict[str, dict[int, float]]:
+    """market|point -> {home_team_id -> shrunk logit offset vs league}."""
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {
+        key: {int(t): float(v) for t, v in per_venue.items()}
+        for key, per_venue in payload.get("factors", {}).items()
     }
 
 
@@ -461,6 +495,11 @@ def main() -> None:
                                 / "models/props/aging_curves.json"),
                     help="aging-curve JSON from scripts/build_prop_aging_curves.py; "
                          "missing file disables the aging adjustment")
+    ap.add_argument("--park-factors",
+                    default=str(Path(__file__).parent.parent
+                                / "models/props/park_factors.json"),
+                    help="park-factor JSON from scripts/build_prop_park_factors.py; "
+                         "missing file disables the park adjustment")
     ap.add_argument("--min-gp", type=int, default=150,
                     help="min pooled recent games before a rate is alert-worthy")
     ap.add_argument("--max-alerts", type=int, default=8, help="max plays per text")
@@ -556,6 +595,10 @@ def main() -> None:
     curves = load_aging_curves(Path(args.aging_curves))
     if not curves:
         print("note: aging curves unavailable - aging adjustment disabled")
+    parks = load_park_factors(Path(args.park_factors))
+    if not parks:
+        print("note: park factors unavailable - park adjustment disabled")
+    team_abbrev, team_ids = team_directory()
     lam = 1.0 if args.recency_half_life <= 0 else 0.5 ** (1.0 / args.recency_half_life)
     latest = db_latest_final()
     stale_days = (datetime.now(ET).date() - latest).days if latest else 99
@@ -563,17 +606,31 @@ def main() -> None:
         print(f"WARNING: DB stale - latest Final game is {latest} "
               f"({stale_days}d old); rates are frozen until the daily ETL runs")
 
-    # League per-game rates over the whole board pool, per (market, point):
+    # Per-player streams: conditioned markets estimate from STARTS only.
+    starts_by_norm = {
+        norm: PlayerLines(
+            lines=[ln for ln in e.lines if ln[2] >= START_PA], age_now=e.age_now
+        )
+        for norm, e in lines_by_norm.items()
+    }
+
+    # League rates per (market, point) over the family-appropriate board pool:
     # the empirical-Bayes prior that trailing rates get shrunk toward.
-    pool = [stats for e in lines_by_norm.values() for _, _, stats in e.lines]
+    pool_all = [stats for e in lines_by_norm.values() for _, _, _, stats in e.lines]
+    pool_starts = [
+        stats for e in starts_by_norm.values() for _, _, _, stats in e.lines
+    ]
     league_over: dict[tuple[str, float], float] = {}
     for market, point in {(r["market"], r["point"]) for r in rows}:
         fn = STAT_FNS[market]
+        pool = pool_starts if market in CONDITIONED_MARKETS else pool_all
         if pool:
             league_over[(market, point)] = sum(1 for s in pool if fn(s) > point) / len(pool)
 
     for r in rows:
-        entry = lines_by_norm.get(_norm_name(r["player"]))
+        conditioned = r["market"] in CONDITIONED_MARKETS
+        source = starts_by_norm if conditioned else lines_by_norm
+        entry = source.get(_norm_name(r["player"]))
         lines = entry.lines if entry else []
         age_now = entry.age_now if entry else float("nan")
         stat_fn = STAT_FNS[r["market"]]
@@ -583,7 +640,7 @@ def main() -> None:
         lg = league_over.get((r["market"], r["point"]), float("nan"))
         over_adj = over_rec
         if rec_gp and not math.isnan(lg):
-            s_w, n_w, age_wmean = decayed_over(lines, stat_fn, r["point"], lam)
+            s_w, n_w, age_wmean, mean_pa = decayed_over(lines, stat_fn, r["point"], lam)
             p_w = (s_w + 0.5) / (n_w + 1.0)
             curve = curves.get(f"{r['market']}|{r['point']:g}")
             delta = 0.0
@@ -595,6 +652,25 @@ def main() -> None:
                 over_adj = (n_w * p_aged + args.shrink_k * lg) / (n_w + args.shrink_k)
             else:
                 over_adj = p_aged
+            if conditioned:
+                # expected-PA rescale (0.5 lines: per-PA equivalent rate model)
+                exp_pa = expected_pa(lines)
+                if (
+                    r["point"] == 0.5
+                    and not math.isnan(exp_pa)
+                    and not math.isnan(mean_pa)
+                    and mean_pa >= 1.0
+                ):
+                    q = 1.0 - (1.0 - over_adj) ** (1.0 / mean_pa)
+                    over_adj = 1.0 - (1.0 - q) ** min(max(exp_pa, 1.0), 6.0)
+                # tonight's park (home team of the event)
+                park_map = parks.get(f"{r['market']}|{r['point']:g}")
+                home_id = team_ids.get(r["home"])
+                if park_map and home_id is not None and home_id in park_map:
+                    clipped = min(max(over_adj, 1e-4), 1.0 - 1e-4)
+                    over_adj = 1.0 / (1.0 + math.exp(
+                        -(math.log(clipped / (1.0 - clipped)) + park_map[home_id])
+                    ))
         p_szn = over_szn if r["side"] == "over" else 1.0 - over_szn
         p_rec = over_rec if r["side"] == "over" else 1.0 - over_rec
         p_l30 = over_l30 if r["side"] == "over" else 1.0 - over_l30
@@ -688,7 +764,7 @@ def main() -> None:
         return
 
     fresh = fresh[: args.max_alerts]
-    ab = team_abbrevs()
+    ab = team_abbrev
     entries = [f"MLB props {datetime.now(ET):%-m/%-d %-I:%M%p}"]
     if stale_days > 2:
         entries.append(f"WARNING: rates stale - DB last updated {latest}")
