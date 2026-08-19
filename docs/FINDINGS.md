@@ -256,6 +256,33 @@ model-market pairs tested and six failures.
 The process is the finding. A run stopped at 60 games would have reported a -0.0098 Brier edge
 with a +15.6% flat-bet ROI and staked money on it.
 
+## Win totals at real prices (added 2026-08-19)
+
+The earlier win-totals test assumed -110 both ways because no prices were stored. Covers
+publishes the real preseason per-side prices (one BetMGM snapshot, late March), now scraped for
+2013-2026 into `resources/season_win_totals_odds.csv` (`scripts/scrape_covers_win_totals.py`;
+outcomes still derived from our own game data, Covers' published wins used only as an integrity
+cross-check: 300 checked, 2 mismatches). Real two-way hold is 4.80%, worse than the assumed 4.54%.
+
+Model-free at real prices, 389 team-seasons over 13 full seasons (2020 excluded):
+
+| Strategy | Bets | Win% | ROI | 95% CI |
+|---|---:|---:|---:|---|
+| always over | 389 | 45.5% | **-13.93%** | [-23.49%, -4.46%] excludes zero |
+| always under | 389 | 54.5% | +3.87% | [-5.69%, +13.45%] |
+
+Win-total overs are systematically shaded: blind-over is a genuinely losing strategy at real
+prices. Blind-under is positive but its interval straddles zero — thirteen seasons of ~30 bets
+is still not enough to promote the under-lean to an edge.
+
+Model strategy at real prices (120 bets, 2022-2025): +8.32% [-8.79%, +25.00%], per-season
+-4.4/+0.7/+1.2/+35.7 — every threshold's CI includes zero, 2025 carries the result, and the
+accuracy precondition still fails (model MAE 7.814 vs line 7.775, paired diff +0.04 wins,
+CI straddles zero). The model also picks under 58% of the time, so part of its positive point
+estimate is the market-wide under-lean rather than team-specific skill. Verdict unchanged:
+no deployable edge, now established at real prices. 2026 lines are captured preseason, so the
+2026 row settles at real prices in October.
+
 ## What remains untested
 
 | Item | Cost | Prior |
