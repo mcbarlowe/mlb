@@ -72,7 +72,7 @@ STAT_COLUMNS = (
     "hits", "doubles", "triples", "homeruns", "totalbases",
     "rbi", "runs", "baseonballs", "stolenbases", "strikeouts",
 )
-STRATEGY_VERSION = "props-decay400-age-k50"
+STRATEGY_VERSION = "props-decay400-age-k50-mkt"
 PAPER_DDL = """
 CREATE TABLE IF NOT EXISTS {schema}.prop_paper_bets (
     alert_date date NOT NULL,
@@ -464,6 +464,16 @@ def main() -> None:
     ap.add_argument("--min-gp", type=int, default=150,
                     help="min pooled recent games before a rate is alert-worthy")
     ap.add_argument("--max-alerts", type=int, default=8, help="max plays per text")
+    ap.add_argument("--max-fair-ratio", type=float, default=1.5,
+                    help="suppress alerts where our prob exceeds the no-vig market "
+                         "prob by more than this ratio (market-sanity anchor)")
+    ap.add_argument("--max-fair-diff", type=float, default=0.15,
+                    help="suppress alerts where our prob exceeds the no-vig market "
+                         "prob by more than this many probability points")
+    ap.add_argument("--max-decimal", type=float, default=15.0,
+                    help="suppress alerts priced longer than this decimal (~+1400)")
+    ap.add_argument("--max-ev", type=float, default=0.50,
+                    help="suppress alerts with EV above this (implausible-edge backstop)")
     ap.add_argument("--notify", action="store_true",
                     help="push new +EV plays to the configured channels")
     ap.add_argument("--notify-method", choices=("imessage", "ntfy", "both"),
@@ -647,7 +657,15 @@ def main() -> None:
         r for r in rows
         if r["ev_adj"] == r["ev_adj"]
         and r["ev_adj"] >= market_min_ev.get(r["market"], args.min_ev)
+        and r["ev_adj"] <= args.max_ev
         and r["rec_gp"] >= args.min_gp
+        # market anchor: a two-sided fair prob must exist, and our estimate may
+        # not exceed it implausibly - when we disagree with the market by this
+        # much, the market usually knows the role/matchup and we do not.
+        and r["fair_p"] == r["fair_p"]
+        and r["adj_rate"] <= r["fair_p"] * args.max_fair_ratio
+        and r["adj_rate"] - r["fair_p"] <= args.max_fair_diff
+        and american_to_decimal(r["best_price"]) <= args.max_decimal
     ]
     state_path = Path(args.state_file)
     state = load_state(state_path)
