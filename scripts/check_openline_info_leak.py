@@ -70,8 +70,8 @@ def load_bets(conn, schema: str, season: int):
     for pk, dt, hid, aid in sched:
         for tid in (int(hid), int(aid)):
             team_games.setdefault(tid, []).append(dt)
-    for tid in team_games:
-        team_games[tid].sort()
+    for dates in team_games.values():
+        dates.sort()
     game_teams = {int(pk): (int(hid), int(aid)) for pk, _, hid, aid in sched}
 
     per_game: dict[int, dict] = {}
