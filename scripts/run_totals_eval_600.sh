@@ -22,29 +22,30 @@ export OPENBLAS_NUM_THREADS=1
 export POLARS_MAX_THREADS=1
 
 OUT_DIR=data/analysis
-LOG="$OUT_DIR/totals_eval_600g.log"
-STATUS="$OUT_DIR/totals_eval_STATUS.txt"
 mkdir -p "$OUT_DIR"
 
 GAMES=${GAMES:-600}
 SIMS=${SIMS:-200}
 SEED=${SEED:-2026}
+SEASON=${SEASON:-2025}
 RUN_ID=${RUN_ID:-totals_eval_600g_200s}
+LOG="$OUT_DIR/${RUN_ID}.log"
+STATUS="$OUT_DIR/${RUN_ID}_STATUS.txt"
 
 {
   echo "STATUS=RUNNING"
   echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "games=$GAMES sims=$SIMS seed=$SEED run_id=$RUN_ID"
+  echo "season=$SEASON games=$GAMES sims=$SIMS seed=$SEED run_id=$RUN_ID"
   echo "expect roughly 46 seconds per game, so about $((GAMES * 46 / 60)) minutes"
   echo "per-game lines accumulate in $LOG"
 } > "$STATUS"
 
 uv run python scripts/sim_totals_eval.py \
-  --season 2025 --games "$GAMES" --sims "$SIMS" --seed "$SEED" \
+  --season "$SEASON" --games "$GAMES" --sims "$SIMS" --seed "$SEED" \
   --edge-buckets 0.02,0.03,0.05,0.07 \
   --run-id "$RUN_ID" \
-  --out-csv "$OUT_DIR/totals_eval_600g.csv" \
-  --out-json "$OUT_DIR/totals_eval_600g.json" \
+  --out-csv "$OUT_DIR/${RUN_ID}.csv" \
+  --out-json "$OUT_DIR/${RUN_ID}.json" \
   > "$LOG" 2>&1
 RC=$?
 
