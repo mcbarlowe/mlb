@@ -40,7 +40,8 @@ STATUS="$OUT_DIR/${RUN_ID}_STATUS.txt"
   echo "per-game lines accumulate in $LOG"
 } > "$STATUS"
 
-uv run python scripts/sim_totals_eval.py \
+UV_BIN=${UV_BIN:-$(command -v uv || echo /usr/local/bin/uv)}
+"$UV_BIN" run python scripts/sim_totals_eval.py \
   --season "$SEASON" --games "$GAMES" --sims "$SIMS" --seed "$SEED" \
   --edge-buckets 0.02,0.03,0.05,0.07 \
   --run-id "$RUN_ID" \
