@@ -1,0 +1,586 @@
+{
+  "meta": {
+    "method": "Home/road balanced park factors (Baseball-Reference style): PF(outcome) = (outcome rate per PA in a team's home games) / (outcome rate per PA in the same team's road games), pooled over all prior seasons from 2021 (leak-free trailing window), keyed by each team's primary home venue.",
+    "created": "2026-08-20T00:52:14.224632+00:00",
+    "clamp": [
+      0.7,
+      1.6
+    ],
+    "outcome_classes": [
+      "home_run",
+      "single",
+      "double",
+      "triple"
+    ],
+    "first_season": 2021,
+    "min_pa": 3000,
+    "train_windows": {
+      "2024": [
+        2021,
+        2022,
+        2023
+      ],
+      "2025": [
+        2021,
+        2022,
+        2023,
+        2024
+      ],
+      "2026": [
+        2021,
+        2022,
+        2023,
+        2024,
+        2025
+      ]
+    }
+  },
+  "factors": {
+    "2024": {
+      "2": {
+        "home_run": 1.0885,
+        "single": 1.0761,
+        "double": 0.876,
+        "triple": 0.855
+      },
+      "5325": {
+        "home_run": 1.1732,
+        "single": 0.9771,
+        "double": 1.043,
+        "triple": 0.8132
+      },
+      "3312": {
+        "home_run": 0.9518,
+        "single": 0.9701,
+        "double": 1.1068,
+        "triple": 0.8389
+      },
+      "3": {
+        "home_run": 1.0034,
+        "single": 1.0934,
+        "double": 1.1971,
+        "triple": 1.6
+      },
+      "15": {
+        "home_run": 0.7559,
+        "single": 1.0829,
+        "double": 1.1235,
+        "triple": 1.2881
+      },
+      "14": {
+        "home_run": 1.05,
+        "single": 0.9464,
+        "double": 1.0516,
+        "triple": 0.7263
+      },
+      "22": {
+        "home_run": 1.2603,
+        "single": 0.9331,
+        "double": 1.0051,
+        "triple": 0.7
+      },
+      "7": {
+        "home_run": 0.8618,
+        "single": 1.0892,
+        "double": 1.1732,
+        "triple": 1.2096
+      },
+      "4705": {
+        "home_run": 1.0084,
+        "single": 1.0124,
+        "double": 0.9681,
+        "triple": 1.01
+      },
+      "4169": {
+        "home_run": 0.9121,
+        "single": 1.0326,
+        "double": 1.0063,
+        "triple": 1.1463
+      },
+      "12": {
+        "home_run": 0.9112,
+        "single": 0.9141,
+        "double": 1.0068,
+        "triple": 0.9131
+      },
+      "2395": {
+        "home_run": 0.8037,
+        "single": 1.0404,
+        "double": 1.0077,
+        "triple": 1.3085
+      },
+      "2392": {
+        "home_run": 0.9865,
+        "single": 0.9857,
+        "double": 1.0081,
+        "triple": 1.4927
+      },
+      "2889": {
+        "home_run": 0.8985,
+        "single": 1.0407,
+        "double": 0.9492,
+        "triple": 0.7501
+      },
+      "2681": {
+        "home_run": 1.0968,
+        "single": 0.9585,
+        "double": 0.973,
+        "triple": 1.1252
+      },
+      "2680": {
+        "home_run": 0.9661,
+        "single": 0.9696,
+        "double": 0.9086,
+        "triple": 0.7
+      },
+      "5": {
+        "home_run": 0.9456,
+        "single": 0.9857,
+        "double": 0.9835,
+        "triple": 0.8492
+      },
+      "680": {
+        "home_run": 0.9763,
+        "single": 0.9244,
+        "double": 0.8702,
+        "triple": 0.7
+      },
+      "4": {
+        "home_run": 1.1696,
+        "single": 0.9772,
+        "double": 0.8995,
+        "triple": 0.7
+      },
+      "3289": {
+        "home_run": 0.9167,
+        "single": 0.9535,
+        "double": 0.8462,
+        "triple": 0.7
+      },
+      "3309": {
+        "home_run": 1.0277,
+        "single": 0.9778,
+        "double": 1.0386,
+        "triple": 0.8857
+      },
+      "1": {
+        "home_run": 1.1538,
+        "single": 0.9981,
+        "double": 0.8872,
+        "triple": 1.0282
+      },
+      "2602": {
+        "home_run": 1.3832,
+        "single": 0.9994,
+        "double": 0.9877,
+        "triple": 0.7
+      },
+      "3313": {
+        "home_run": 1.1453,
+        "single": 0.9475,
+        "double": 0.9233,
+        "triple": 0.7
+      },
+      "32": {
+        "home_run": 1.1001,
+        "single": 0.9311,
+        "double": 0.9548,
+        "triple": 1.0867
+      },
+      "17": {
+        "home_run": 1.0364,
+        "single": 1.0473,
+        "double": 0.9213,
+        "triple": 1.2371
+      },
+      "19": {
+        "home_run": 1.1566,
+        "single": 1.0997,
+        "double": 1.2289,
+        "triple": 1.6
+      },
+      "2394": {
+        "home_run": 0.8077,
+        "single": 1.0077,
+        "double": 1.0054,
+        "triple": 1.6
+      },
+      "31": {
+        "home_run": 0.8099,
+        "single": 1.0597,
+        "double": 1.051,
+        "triple": 1.0739
+      },
+      "10": {
+        "home_run": 0.7954,
+        "single": 0.9655,
+        "double": 0.9951,
+        "triple": 1.0445
+      }
+    },
+    "2025": {
+      "2": {
+        "home_run": 1.0557,
+        "single": 1.0805,
+        "double": 0.8984,
+        "triple": 1.0101
+      },
+      "5325": {
+        "home_run": 1.1291,
+        "single": 0.9576,
+        "double": 1.011,
+        "triple": 0.9402
+      },
+      "3312": {
+        "home_run": 0.9957,
+        "single": 0.9846,
+        "double": 1.1008,
+        "triple": 0.8386
+      },
+      "3": {
+        "home_run": 0.9574,
+        "single": 1.0726,
+        "double": 1.1962,
+        "triple": 1.3784
+      },
+      "15": {
+        "home_run": 0.7777,
+        "single": 1.0778,
+        "double": 1.1336,
+        "triple": 1.3684
+      },
+      "14": {
+        "home_run": 1.0335,
+        "single": 0.961,
+        "double": 1.075,
+        "triple": 0.7463
+      },
+      "31": {
+        "home_run": 0.85,
+        "single": 1.0509,
+        "double": 1.0911,
+        "triple": 0.9201
+      },
+      "22": {
+        "home_run": 1.2227,
+        "single": 0.9425,
+        "double": 0.9645,
+        "triple": 0.7
+      },
+      "7": {
+        "home_run": 0.8616,
+        "single": 1.0763,
+        "double": 1.2082,
+        "triple": 1.3869
+      },
+      "4705": {
+        "home_run": 0.9609,
+        "single": 1.0322,
+        "double": 0.968,
+        "triple": 1.0921
+      },
+      "4169": {
+        "home_run": 0.9381,
+        "single": 1.0343,
+        "double": 1.0245,
+        "triple": 1.1503
+      },
+      "12": {
+        "home_run": 0.9355,
+        "single": 0.9283,
+        "double": 0.9628,
+        "triple": 1.0442
+      },
+      "2395": {
+        "home_run": 0.7783,
+        "single": 1.0358,
+        "double": 1.0628,
+        "triple": 1.3249
+      },
+      "2392": {
+        "home_run": 1.0504,
+        "single": 0.9774,
+        "double": 1.0188,
+        "triple": 1.3086
+      },
+      "2889": {
+        "home_run": 0.8759,
+        "single": 1.0401,
+        "double": 0.9565,
+        "triple": 0.8374
+      },
+      "2681": {
+        "home_run": 1.1037,
+        "single": 0.968,
+        "double": 0.9311,
+        "triple": 1.0358
+      },
+      "2680": {
+        "home_run": 1.0563,
+        "single": 0.9514,
+        "double": 0.9198,
+        "triple": 0.7
+      },
+      "5": {
+        "home_run": 0.9735,
+        "single": 0.9927,
+        "double": 1.0304,
+        "triple": 0.7087
+      },
+      "680": {
+        "home_run": 0.9414,
+        "single": 0.9331,
+        "double": 0.8442,
+        "triple": 0.7
+      },
+      "4": {
+        "home_run": 1.1144,
+        "single": 0.9873,
+        "double": 0.9161,
+        "triple": 0.7
+      },
+      "10": {
+        "home_run": 0.7804,
+        "single": 0.982,
+        "double": 0.9894,
+        "triple": 1.0184
+      },
+      "3289": {
+        "home_run": 0.9625,
+        "single": 0.9266,
+        "double": 0.8815,
+        "triple": 0.7152
+      },
+      "3309": {
+        "home_run": 1.0408,
+        "single": 0.985,
+        "double": 0.9933,
+        "triple": 0.8411
+      },
+      "1": {
+        "home_run": 1.1521,
+        "single": 0.9964,
+        "double": 0.897,
+        "triple": 1.0072
+      },
+      "3313": {
+        "home_run": 1.1569,
+        "single": 0.9463,
+        "double": 0.9319,
+        "triple": 0.7
+      },
+      "2602": {
+        "home_run": 1.3723,
+        "single": 1.0156,
+        "double": 1.0197,
+        "triple": 0.7
+      },
+      "2394": {
+        "home_run": 0.8439,
+        "single": 1.002,
+        "double": 0.9912,
+        "triple": 1.4315
+      },
+      "32": {
+        "home_run": 1.1147,
+        "single": 0.9231,
+        "double": 0.9159,
+        "triple": 1.1093
+      },
+      "17": {
+        "home_run": 0.9818,
+        "single": 1.0199,
+        "double": 0.8824,
+        "triple": 1.2162
+      },
+      "19": {
+        "home_run": 1.1178,
+        "single": 1.1152,
+        "double": 1.1825,
+        "triple": 1.6
+      }
+    },
+    "2026": {
+      "2": {
+        "home_run": 1.096,
+        "single": 1.0579,
+        "double": 0.9305,
+        "triple": 0.9994
+      },
+      "5325": {
+        "home_run": 1.0538,
+        "single": 0.9534,
+        "double": 1.011,
+        "triple": 0.8453
+      },
+      "3312": {
+        "home_run": 0.9599,
+        "single": 0.9998,
+        "double": 1.1156,
+        "triple": 0.8168
+      },
+      "3": {
+        "home_run": 0.9298,
+        "single": 1.0693,
+        "double": 1.1961,
+        "triple": 1.3463
+      },
+      "15": {
+        "home_run": 0.7825,
+        "single": 1.0645,
+        "double": 1.1173,
+        "triple": 1.4884
+      },
+      "14": {
+        "home_run": 1.0772,
+        "single": 0.9563,
+        "double": 1.0485,
+        "triple": 0.7563
+      },
+      "31": {
+        "home_run": 0.8311,
+        "single": 1.0511,
+        "double": 1.115,
+        "triple": 0.9463
+      },
+      "22": {
+        "home_run": 1.2806,
+        "single": 0.9384,
+        "double": 0.9801,
+        "triple": 0.7
+      },
+      "7": {
+        "home_run": 0.8608,
+        "single": 1.0575,
+        "double": 1.1618,
+        "triple": 1.537
+      },
+      "4705": {
+        "home_run": 0.9765,
+        "single": 1.0307,
+        "double": 0.9709,
+        "triple": 1.0064
+      },
+      "4169": {
+        "home_run": 0.9169,
+        "single": 1.0171,
+        "double": 1.0138,
+        "triple": 1.1945
+      },
+      "3309": {
+        "home_run": 1.0084,
+        "single": 1.0003,
+        "double": 0.9873,
+        "triple": 0.9009
+      },
+      "3313": {
+        "home_run": 1.1294,
+        "single": 0.9399,
+        "double": 0.9059,
+        "triple": 0.7
+      },
+      "12": {
+        "home_run": 0.9755,
+        "single": 0.9629,
+        "double": 0.9445,
+        "triple": 0.9619
+      },
+      "2395": {
+        "home_run": 0.796,
+        "single": 1.0507,
+        "double": 1.0547,
+        "triple": 1.2484
+      },
+      "2392": {
+        "home_run": 1.0547,
+        "single": 0.9779,
+        "double": 1.0014,
+        "triple": 1.2529
+      },
+      "2889": {
+        "home_run": 0.8676,
+        "single": 1.0384,
+        "double": 0.9793,
+        "triple": 0.7431
+      },
+      "2681": {
+        "home_run": 1.1344,
+        "single": 0.9758,
+        "double": 0.9403,
+        "triple": 1.0471
+      },
+      "680": {
+        "home_run": 0.9228,
+        "single": 0.9114,
+        "double": 0.8686,
+        "triple": 0.7
+      },
+      "2680": {
+        "home_run": 1.0437,
+        "single": 0.9448,
+        "double": 0.907,
+        "triple": 0.7
+      },
+      "5": {
+        "home_run": 0.971,
+        "single": 1.0023,
+        "double": 1.0088,
+        "triple": 0.7
+      },
+      "4": {
+        "home_run": 1.0959,
+        "single": 0.9906,
+        "double": 0.8933,
+        "triple": 0.7
+      },
+      "10": {
+        "home_run": 0.8358,
+        "single": 0.993,
+        "double": 1.0277,
+        "triple": 0.9765
+      },
+      "3289": {
+        "home_run": 0.9828,
+        "single": 0.9468,
+        "double": 0.8786,
+        "triple": 0.7097
+      },
+      "1": {
+        "home_run": 1.1184,
+        "single": 0.9998,
+        "double": 0.9133,
+        "triple": 1.0152
+      },
+      "2602": {
+        "home_run": 1.3327,
+        "single": 1.0124,
+        "double": 1.0035,
+        "triple": 0.7
+      },
+      "2394": {
+        "home_run": 0.9074,
+        "single": 1.0021,
+        "double": 1.0002,
+        "triple": 1.4376
+      },
+      "32": {
+        "home_run": 1.0995,
+        "single": 0.9191,
+        "double": 0.9308,
+        "triple": 1.1272
+      },
+      "17": {
+        "home_run": 0.9721,
+        "single": 1.0027,
+        "double": 0.8788,
+        "triple": 1.227
+      },
+      "19": {
+        "home_run": 1.0987,
+        "single": 1.1303,
+        "double": 1.2,
+        "triple": 1.6
+      }
+    }
+  }
+}
