@@ -3,9 +3,14 @@
 
 Default strategy:
 - champion win model vs consensus no-vig h2h market
-- edge >= 0.05
+- edge >= 0.03, logged wide so any threshold or band can be applied in analysis
 - execute at best available book price for the selected side
 - quarter-Kelly stake, 5% cap, fixed bankroll
+
+The strategy_version label is derived from the edge gate, so records taken under different
+thresholds never pool. Measured full-sample ROI at open entry with June removed, six seasons:
+3% +1.10%, 4% +3.08%, 5% +3.23%, 4-8% band +4.40%. None is individually significant, which is
+why the gate is set wide rather than at the best-looking cut.
 """
 
 from __future__ import annotations
@@ -24,6 +29,8 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.betting.gates import require_open_gate
+from src.betting.h2h_odds_store import upsert_h2h_odds_rows
 from src.betting.ingest import team_abbrev_to_id
 from src.betting.paper_trade_store import upsert_paper_trade_rows
 from src.betting.paper_trading import (
@@ -40,7 +47,18 @@ from src.sim.team_strength import (
 )
 
 CURRENT_ODDS_URL = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"
-STRATEGY_VERSION = "moneyline_champion_best_open_edge05_v1"
+
+
+def strategy_version(edge_threshold: float) -> str:
+    """Record label, derived from the gate so the two can never disagree.
+
+    The threshold is part of the strategy identity. Logging bets from a 3% gate under a label that
+    says 5% would silently pool two different strategies in one record and make the result
+    uninterpretable, and the label is also the dedup key.
+    """
+    return f"moneyline_champion_best_open_edge{round(edge_threshold * 100):02d}_v1"
+
+
 NAME_ALIASES = {
     "Cleveland Guardians": "Cleveland Indians",
     "Miami Marlins": "Florida Marlins",
@@ -236,6 +254,54 @@ def _odds_by_game_pk(
     return dict(out)
 
 
+def _h2h_odds_rows(
+    *,
+    slate_games: Sequence[SlateGame],
+    odds_by_game: Mapping[int, Sequence[PaperOddsLine]],
+    snapshot_time: str,
+    line_type: str,
+    source: str,
+) -> list[dict[str, object]]:
+    slate_by_pk = {game.game_pk: game for game in slate_games}
+    rows: list[dict[str, object]] = []
+    for game_pk, lines in odds_by_game.items():
+        game = slate_by_pk.get(game_pk)
+        if game is None:
+            continue
+        for line in lines:
+            rows.append(
+                {
+                    "game_pk": game.game_pk,
+                    "game_date": game.slate_date,
+                    "away_team_id": game.away_team_id,
+                    "home_team_id": game.home_team_id,
+                    "bookmaker": line.bookmaker,
+                    "market": "h2h",
+                    "line_type": line_type,
+                    "home_ml": line.home_ml,
+                    "away_ml": line.away_ml,
+                    "snapshot_time": snapshot_time,
+                    "source": source,
+                }
+            )
+    return rows
+
+
+def _open_odds_rows(
+    *,
+    slate_games: Sequence[SlateGame],
+    odds_by_game: Mapping[int, Sequence[PaperOddsLine]],
+    snapshot_time: str,
+) -> list[dict[str, object]]:
+    return _h2h_odds_rows(
+        slate_games=slate_games,
+        odds_by_game=odds_by_game,
+        snapshot_time=snapshot_time,
+        line_type="open",
+        source="the-odds-api-current",
+    )
+
+
 def _active_rosters(game: SlateGame, *, enabled: bool) -> tuple[tuple[int, ...], ...]:
     if not enabled:
         return (), (), (), ()
@@ -277,9 +343,10 @@ def _pick_row(
     snapshot_time: str,
     paper_date: str,
     staking: str,
+    version: str,
 ) -> dict[str, str]:
     return {
-        "strategy_version": STRATEGY_VERSION,
+        "strategy_version": version,
         "paper_date": paper_date,
         "snapshot_time_utc": snapshot_time,
         "game_pk": str(game.game_pk),
@@ -328,6 +395,7 @@ def _write_picks(
     rows: Sequence[dict[str, str]],
     paper_date: str,
     replace_date: bool,
+    version: str,
 ) -> tuple[int, int]:
     existing = _read_existing(path)
     if replace_date:
@@ -336,12 +404,11 @@ def _write_picks(
             for row in existing
             if not (
                 row.get("paper_date") == paper_date
-                and row.get("strategy_version") == STRATEGY_VERSION
+                and row.get("strategy_version") == version
             )
         ]
     existing_keys = {
-        (row.get("strategy_version", ""), row.get("game_pk", ""))
-        for row in existing
+        (row.get("strategy_version", ""), row.get("game_pk", "")) for row in existing
     }
     new_rows: list[dict[str, str]] = []
     skipped = 0
@@ -374,7 +441,12 @@ def _print_rows(rows: Iterable[dict[str, str]]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", type=str, default=None)
-    parser.add_argument("--edge-threshold", type=float, default=0.05)
+    # Logged wide on purpose. Paper bets cost nothing, the edge is stored on every row, and any
+    # threshold or band can be applied in analysis afterwards. Gating at the configuration that
+    # looked best over six hindsight seasons would lock in a parameter chosen from the same data
+    # it would then be tested on. Measured full-sample ROI at open entry with June removed:
+    # 3% +1.10%, 4% +3.08%, 5% +3.23%, and the 4-8% band +4.40%, none individually significant.
+    parser.add_argument("--edge-threshold", type=float, default=0.03)
     parser.add_argument("--staking", choices=("flat", "kelly"), default="kelly")
     parser.add_argument("--bankroll-units", type=float, default=100.0)
     parser.add_argument("--flat-stake-units", type=float, default=1.0)
@@ -382,6 +454,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--kelly-cap", type=float, default=0.05)
     parser.add_argument("--regions", default="us")
     parser.add_argument("--odds-json", type=str, default=None)
+    parser.add_argument(
+        "--gate-json",
+        type=str,
+        default=None,
+        help="Optional betting-gate JSON artifact that must be open before execution.",
+    )
     parser.add_argument("--max-match-hours", type=float, default=12.0)
     parser.add_argument("--all-games", action="store_true")
     parser.add_argument("--skip-active-rosters", action="store_true")
@@ -404,12 +482,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replace-date", action="store_true")
     parser.add_argument("--no-db-log", action="store_true")
     parser.add_argument("--no-csv-log", action="store_true")
+    parser.add_argument(
+        "--no-odds-db-log",
+        action="store_true",
+        help="Do not persist the matched current h2h board into mlb.odds/open.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
 
+def _preflight_gate(gate_json: str | None) -> None:
+    if gate_json is None:
+        return
+    gate = require_open_gate(gate_json)
+    print(f"Betting gate OPEN: {gate.reason} ({gate.artifact})")
+
+
 def main() -> None:
     args = parse_args()
+    # Gate first. A closed gate must exit before any other work, including reading args that a
+    # caller checking only the gate would not have supplied.
+    _preflight_gate(args.gate_json)
+    version = strategy_version(args.edge_threshold)
     target_date = _parse_date(args.date)
     paper_date = target_date.isoformat()
     states = None if args.all_games else {"Preview"}
@@ -426,17 +520,28 @@ def main() -> None:
             raise SystemExit("ODDS_API_KEY is required unless --odds-json is provided")
         odds_payload, headers = _fetch_current_odds(api_key, args.regions)
 
+    snapshot_time = datetime.now(tz=UTC).isoformat()
     odds_by_game = _odds_by_game_pk(
         payload=odds_payload,
         slate_games=slate_games,
         max_match_hours=args.max_match_hours,
     )
+    if args.dry_run:
+        print("dry-run: no h2h open odds rows written to DB")
+    elif not args.no_db_log and not args.no_odds_db_log:
+        odds_inserted = upsert_h2h_odds_rows(
+            _open_odds_rows(
+                slate_games=slate_games,
+                odds_by_game=odds_by_game,
+                snapshot_time=snapshot_time,
+            )
+        )
+        print(f"upserted {odds_inserted} h2h open odds rows into odds")
     predictor = build_live_strength_predictor(
         target_date,
         tracking_uri=args.mlflow_tracking_uri,
         registered_model_name=args.win_model_name,
     )
-    snapshot_time = datetime.now(tz=UTC).isoformat()
     rows: list[dict[str, str]] = []
     skipped_no_odds = 0
     skipped_no_edge = 0
@@ -472,6 +577,7 @@ def main() -> None:
                 snapshot_time=snapshot_time,
                 paper_date=paper_date,
                 staking=args.staking,
+                version=version,
             )
         )
 
@@ -506,6 +612,7 @@ def main() -> None:
         rows=rows,
         paper_date=paper_date,
         replace_date=args.replace_date,
+        version=version,
     )
     print(f"wrote {written} rows to {args.out}; skipped_existing={skipped_existing}")
 
