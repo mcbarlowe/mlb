@@ -263,23 +263,52 @@ Measured pooled expectation with all three rules applied: **−0.22% per unit st
 
 ## What would change the verdict
 
-One category remains untested with a plausible route to information the price lacks.
+Nothing reachable by compute. The last plausible route was line movement, and it is now closed.
 
-**Market-dynamics data.** The oracle test established a real ceiling: perfect foresight of the
-closing line, betting at the open, returns **+6.14% [+1.14%, +10.94%]** on 1,566 bets restricted
-to games whose line moves at least three points. That is statistically significant, and it is the
-only positive result in this project that is not an artifact of selection.
+### The line-movement thesis, and why it is dead
 
-It is unreachable with current inputs. The target is continuous — `logit(close) − logit(open)` —
-carrying far more statistical power per game than binary win/loss. Four features survived a
-Bonferroni residual screen against it (`model_disagree`, `book_dispersion`, `lead_hours`,
-`n_books`), yet the best predicted-movement standard deviation is **0.0206 logits against the
-0.1200 required**, a 5.8σ shortfall, and predicted movement never once reaches the threshold
-across 6,988 games. ROI degrades monotonically as predicted-movement confidence rises.
+The oracle test established a real ceiling. Perfect foresight of the closing line, betting at the
+open, returns **+6.04% [+1.05%, +10.76%]** on 1,565 bets restricted to games whose line moves at
+least three points, rising monotonically to +10.99% at a five-point threshold. That was the only
+statistically significant positive in the project and the only one not produced by selection. Note
+that betting at the *best* opening price folds in the +2.1pp shopping edge, so the movement
+component alone is nearer 4%.
 
-Closing that gap needs data this repository does not have and cannot derive: lineup announcement
-timestamps, injury-feed latency, per-book move logs, and betting-percentage splits. **That is a
-purchasing decision, not a modelling one.** Everything reachable by compute has been tested.
+Predicting the move at the open failed by a wide margin. The target is continuous —
+`logit(close) − logit(open)` — so it carries far more power per game than binary win/loss, and four
+features cleared a Bonferroni residual screen (`model_disagree`, `book_dispersion`, `lead_hours`,
+`n_books`). But the best predicted-movement standard deviation is **0.0206 logits against the
+0.1200 required**, a factor of six, and predicted movement never once reaches the threshold across
+6,988 games. ROI degrades monotonically as predicted confidence rises, and `model_disagree` alone
+supplies 0.0357 of the total 0.041 R², so most of the apparent signal is the winner's curse wearing
+a different hat.
+
+That left one idea: bet later, using features that describe how the price is behaving — which book
+moved first, whether books are converging, how fast it is moving. Those require watching part of
+the move, so the bet lands after the open. Building that needs per-book snapshot ladders, roughly
+144,000 API credits per season, which the existing balance covers comfortably.
+
+It is not worth buying, and the reason is free to measure from the three price points already
+stored (`scripts/test_entry_point_ceiling.py`):
+
+| Measurement | Value | Meaning |
+|---|---:|---|
+| corr(signed early move, signed late move) | **+0.0192** | no momentum |
+| corr(abs early move, abs late move) | **+0.0369** | no volatility clustering |
+| Share of total movement before the 2.5h mark | 70.2% | most of it is already gone |
+| Games with 3+ points left to move at 2.5h | **136 of 9,583, 1.4%** | almost no opportunities |
+
+The early move carries no information about the remaining move, in direction, in magnitude, or in
+the tails — quintiles of early movement show a flat 1.2–1.9% rate of large late moves against a
+1.4% baseline, with the largest early movers slightly *below* average. A snapshot ladder buys
+resolution on the early move, and the early move is uninformative. So both branches are shut: at
+the open only static features exist and they fall six-fold short, and later the dynamics features
+exist but describe something unrelated to what remains.
+
+What is left needs data that cannot be derived here at all: lineup announcement timestamps,
+injury-feed latency, and betting-percentage splits. Those are a purchasing decision against a
+thesis whose observable component has now been refuted, which is a materially worse bet than it
+looked before this check.
 
 ---
 
@@ -301,6 +330,7 @@ uv run python scripts/survey_mlb_market_holds.py --dates 2025-06-10,2025-07-15,2
 
 # Oracle ceiling and the line-movement screen
 uv run python scripts/test_beat_the_opener_ceiling.py
+uv run python scripts/test_entry_point_ceiling.py
 uv run python scripts/screen_movement_signal.py
 
 # Moneyline backtest with and without line shopping
