@@ -62,7 +62,7 @@ def main() -> None:
     print("\nout-of-fold logistic stacks (5-fold CV):")
     for cols in (["model"], ["sharp"], ["kalshi"], ["model", "sharp"],
                  ["sharp", "kalshi"], ["model", "sharp", "kalshi"]):
-        b, ic, coef = cv_stack(cols)
+        b, _ic, coef = cv_stack(cols)
         cs = " ".join(f"{k}={v:+.2f}" for k, v in coef.items())
         print(f"  {'+'.join(cols):26s} OOF Brier {b:.4f} | coef: {cs}")
 

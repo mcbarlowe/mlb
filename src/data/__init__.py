@@ -13,10 +13,10 @@ from src.data.reference_data import ReferenceData
 from src.data.team_data import TeamData
 
 __all__ = [
+    "BoxscoreData",
     "GameFeedData",
     "LinescoreData",
-    "BoxscoreData",
+    "PlayerData",
     "ReferenceData",
     "TeamData",
-    "PlayerData",
 ]

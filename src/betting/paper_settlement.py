@@ -24,6 +24,9 @@ class PaperTradeSummary:
     total_staked: float
     profit_units: float
     roi: float
+    starting_bankroll: float
+    current_bankroll: float
+    bankroll_return: float
     avg_clv: float
     beat_close_rate: float
     win_rate: float
@@ -111,11 +114,14 @@ def settle_paper_trade_row(
 
 def summarize_paper_trade_rows(
     rows: Sequence[Mapping[str, str]],
+    *,
+    starting_bankroll: float = 100.0,
 ) -> PaperTradeSummary:
     settled = [row for row in rows if row.get("status") == "settled"]
     open_rows = len(rows) - len(settled)
     total_staked = sum(_optional_float(row, "stake_units") or 0.0 for row in settled)
     profit_units = sum(_optional_float(row, "profit_units") or 0.0 for row in settled)
+    current_bankroll = starting_bankroll + profit_units
     clvs = [value for row in settled if (value := _optional_float(row, "clv")) is not None]
     wins = [row for row in settled if row.get("result") == "win"]
     return PaperTradeSummary(
@@ -126,6 +132,9 @@ def summarize_paper_trade_rows(
         total_staked=total_staked,
         profit_units=profit_units,
         roi=profit_units / total_staked if total_staked else 0.0,
+        starting_bankroll=starting_bankroll,
+        current_bankroll=current_bankroll,
+        bankroll_return=profit_units / starting_bankroll if starting_bankroll else 0.0,
         avg_clv=sum(clvs) / len(clvs) if clvs else 0.0,
         beat_close_rate=(sum(1 for clv in clvs if clv > 0.0) / len(clvs))
         if clvs

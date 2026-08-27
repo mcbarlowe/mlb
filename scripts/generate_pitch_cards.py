@@ -14,22 +14,20 @@ Usage:
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import numpy as np
 import polars as pl
 import torch
+from matplotlib import patches
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.ml.model import create_model
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES
 
 
 def load_model(model_dir: str, device: str = "cpu"):
@@ -39,7 +37,7 @@ def load_model(model_dir: str, device: str = "cpu"):
     # Find the run directory
     run_dirs = list(model_path.glob("run_*"))
     if run_dirs:
-        run_dir = sorted(run_dirs)[-1]  # Get most recent
+        run_dir = max(run_dirs)  # Get most recent
     else:
         run_dir = model_path
 
@@ -92,7 +90,7 @@ def load_pitcher_data(data_path: str, season: str = "2025"):
     return pl.concat(dfs, how="diagonal")
 
 
-def get_pitcher_stats(df: pl.DataFrame, pitcher_name: str = None, pitcher_id: int = None):
+def get_pitcher_stats(df: pl.DataFrame, pitcher_name: str | None = None, pitcher_id: int | None = None):
     """Get statistics for a specific pitcher."""
     if pitcher_name:
         pitcher_df = df.filter(pl.col("pitcher_name") == pitcher_name)
@@ -131,7 +129,7 @@ def get_pitcher_stats(df: pl.DataFrame, pitcher_name: str = None, pitcher_id: in
 
     # Location data by pitch type
     locations = {}
-    for pitch_type in pitch_dist.keys():
+    for pitch_type in pitch_dist:
         type_df = pitcher_df.filter(pl.col("pitch_type") == pitch_type)
         px = type_df.select("px").drop_nulls().to_numpy().flatten()
         pz = type_df.select("pz").drop_nulls().to_numpy().flatten()
@@ -164,7 +162,7 @@ def get_pitcher_stats(df: pl.DataFrame, pitcher_name: str = None, pitcher_id: in
 
     # Velocity by pitch type
     velocities = {}
-    for pitch_type in pitch_dist.keys():
+    for pitch_type in pitch_dist:
         type_df = pitcher_df.filter(pl.col("pitch_type") == pitch_type)
         speeds = type_df.select("start_speed").drop_nulls().to_numpy().flatten()
         if len(speeds) > 0:
@@ -212,7 +210,7 @@ def draw_strike_zone(ax, zone_height_bot=1.5, zone_height_top=3.5):
     ax.add_patch(plate)
 
 
-def create_pitch_card(pitcher_info: dict, output_path: str = None):
+def create_pitch_card(pitcher_info: dict, output_path: str | None = None):
     """Create a visual pitch card for a pitcher."""
 
     fig = plt.figure(figsize=(16, 12))
@@ -233,7 +231,7 @@ def create_pitch_card(pitcher_info: dict, output_path: str = None):
     sizes = [pitch_dist[p]["pct"] for p in labels]
     colors = plt.cm.Set3(np.linspace(0, 1, len(labels)))
 
-    wedges, texts, autotexts = ax1.pie(
+    _wedges, _texts, _autotexts = ax1.pie(
         sizes, labels=labels, autopct='%1.1f%%',
         colors=colors, startangle=90
     )
@@ -461,7 +459,7 @@ def main():
         print("\nUse --pitcher 'Name' or --top N to generate cards")
         return
 
-    print(f"\nGenerating pitch cards...")
+    print("\nGenerating pitch cards...")
     for pitcher_name in pitchers_to_process:
         print(f"\nProcessing {pitcher_name}...")
 

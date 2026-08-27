@@ -262,6 +262,8 @@ def build_day_ahead_simulator(
     outcome_run_dir: str = "auto",
     tracking_uri: str | None = None,
     pa_calibration_path: str | Path | None = None,
+    pitch_type_model_dir: str | None = None,
+    pitch_type_model_weight: float = 1.0,
 ) -> tuple[GameSimulator, Path]:
     """Load the outcome-model chain, pitch-mix tables, and base-out engine."""
     from src.sim.artifacts import ensure_sim_artifacts
@@ -286,8 +288,19 @@ def build_day_ahead_simulator(
         tracking_uri=resolved_tracking_uri,
         selection=selection,
     )
-    predictor = PitchOutcomePredictor(run_dir, profiles_dir=profiles_dir)
     mix = PitchMixProfiles.load(seed=seed)
+    if pitch_type_model_dir is not None:
+        from src.sim.pitch_mix import PitchModelCountProfiles
+
+        # Load Torch artifacts before CatBoost; the reverse order segfaults
+        # on the local macOS ARM runtime.
+        mix = PitchModelCountProfiles.load(
+            pitch_type_model_dir,
+            mix,
+            season,
+            model_weight=pitch_type_model_weight,
+        )
+    predictor = PitchOutcomePredictor(run_dir, profiles_dir=profiles_dir)
     calibration = SimCalibration.load() if DEFAULT_CALIBRATION_PATH.exists() else None
     pa_calibration = (
         load_pa_outcome_calibration(Path(pa_calibration_path))

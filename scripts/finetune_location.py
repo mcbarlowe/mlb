@@ -102,7 +102,7 @@ def upgrade_model_location_head(
     model.location_head = new_location_head
 
     # Update n_location_components to match new head
-    setattr(model, "n_location_components", new_location_head.total_components)
+    model.n_location_components = new_location_head.total_components
 
     # Override the forward method to use pitch-type conditioning
     def new_forward(features, lengths, mask, return_attention=False):
@@ -267,7 +267,7 @@ def run_finetuning(args) -> dict:
         state_dict = checkpoint
 
     # Check if it has attention layers
-    has_attention = any("attention_layers" in k for k in state_dict.keys())
+    has_attention = any("attention_layers" in k for k in state_dict)
     print(f"Model has attention: {has_attention}")
 
     # Get dimensions from state dict
@@ -288,7 +288,7 @@ def run_finetuning(args) -> dict:
     # Recreate model architecture
     if has_attention:
         # Count attention layers
-        n_attn_layers = len([k for k in state_dict.keys() if "attention_layers" in k and "attention.q_proj.weight" in k])
+        n_attn_layers = len([k for k in state_dict if "attention_layers" in k and "attention.q_proj.weight" in k])
 
         model = PitchPredictorWithAttention(
             n_pitch_types=n_pitch_types,

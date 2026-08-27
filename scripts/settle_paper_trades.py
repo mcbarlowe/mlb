@@ -5,11 +5,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from datetime import UTC, date, datetime
 from pathlib import Path
 from statistics import median
+
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -22,9 +26,11 @@ from src.betting.paper_trade_store import (
     load_paper_trade_rows,
     update_paper_trade_settlement_rows,
 )
+from src.data.linescore_data import LinescoreData
 from src.database import PostgresConfig, PostgresHandler
 
 DEFAULT_PAPER_PATH = Path("output/paper_trades/moneyline_paper_trades.csv")
+DEFAULT_RAW_LIVEFEED_ROOT = Path("data/raw/livefeeds")
 SETTLEMENT_FIELDS = (
     "status",
     "close_ml",
@@ -191,8 +197,10 @@ def _settle_rows(
     return settled_rows, updated, missing_final, missing_close
 
 
-def _print_report(rows: Sequence[Mapping[str, str]]) -> None:
-    summary = summarize_paper_trade_rows(rows)
+def _print_report(
+    rows: Sequence[Mapping[str, str]], *, bankroll_units: float = 100.0
+) -> None:
+    summary = summarize_paper_trade_rows(rows, starting_bankroll=bankroll_units)
     print(
         "Paper-trade report: "
         f"rows={summary.rows} open={summary.open_rows} "
@@ -201,11 +209,118 @@ def _print_report(rows: Sequence[Mapping[str, str]]) -> None:
     print(
         f"Staked {summary.total_staked:.2f}u | "
         f"Profit {summary.profit_units:+.2f}u | "
-        f"ROI {summary.roi:+.2%} | "
+        f"Stake ROI {summary.roi:+.2%} | "
         f"Win {summary.win_rate:.1%} | "
         f"Avg CLV {summary.avg_clv:+.4f} | "
         f"Beat close {summary.beat_close_rate:.1%}"
     )
+    print(
+        f"Bankroll {summary.current_bankroll:+.2f}u "
+        f"({summary.bankroll_return:+.2%})"
+    )
+
+
+def _prior_open_game_pks(
+    rows: Sequence[Mapping[str, str]],
+    *,
+    today: date,
+) -> list[int]:
+    game_pks: set[int] = set()
+    for row in rows:
+        if row.get("status") != "open":
+            continue
+        paper_date = row.get("paper_date", "")
+        if not paper_date or date.fromisoformat(paper_date) >= today:
+            continue
+        game_pk = _row_game_pk(row)
+        if game_pk is not None:
+            game_pks.add(game_pk)
+    return sorted(game_pks)
+
+def _prior_paper_game_pks(
+    rows: Sequence[Mapping[str, str]],
+    *,
+    today: date,
+) -> list[int]:
+    game_pks: set[int] = set()
+    for row in rows:
+        paper_date = row.get("paper_date", "")
+        if not paper_date or date.fromisoformat(paper_date) >= today:
+            continue
+        game_pk = _row_game_pk(row)
+        if game_pk is not None:
+            game_pks.add(game_pk)
+    return sorted(game_pks)
+
+
+def refresh_final_score_rows(
+    rows: Sequence[Mapping[str, str]],
+    *,
+    db_config: PostgresConfig,
+    raw_livefeed_root: Path,
+    today: date | None = None,
+) -> tuple[int, int]:
+    target_pks = _prior_paper_game_pks(
+        rows,
+        today=today or datetime.now(tz=UTC).date(),
+    )
+    if not target_pks:
+        return 0, 0
+
+    transformer = LinescoreData()
+    line_frames: list[pd.DataFrame] = []
+    statuses: list[tuple[str | None, str | None, str | None, str | None, int]] = []
+    refreshed_pks: list[int] = []
+    for game_pk in target_pks:
+        matches = sorted(raw_livefeed_root.glob(f"*/{game_pk}.json"))
+        if not matches:
+            print(f"skip final-score refresh: missing raw livefeed for game_pk={game_pk}")
+            continue
+        path = matches[-1]
+        data = json.loads(path.read_text())
+        status = data.get("gameData", {}).get("status", {})
+        if status.get("abstractGameState") != "Final":
+            print(f"skip final-score refresh: game_pk={game_pk} is not Final: {path}")
+            continue
+        linescore = transformer.transform(data, game_pk=game_pk)
+        if linescore.empty:
+            print(f"skip final-score refresh: no linescore rows for game_pk={game_pk}: {path}")
+            continue
+        refreshed_pks.append(game_pk)
+        line_frames.append(linescore)
+        statuses.append(
+            (
+                status.get("abstractGameState"),
+                status.get("codedGameState"),
+                status.get("detailedState"),
+                status.get("statusCode"),
+                game_pk,
+            )
+        )
+
+    if not line_frames:
+        return 0, 0
+
+
+    with PostgresHandler(db_config) as db, db.connection.transaction():
+        with db.connection.cursor() as cursor:
+            cursor.execute("DELETE FROM linescore WHERE game_pk = ANY(%s)", (refreshed_pks,))
+            cursor.executemany(
+                """
+                UPDATE games
+                SET abstract_game_state = %s,
+                    coded_game_state = %s,
+                    detailed_state = %s,
+                    status_code = %s
+                WHERE game_pk = %s
+                """,
+                statuses,
+            )
+        line_rows = pd.concat(line_frames, ignore_index=True)
+        db.insert_dataframe(line_rows, "linescore")
+
+    return len(refreshed_pks), sum(len(frame) for frame in line_frames)
+
 
 
 def parse_args() -> argparse.Namespace:
@@ -214,6 +329,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", action="store_true", help="read/update mlb.paper_trades")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument(
+        "--refresh-final-scores",
+        action="store_true",
+        help=(
+            "For DB settlement, refresh games/linescore from raw final livefeeds "
+            "for prior open paper trades before settling."
+        ),
+    )
+    parser.add_argument(
+        "--raw-livefeed-root",
+        type=Path,
+        default=DEFAULT_RAW_LIVEFEED_ROOT,
+    )
+    parser.add_argument("--bankroll-units", type=float, default=100.0)
     return parser.parse_args()
 
 
@@ -223,10 +352,23 @@ def main() -> None:
     if args.db:
         rows = load_paper_trade_rows(db_config=db_config)
         existing_fields = list(rows[0].keys()) if rows else []
+        if args.refresh_final_scores and not args.report_only:
+            if args.dry_run:
+                print("dry-run: no games/linescore rows refreshed")
+            else:
+                refreshed_games, refreshed_linescore = refresh_final_score_rows(
+                    rows,
+                    db_config=db_config,
+                    raw_livefeed_root=args.raw_livefeed_root,
+                )
+                print(
+                    "refreshed final score rows: "
+                    f"games={refreshed_games} linescore_rows={refreshed_linescore}"
+                )
     else:
         rows, existing_fields = _read_csv(args.path)
     if args.report_only:
-        _print_report(rows)
+        _print_report(rows, bankroll_units=args.bankroll_units)
         return
 
     settled_rows, updated, missing_final, missing_close = _settle_rows(
@@ -237,7 +379,7 @@ def main() -> None:
         f"Settlement scan: updated={updated} "
         f"missing_final={missing_final} missing_close={missing_close}"
     )
-    _print_report(settled_rows)
+    _print_report(settled_rows, bankroll_units=args.bankroll_units)
     if args.dry_run:
         target = "DB" if args.db else "CSV"
         print(f"dry-run: no paper-trade rows written to {target}")

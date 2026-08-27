@@ -47,7 +47,7 @@ Inference Example:
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
@@ -346,7 +346,7 @@ def train_mdn(
 
 def run_combined_training(args):
     """Run training for both models."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) / f"combined_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -409,6 +409,8 @@ def run_combined_training(args):
             label="XGBoost",
             subdir="xgboost",
         )
+
+    mdn_results = train_mdn(train_df, val_df, test_df, feature_engine, output_dir, args)
 
     # Save feature engine
     feature_engine_path = output_dir / "feature_engine.json"

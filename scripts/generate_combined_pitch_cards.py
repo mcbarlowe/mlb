@@ -20,30 +20,29 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+
+import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 import torch
-import matplotlib.pyplot as plt
 from scipy import stats
 from tqdm import tqdm
-from dataclasses import dataclass
-from typing import Optional
 
+from src.ml.features import (
+    IDX_TO_PITCH_TYPE,
+    PITCH_TYPE_CODES,
+    PitchFeatureEngine,
+)
 from src.ml.model import create_model
+from src.ml.pitch_predictor import (
+    PITCH_TYPE_FULL_NAMES,
+    GameContext,
+    PitchPrediction,
+    fetch_mlb_headshot,
+)
 from src.ml.pitch_type_location_model import (
     PitchTypeConditionedMDN,
     PitchTypeThenLocationPredictor,
-)
-from src.ml.features import (
-    PITCH_TYPE_CODES,
-    IDX_TO_PITCH_TYPE,
-    PitchFeatureEngine,
-)
-from src.ml.pitch_predictor import (
-    GameContext,
-    PitchPrediction,
-    PITCH_TYPE_FULL_NAMES,
-    fetch_mlb_headshot,
 )
 
 
@@ -128,7 +127,7 @@ def load_sample_at_bats(
     season: str = "2025",
     n_at_bats: int = 10,
     min_pitches: int = 3,
-    seed: int = None,
+    seed: int | None = None,
 ) -> list[pl.DataFrame]:
     """Load sample at-bats from parquet files."""
     print(f"Loading data from {season}...")
@@ -176,7 +175,7 @@ def get_context_from_row(row: pl.DataFrame) -> GameContext:
         date_str = str(date_val)
         try:
             if 'T' in date_str:
-                dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                dt = datetime.fromisoformat(date_str)
             else:
                 dt = datetime.strptime(date_str[:10], '%Y-%m-%d')
             return dt.strftime('%B %d, %Y')
@@ -326,7 +325,7 @@ def predict_combined(
     device: torch.device,
     grid_size: int = 100,
     compute_top2_densities: bool = True,
-) -> tuple[PitchPrediction, Optional[dict]]:
+) -> tuple[PitchPrediction, dict | None]:
     """
     Make prediction using the combined pitch type + location model.
 
@@ -376,7 +375,7 @@ def predict_combined(
         # Get MDN parameters for last position
         mdn_params = output["mdn_params"]
         # Reshape back to get last position
-        n_components = mdn_params["pi"].shape[-1]
+        mdn_params["pi"].shape[-1]
         last_idx = seq_len - 1
 
         pi = mdn_params["pi"][last_idx]  # [K]
@@ -441,11 +440,11 @@ def predict_combined(
 def create_pitch_card(
     prediction: PitchPrediction,
     context: GameContext,
-    actual_pitch_type: Optional[str] = None,
-    actual_location: Optional[tuple[float, float]] = None,
-    save_path: Optional[str] = None,
+    actual_pitch_type: str | None = None,
+    actual_location: tuple[float, float] | None = None,
+    save_path: str | None = None,
     figsize: tuple[float, float] = (14, 10),
-    top2_densities: Optional[dict] = None,
+    top2_densities: dict | None = None,
 ) -> plt.Figure:
     """Create a comprehensive pitch prediction card.
 
@@ -458,7 +457,7 @@ def create_pitch_card(
         figsize: Figure size in inches
         top2_densities: Dict with per-pitch-type location densities for top 2 types
     """
-    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+    from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 
     fig = plt.figure(figsize=figsize, facecolor='white')
 
@@ -512,7 +511,7 @@ def create_pitch_card(
     if pitcher_headshot is not None:
         im_pitcher = OffsetImage(pitcher_headshot, zoom=0.5)
         ab_pitcher = AnnotationBbox(im_pitcher, (0.08, 0.5), frameon=True,
-                                    bboxprops=dict(edgecolor='#cccccc', linewidth=1))
+                                    bboxprops={"edgecolor": '#cccccc', "linewidth": 1})
         ax_matchup.add_artist(ab_pitcher)
         ax_matchup.text(0.20, 0.5, f"P: {context.pitcher_name} ({context.pitcher_hand})",
                         ha='left', va='center', fontsize=12, fontweight='bold',
@@ -532,7 +531,7 @@ def create_pitch_card(
                         transform=ax_matchup.transAxes)
         im_batter = OffsetImage(batter_headshot, zoom=0.5)
         ab_batter = AnnotationBbox(im_batter, (0.92, 0.5), frameon=True,
-                                   bboxprops=dict(edgecolor='#cccccc', linewidth=1))
+                                   bboxprops={"edgecolor": '#cccccc', "linewidth": 1})
         ax_matchup.add_artist(ab_batter)
     else:
         ax_matchup.text(0.88, 0.5, f"B: {context.batter_name} ({context.batter_hand})",
@@ -652,7 +651,7 @@ def create_pitch_card(
             exp_px_flipped = -pt_data["expected_loc"][0]
             exp_pz = pt_data["expected_loc"][1]
             marker = 'D' if i == 0 else 's'  # Diamond for #1, Square for #2
-            scatter = ax_zone.scatter(
+            ax_zone.scatter(
                 exp_px_flipped, exp_pz,
                 c=marker_color, s=120, marker=marker,
                 edgecolors='white', linewidths=2,

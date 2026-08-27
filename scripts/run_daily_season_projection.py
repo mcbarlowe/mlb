@@ -159,6 +159,36 @@ def parse_args() -> argparse.Namespace:
         help="Optional preseason market win totals CSV passed to the projection model.",
     )
     parser.add_argument(
+        "--market-prior-scale",
+        type=float,
+        default=None,
+        help="Optional fixed market-prior logit scale passed to the projection model.",
+    )
+    parser.add_argument(
+        "--market-prior-decay-games",
+        type=float,
+        default=None,
+        help="Optional per-team games-played decay constant for market priors.",
+    )
+    parser.add_argument(
+        "--roster-priors",
+        type=Path,
+        default=None,
+        help="Optional preseason roster/depth-chart prior CSV passed to the projection model.",
+    )
+    parser.add_argument(
+        "--roster-prior-scale",
+        type=float,
+        default=None,
+        help="Optional fixed roster-prior logit scale passed to the projection model.",
+    )
+    parser.add_argument(
+        "--roster-prior-decay-games",
+        type=float,
+        default=None,
+        help="Optional per-team games-played decay constant for roster priors.",
+    )
+    parser.add_argument(
         "--calibrate-playoff-probs",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -388,8 +418,24 @@ def _projection_command(
         command.append("--no-tune-simulation-params")
     if args.calibrate_playoff_probs:
         command.append("--calibrate-playoff-probs")
-    if args.market_win_totals is not None:
-        command.extend(["--market-win-totals", str(args.market_win_totals)])
+    market_win_totals = getattr(args, "market_win_totals", None)
+    if market_win_totals is not None:
+        command.extend(["--market-win-totals", str(market_win_totals)])
+        market_prior_scale = getattr(args, "market_prior_scale", None)
+        if market_prior_scale is not None:
+            command.extend(["--market-prior-scale", str(market_prior_scale)])
+        market_prior_decay_games = getattr(args, "market_prior_decay_games", None)
+        if market_prior_decay_games is not None:
+            command.extend(["--market-prior-decay-games", str(market_prior_decay_games)])
+    roster_priors = getattr(args, "roster_priors", None)
+    if roster_priors is not None:
+        command.extend(["--roster-priors", str(roster_priors)])
+        roster_prior_scale = getattr(args, "roster_prior_scale", None)
+        if roster_prior_scale is not None:
+            command.extend(["--roster-prior-scale", str(roster_prior_scale)])
+        roster_prior_decay_games = getattr(args, "roster_prior_decay_games", None)
+        if roster_prior_decay_games is not None:
+            command.extend(["--roster-prior-decay-games", str(roster_prior_decay_games)])
     return command
 
 

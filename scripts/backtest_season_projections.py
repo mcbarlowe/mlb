@@ -9,7 +9,7 @@ import math
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
@@ -47,11 +47,16 @@ class SimulationParams:
     team_prior_scale: float
     schedule_strength_scale: float
     market_prior_scale: float
+    team_prior_decay_games: float | None
+    market_prior_decay_games: float | None
+    roster_prior_scale: float
+    roster_prior_decay_games: float | None
 
 
 @dataclass(frozen=True)
 class ProjectionContext:
     season: int
+    as_of_label: str
     schedule: tuple[SeasonScheduleGame, ...]
     as_of_date: date
     predictor: HomeWinPredictor
@@ -61,12 +66,22 @@ class ProjectionContext:
     team_prior_offsets: dict[int, float]
     schedule_strength_offsets: dict[int, float]
     market_prior_offsets: dict[int, float]
+    roster_prior_offsets: dict[int, float]
+    input_market_sources: str
 
 
 @dataclass(frozen=True)
 class LabeledProjection:
     projection_type: str
     projection: SeasonProjection
+    as_of_label: str = ""
+
+@dataclass(frozen=True)
+class PostseasonActualStages:
+    division_series_teams: frozenset[int] = frozenset()
+    league_championship_teams: frozenset[int] = frozenset()
+    world_series_teams: frozenset[int] = frozenset()
+    champion: int | None = None
 
 
 @dataclass(frozen=True)
@@ -85,11 +100,12 @@ class ProbabilityCalibration:
 class ModelAdjustments:
     params: SimulationParams
     tune_seasons: tuple[int, ...]
-    playoff_calibration: ProbabilityCalibration | None
+    calibrations: dict[str, ProbabilityCalibration]
     calibration_seasons: tuple[int, ...]
+    tuning_objective: str
 
 
-ContextCache = dict[tuple[int, str | None], ProjectionContext]
+ContextCache = dict[tuple[int, str], ProjectionContext]
 
 
 def parse_args() -> argparse.Namespace:
@@ -182,6 +198,19 @@ def parse_args() -> argparse.Namespace:
         help="Candidate preseason team-prior scales for prior-season tuning.",
     )
     parser.add_argument(
+        "--team-prior-decay-games",
+        type=float,
+        default=0.0,
+        help="Fixed per-team games-played decay constant for team priors; 0 disables decay.",
+    )
+    parser.add_argument(
+        "--team-prior-decay-games-grid",
+        type=float,
+        nargs="+",
+        default=[0.0, 30.0, 60.0],
+        help="Candidate per-team games-played decay constants for team priors.",
+    )
+    parser.add_argument(
         "--market-win-totals",
         type=Path,
         default=None,
@@ -205,6 +234,51 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=2,
         help="Minimum prior seasons with market win totals required before tuning nonzero market-prior scales.",
+    )
+    parser.add_argument(
+        "--market-prior-decay-games",
+        type=float,
+        default=0.0,
+        help="Fixed per-team games-played decay constant for market priors; 0 disables decay.",
+    )
+    parser.add_argument(
+        "--market-prior-decay-games-grid",
+        type=float,
+        nargs="+",
+        default=[0.0, 30.0, 60.0],
+        help="Candidate per-team games-played decay constants for market priors.",
+    )
+    parser.add_argument(
+        "--roster-priors",
+        type=Path,
+        default=None,
+        help="Optional CSV of preseason roster/depth-chart priors.",
+    )
+    parser.add_argument(
+        "--roster-prior-scale",
+        type=float,
+        default=0.0,
+        help="Fixed roster-prior logit scale when tuning is disabled or unavailable.",
+    )
+    parser.add_argument(
+        "--roster-prior-scale-grid",
+        type=float,
+        nargs="+",
+        default=[0.0, 0.25, 0.50],
+        help="Candidate roster-prior scales for prior-season tuning.",
+    )
+    parser.add_argument(
+        "--roster-prior-decay-games",
+        type=float,
+        default=0.0,
+        help="Fixed per-team games-played decay constant for roster priors; 0 disables decay.",
+    )
+    parser.add_argument(
+        "--roster-prior-decay-games-grid",
+        type=float,
+        nargs="+",
+        default=[0.0, 30.0, 60.0],
+        help="Candidate per-team games-played decay constants for roster priors.",
     )
     parser.add_argument(
         "--schedule-strength-scale",
@@ -232,10 +306,43 @@ def parse_args() -> argparse.Namespace:
         help="Minimum prior-season team outcomes required to fit playoff-probability calibration.",
     )
     parser.add_argument(
+        "--calibration-targets",
+        nargs="+",
+        default=["playoff"],
+        choices=[
+            "all",
+            "division",
+            "playoff",
+            "division_series",
+            "league_championship",
+            "world_series",
+            "championship",
+        ],
+        help="Targets calibrated when --calibrate-playoff-probs is enabled.",
+    )
+    parser.add_argument(
+        "--postseason-results",
+        type=Path,
+        default=None,
+        help="Optional CSV with actual postseason stage outcomes by season/team.",
+    )
+    parser.add_argument(
+        "--tuning-objective",
+        choices=["combined", "wins", "division", "playoff", "championship"],
+        default="combined",
+        help="Metric used to choose simulation parameters on prior seasons.",
+    )
+    parser.add_argument(
         "--as-of",
         type=str,
         default=None,
         help="Override projection date for a single --seasons value; defaults to first regular-season date.",
+    )
+    parser.add_argument(
+        "--as-of-buckets",
+        nargs="+",
+        default=["opening_day"],
+        help="As-of buckets: opening_day, day7, day14, team30, team60, playoff_start.",
     )
     parser.add_argument(
         "--no-rosters",
@@ -312,24 +419,120 @@ def _completed_played_schedule(
     return played, len(schedule) - len(played)
 
 
+def _as_of_labels(args: argparse.Namespace) -> tuple[str, ...]:
+    if args.as_of is not None:
+        return (f"custom:{args.as_of}",)
+    labels = tuple(str(label) for label in args.as_of_buckets)
+    if not labels:
+        raise ValueError("--as-of-buckets must not be empty")
+    return labels
+
+
+def _resolve_as_of_date(
+    schedule: Sequence[SeasonScheduleGame],
+    *,
+    label: str,
+) -> date:
+    if label.startswith("custom:"):
+        return date.fromisoformat(label.split(":", 1)[1])
+    first_date = first_regular_season_date(schedule)
+    if label == "opening_day":
+        return first_date
+    if label.startswith("day"):
+        return first_date + timedelta(days=_suffix_int(label, "day"))
+    if label.endswith("_days"):
+        return first_date + timedelta(days=_prefix_int(label, "_days"))
+    if label.startswith("team"):
+        return _as_of_date_for_team_games(schedule, _suffix_int(label, "team"))
+    if label.endswith(("_games", "_games_per_team")):
+        suffix = "_games_per_team" if label.endswith("_games_per_team") else "_games"
+        return _as_of_date_for_team_games(schedule, _prefix_int(label, suffix))
+    if label == "playoff_start":
+        return max(game.game_date for game in schedule) + timedelta(days=1)
+    raise ValueError(
+        "Unsupported as-of bucket "
+        f"{label!r}; use opening_day, dayN, N_days, teamN, N_games, or playoff_start"
+    )
+
+
+def _suffix_int(label: str, prefix: str) -> int:
+    text = label[len(prefix) :]
+    if not text:
+        raise ValueError(f"{label!r} must include a numeric suffix")
+    value = int(text)
+    if value < 0:
+        raise ValueError(f"{label!r} must be non-negative")
+    return value
+
+
+def _prefix_int(label: str, suffix: str) -> int:
+    text = label[: -len(suffix)]
+    if not text:
+        raise ValueError(f"{label!r} must include a numeric prefix")
+    value = int(text)
+    if value < 0:
+        raise ValueError(f"{label!r} must be non-negative")
+    return value
+
+
+def _as_of_date_for_team_games(
+    schedule: Sequence[SeasonScheduleGame],
+    target_games: int,
+) -> date:
+    if target_games == 0:
+        return first_regular_season_date(schedule)
+    team_ids = sorted({team for game in schedule for team in (game.away_team_id, game.home_team_id)})
+    counts = {team_id: 0 for team_id in team_ids}
+    for game in sorted(schedule, key=lambda item: (item.game_date, item.game_pk)):
+        if not game.is_final:
+            continue
+        counts[game.away_team_id] += 1
+        counts[game.home_team_id] += 1
+        if all(count >= target_games for count in counts.values()):
+            return game.game_date + timedelta(days=1)
+    return max(game.game_date for game in schedule) + timedelta(days=1)
+
+
+def _load_roster_offsets(
+    path: Path | None,
+    *,
+    season: int,
+    teams: dict[int, TeamInfo],
+) -> dict[int, float]:
+    if path is None:
+        return {}
+    from src.sim.roster_priors import load_roster_prior_offsets
+
+    return load_roster_prior_offsets(
+        path,
+        prediction_season=season,
+        teams=teams,
+    )
+
+
+def _input_market_sources(args: argparse.Namespace) -> str:
+    sources: list[str] = []
+    if args.market_win_totals is not None:
+        sources.append("win_totals")
+    if args.roster_priors is not None:
+        sources.append("roster_priors")
+    return ",".join(sources)
+
+
 def _projection_context(
     season: int,
     *,
     args: argparse.Namespace,
     teams: dict[int, TeamInfo],
     cache: ContextCache,
-    as_of_override: str | None,
+    as_of_label: str,
 ) -> ProjectionContext:
-    key = (season, as_of_override)
+    key = (season, as_of_label)
     if key in cache:
         return cache[key]
 
     schedule, skipped_games = _completed_played_schedule(season)
-    as_of_date = (
-        date.fromisoformat(as_of_override)
-        if as_of_override is not None
-        else first_regular_season_date(schedule)
-    )
+    as_of_date = _resolve_as_of_date(schedule, label=as_of_label)
     predictor, train_seasons, observed_games = _fit_as_of_predictor(
         season=season,
         as_of_date=as_of_date,
@@ -350,6 +553,11 @@ def _projection_context(
         if args.market_win_totals is not None
         else {}
     )
+    roster_prior_offsets = _load_roster_offsets(
+        args.roster_priors,
+        season=season,
+        teams=teams,
+    )
     schedule_strength_offsets = schedule_strength_offsets_from_games(
         schedule,
         as_of_date=as_of_date,
@@ -357,6 +565,7 @@ def _projection_context(
     )
     context = ProjectionContext(
         season=season,
+        as_of_label=as_of_label,
         schedule=schedule,
         as_of_date=as_of_date,
         predictor=predictor,
@@ -366,9 +575,16 @@ def _projection_context(
         team_prior_offsets=team_prior_offsets,
         schedule_strength_offsets=schedule_strength_offsets,
         market_prior_offsets=market_prior_offsets,
+        roster_prior_offsets=roster_prior_offsets,
+        input_market_sources=_input_market_sources(args),
     )
     cache[key] = context
     return context
+
+
+def _decay_arg(value: float) -> float | None:
+    parsed = float(value)
+    return None if parsed == 0.0 else parsed
 
 
 def _fixed_params(args: argparse.Namespace) -> SimulationParams:
@@ -378,12 +594,25 @@ def _fixed_params(args: argparse.Namespace) -> SimulationParams:
         team_prior_scale=args.team_prior_scale,
         market_prior_scale=args.market_prior_scale,
         schedule_strength_scale=args.schedule_strength_scale,
+        team_prior_decay_games=_decay_arg(args.team_prior_decay_games),
+        market_prior_decay_games=_decay_arg(args.market_prior_decay_games),
+        roster_prior_scale=args.roster_prior_scale,
+        roster_prior_decay_games=_decay_arg(args.roster_prior_decay_games),
     )
+
+
+def _arg_values(args: argparse.Namespace, name: str, default: Sequence[float]) -> Sequence[float]:
+    return getattr(args, name, default)
 
 
 def _candidate_params(args: argparse.Namespace) -> tuple[SimulationParams, ...]:
     market_scale_grid = (
         args.market_prior_scale_grid if args.market_win_totals is not None else [0.0]
+    )
+    roster_scale_grid = (
+        _arg_values(args, "roster_prior_scale_grid", [0.0])
+        if getattr(args, "roster_priors", None) is not None
+        else [0.0]
     )
     candidates = tuple(
         SimulationParams(
@@ -392,11 +621,19 @@ def _candidate_params(args: argparse.Namespace) -> tuple[SimulationParams, ...]:
             team_prior_scale=prior_scale,
             market_prior_scale=market_scale,
             schedule_strength_scale=schedule_scale,
+            team_prior_decay_games=_decay_arg(team_decay),
+            market_prior_decay_games=_decay_arg(market_decay),
+            roster_prior_scale=roster_scale,
+            roster_prior_decay_games=_decay_arg(roster_decay),
         )
         for scale in args.probability_logit_scale_grid
         for team_sd in args.team_strength_sd_grid
         for prior_scale in args.team_prior_scale_grid
+        for team_decay in _arg_values(args, "team_prior_decay_games_grid", [0.0])
         for market_scale in market_scale_grid
+        for market_decay in _arg_values(args, "market_prior_decay_games_grid", [0.0])
+        for roster_scale in roster_scale_grid
+        for roster_decay in _arg_values(args, "roster_prior_decay_games_grid", [0.0])
         for schedule_scale in args.schedule_strength_scale_grid
     )
     if not candidates:
@@ -412,23 +649,21 @@ def _candidate_params(args: argparse.Namespace) -> tuple[SimulationParams, ...]:
             or candidate.team_strength_sd < 0.0
         ):
             raise ValueError("All team-strength sd candidates must be non-negative")
-        if (
-            not math.isfinite(candidate.team_prior_scale)
-            or candidate.team_prior_scale < 0.0
+        for label, value in (
+            ("team-prior scale", candidate.team_prior_scale),
+            ("market-prior scale", candidate.market_prior_scale),
+            ("roster-prior scale", candidate.roster_prior_scale),
+            ("schedule-strength scale", candidate.schedule_strength_scale),
         ):
-            raise ValueError("All team-prior scale candidates must be non-negative")
-        if (
-            not math.isfinite(candidate.market_prior_scale)
-            or candidate.market_prior_scale < 0.0
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"All {label} candidates must be non-negative")
+        for label, value in (
+            ("team-prior decay", candidate.team_prior_decay_games),
+            ("market-prior decay", candidate.market_prior_decay_games),
+            ("roster-prior decay", candidate.roster_prior_decay_games),
         ):
-            raise ValueError("All market-prior scale candidates must be non-negative")
-        if (
-            not math.isfinite(candidate.schedule_strength_scale)
-            or candidate.schedule_strength_scale < 0.0
-        ):
-            raise ValueError(
-                "All schedule-strength scale candidates must be non-negative"
-            )
+            if value is not None and (not math.isfinite(value) or value < 0.0):
+                raise ValueError(f"All {label} candidates must be non-negative")
     return candidates
 
 
@@ -440,6 +675,16 @@ def _tuning_seasons(season: int, args: argparse.Namespace) -> tuple[int, ...]:
     first_tunable = args.start_season + args.train_window
     start = max(first_tunable, season - args.tune_window)
     return tuple(range(start, season))
+
+
+CALIBRATION_TARGETS = (
+    "division",
+    "playoff",
+    "division_series",
+    "league_championship",
+    "world_series",
+    "championship",
+)
 
 
 def _simulate_context(
@@ -462,15 +707,117 @@ def _simulate_context(
         team_strength_sd=params.team_strength_sd,
         team_prior_offsets=context.team_prior_offsets,
         team_prior_scale=params.team_prior_scale,
+        team_prior_decay_games=params.team_prior_decay_games,
         market_prior_offsets=context.market_prior_offsets,
         market_prior_scale=params.market_prior_scale,
+        market_prior_decay_games=params.market_prior_decay_games,
+        roster_prior_offsets=context.roster_prior_offsets,
+        roster_prior_scale=params.roster_prior_scale,
+        roster_prior_decay_games=params.roster_prior_decay_games,
         schedule_strength_offsets=context.schedule_strength_offsets,
         schedule_strength_scale=params.schedule_strength_scale,
+        input_market_sources=context.input_market_sources,
     )
 
 
-def _evaluation_objective(evaluation: SeasonEvaluation) -> float:
-    return evaluation.division_brier + evaluation.playoff_brier
+def _projection_probability(row: TeamProjection, target: str) -> float:
+    if target == "division":
+        return row.division_win_prob
+    if target == "playoff":
+        return row.playoff_prob
+    if target == "division_series":
+        return row.division_series_prob
+    if target == "league_championship":
+        return row.league_championship_prob
+    if target == "world_series":
+        return row.world_series_prob
+    if target == "championship":
+        return row.championship_prob
+    raise KeyError(target)
+
+
+def _actual_target(
+    *,
+    target: str,
+    team_id: int,
+    outcome,
+    stages: PostseasonActualStages | None,
+) -> float | None:
+    if target == "division":
+        return 1.0 if outcome.division_winner else 0.0
+    if target == "playoff":
+        return 1.0 if outcome.playoff_team else 0.0
+    if stages is None:
+        return None
+    if target == "division_series":
+        return 1.0 if team_id in stages.division_series_teams else 0.0
+    if target == "league_championship":
+        return 1.0 if team_id in stages.league_championship_teams else 0.0
+    if target == "world_series":
+        return 1.0 if team_id in stages.world_series_teams else 0.0
+    if target == "championship":
+        return 1.0 if team_id == stages.champion else 0.0
+    raise KeyError(target)
+
+
+def _evaluation_objective(
+    evaluation: SeasonEvaluation,
+    projection: SeasonProjection,
+    context: ProjectionContext,
+    *,
+    teams: dict[int, TeamInfo],
+    objective: str,
+    postseason_results: dict[int, PostseasonActualStages],
+) -> float:
+    if objective == "combined":
+        return evaluation.division_brier + evaluation.playoff_brier
+    if objective == "wins":
+        return evaluation.actual_wins_rmse
+    if objective == "division":
+        return evaluation.division_brier
+    if objective == "playoff":
+        return evaluation.playoff_brier
+    if objective == "championship":
+        stages = postseason_results.get(context.season)
+        if stages is None or stages.champion is None:
+            return evaluation.playoff_brier
+        return _target_brier(
+            projection,
+            context,
+            teams=teams,
+            target="championship",
+            stages=stages,
+        )
+    raise KeyError(objective)
+
+
+def _target_brier(
+    projection: SeasonProjection,
+    context: ProjectionContext,
+    *,
+    teams: dict[int, TeamInfo],
+    target: str,
+    stages: PostseasonActualStages | None,
+) -> float:
+    actual = actual_outcomes(
+        context.schedule,
+        teams,
+        wild_cards_per_league=projection.wild_cards_per_league,
+    )
+    losses: list[float] = []
+    for row in projection.teams:
+        target_value = _actual_target(
+            target=target,
+            team_id=row.team_id,
+            outcome=actual[row.team_id],
+            stages=stages,
+        )
+        if target_value is None:
+            continue
+        losses.append((_projection_probability(row, target) - target_value) ** 2)
+    if not losses:
+        return math.inf
+    return sum(losses) / len(losses)
 
 
 def _fit_playoff_calibration(
@@ -479,21 +826,52 @@ def _fit_playoff_calibration(
     teams: dict[int, TeamInfo],
     min_teams: int,
 ) -> ProbabilityCalibration | None:
-    probabilities: list[float] = []
-    outcomes: list[float] = []
-    for projection, context in pairs:
-        actual = actual_outcomes(
-            context.schedule,
-            teams,
-            wild_cards_per_league=projection.wild_cards_per_league,
-        )
-        for row in projection.teams:
-            probabilities.append(row.playoff_prob)
-            outcomes.append(1.0 if actual[row.team_id].playoff_team else 0.0)
+    calibrations = _fit_target_calibrations(
+        pairs,
+        teams=teams,
+        min_teams=min_teams,
+        targets=("playoff",),
+        postseason_results={},
+    )
+    return calibrations.get("playoff")
 
-    if len(probabilities) < min_teams or len(set(outcomes)) < 2:
-        return None
-    return _fit_probability_calibration(probabilities, outcomes)
+
+def _fit_target_calibrations(
+    pairs: Sequence[tuple[SeasonProjection, ProjectionContext]],
+    *,
+    teams: dict[int, TeamInfo],
+    min_teams: int,
+    targets: Sequence[str],
+    postseason_results: dict[int, PostseasonActualStages],
+) -> dict[str, ProbabilityCalibration]:
+    calibrations: dict[str, ProbabilityCalibration] = {}
+    for target in targets:
+        probabilities: list[float] = []
+        outcomes: list[float] = []
+        for projection, context in pairs:
+            actual = actual_outcomes(
+                context.schedule,
+                teams,
+                wild_cards_per_league=projection.wild_cards_per_league,
+            )
+            stages = postseason_results.get(context.season)
+            for row in projection.teams:
+                target_value = _actual_target(
+                    target=target,
+                    team_id=row.team_id,
+                    outcome=actual[row.team_id],
+                    stages=stages,
+                )
+                if target_value is None:
+                    continue
+                probabilities.append(_projection_probability(row, target))
+                outcomes.append(target_value)
+        if len(probabilities) < min_teams or len(set(outcomes)) < 2:
+            continue
+        calibration = _fit_probability_calibration(probabilities, outcomes)
+        if calibration is not None:
+            calibrations[target] = calibration
+    return calibrations
 
 
 def _fit_probability_calibration(
@@ -562,42 +940,108 @@ def _scale_stage_probability(
     )
 
 
-def _apply_playoff_calibration(
+def _clamp_stage_order(
+    *,
+    division: float,
+    playoff: float,
+    division_series: float,
+    league_championship: float,
+    world_series: float,
+    championship: float,
+) -> tuple[float, float, float, float, float, float]:
+    division = min(max(division, 0.0), playoff)
+    division_series = min(max(division_series, 0.0), playoff)
+    league_championship = min(max(league_championship, 0.0), division_series)
+    world_series = min(max(world_series, 0.0), league_championship)
+    championship = min(max(championship, 0.0), world_series)
+    return (
+        division,
+        playoff,
+        division_series,
+        league_championship,
+        world_series,
+        championship,
+    )
+
+
+def _apply_target_calibrations(
     projection: SeasonProjection,
-    calibration: ProbabilityCalibration | None,
+    calibrations: dict[str, ProbabilityCalibration],
+    *,
+    enforce_stage_order: bool = True,
 ) -> SeasonProjection:
-    if calibration is None:
+    if not calibrations:
         return projection
     calibrated_rows = []
     for row in projection.teams:
-        playoff_prob = calibration.apply(row.playoff_prob)
+        raw_playoff_prob = row.playoff_prob
+        division_prob = calibrations.get("division", _IdentityCalibration()).apply(
+            row.division_win_prob
+        )
+        playoff_prob = calibrations.get("playoff", _IdentityCalibration()).apply(
+            row.playoff_prob
+        )
+        if "division_series" in calibrations:
+            division_series_prob = calibrations["division_series"].apply(
+                row.division_series_prob
+            )
+        elif "playoff" in calibrations:
+            division_series_prob = _scale_stage_probability(
+                row.division_series_prob,
+                raw_playoff_probability=raw_playoff_prob,
+                calibrated_playoff_probability=playoff_prob,
+            )
+        else:
+            division_series_prob = row.division_series_prob
+        league_championship_prob = (
+            calibrations["league_championship"].apply(row.league_championship_prob)
+            if "league_championship" in calibrations
+            else row.league_championship_prob
+        )
+        world_series_prob = (
+            calibrations["world_series"].apply(row.world_series_prob)
+            if "world_series" in calibrations
+            else row.world_series_prob
+        )
+        championship_prob = (
+            calibrations["championship"].apply(row.championship_prob)
+            if "championship" in calibrations
+            else row.championship_prob
+        )
+        if enforce_stage_order:
+            (
+                division_prob,
+                playoff_prob,
+                division_series_prob,
+                league_championship_prob,
+                world_series_prob,
+                championship_prob,
+            ) = _clamp_stage_order(
+                division=division_prob,
+                playoff=playoff_prob,
+                division_series=division_series_prob,
+                league_championship=league_championship_prob,
+                world_series=world_series_prob,
+                championship=championship_prob,
+            )
         calibrated_rows.append(
             TeamProjection(
                 team_id=row.team_id,
                 actual_wins_as_of=row.actual_wins_as_of,
                 expected_wins=row.expected_wins,
-                division_win_prob=row.division_win_prob,
+                division_win_prob=division_prob,
                 playoff_prob=playoff_prob,
-                division_series_prob=_scale_stage_probability(
-                    row.division_series_prob,
-                    raw_playoff_probability=row.playoff_prob,
-                    calibrated_playoff_probability=playoff_prob,
-                ),
-                league_championship_prob=_scale_stage_probability(
-                    row.league_championship_prob,
-                    raw_playoff_probability=row.playoff_prob,
-                    calibrated_playoff_probability=playoff_prob,
-                ),
-                world_series_prob=_scale_stage_probability(
-                    row.world_series_prob,
-                    raw_playoff_probability=row.playoff_prob,
-                    calibrated_playoff_probability=playoff_prob,
-                ),
-                championship_prob=_scale_stage_probability(
-                    row.championship_prob,
-                    raw_playoff_probability=row.playoff_prob,
-                    calibrated_playoff_probability=playoff_prob,
-                ),
+                division_series_prob=division_series_prob,
+                league_championship_prob=league_championship_prob,
+                world_series_prob=world_series_prob,
+                championship_prob=championship_prob,
+                team_prior_offset=row.team_prior_offset,
+                team_prior_weight=row.team_prior_weight,
+                market_prior_offset=row.market_prior_offset,
+                market_prior_weight=row.market_prior_weight,
+                roster_prior_offset=row.roster_prior_offset,
+                roster_prior_weight=row.roster_prior_weight,
+                combined_prior_offset=row.combined_prior_offset,
             )
         )
     calibrated_teams = tuple(calibrated_rows)
@@ -612,7 +1056,51 @@ def _apply_playoff_calibration(
         team_prior_scale=projection.team_prior_scale,
         market_prior_scale=projection.market_prior_scale,
         schedule_strength_scale=projection.schedule_strength_scale,
-        playoff_calibration_slope=calibration.slope,
+        playoff_calibration_slope=(
+            calibrations["playoff"].slope if "playoff" in calibrations else None
+        ),
+        division_calibration_slope=(
+            calibrations["division"].slope if "division" in calibrations else None
+        ),
+        division_series_calibration_slope=(
+            calibrations["division_series"].slope
+            if "division_series" in calibrations
+            else None
+        ),
+        league_championship_calibration_slope=(
+            calibrations["league_championship"].slope
+            if "league_championship" in calibrations
+            else None
+        ),
+        world_series_calibration_slope=(
+            calibrations["world_series"].slope
+            if "world_series" in calibrations
+            else None
+        ),
+        championship_calibration_slope=(
+            calibrations["championship"].slope if "championship" in calibrations else None
+        ),
+        team_prior_decay_games=projection.team_prior_decay_games,
+        market_prior_decay_games=projection.market_prior_decay_games,
+        roster_prior_scale=projection.roster_prior_scale,
+        roster_prior_decay_games=projection.roster_prior_decay_games,
+        input_market_sources=projection.input_market_sources,
+    )
+
+
+class _IdentityCalibration:
+    def apply(self, probability: float) -> float:
+        return probability
+
+
+def _apply_playoff_calibration(
+    projection: SeasonProjection,
+    calibration: ProbabilityCalibration | None,
+) -> SeasonProjection:
+    return _apply_target_calibrations(
+        projection,
+        {"playoff": calibration} if calibration is not None else {},
+        enforce_stage_order=False,
     )
 
 
@@ -643,12 +1131,61 @@ def _finite_float(value: float, label: str) -> float:
     return parsed
 
 
+def _selected_calibration_targets(args: argparse.Namespace) -> tuple[str, ...]:
+    targets = tuple(str(target) for target in args.calibration_targets)
+    if "all" in targets:
+        return CALIBRATION_TARGETS
+    return targets
+
+
+def _load_postseason_results(path: Path | None) -> dict[int, PostseasonActualStages]:
+    if path is None:
+        return {}
+    results: dict[int, dict[str, set[int] | int | None]] = {}
+    with path.open(newline="") as handle:
+        for index, row in enumerate(csv.DictReader(handle), start=2):
+            season = int(row["season"])
+            team_id = int(row["team_id"])
+            entry = results.setdefault(
+                season,
+                {
+                    "division_series": set(),
+                    "league_championship": set(),
+                    "world_series": set(),
+                    "champion": None,
+                },
+            )
+            for field in ("division_series", "league_championship", "world_series"):
+                if _truthy(row.get(field, "")):
+                    cast_set = entry[field]
+                    if not isinstance(cast_set, set):
+                        raise ValueError(f"Invalid postseason field state at row {index}")
+                    cast_set.add(team_id)
+            if _truthy(row.get("championship", "")):
+                entry["champion"] = team_id
+    return {
+        season: PostseasonActualStages(
+            division_series_teams=frozenset(value["division_series"]),
+            league_championship_teams=frozenset(value["league_championship"]),
+            world_series_teams=frozenset(value["world_series"]),
+            champion=value["champion"] if isinstance(value["champion"], int) else None,
+        )
+        for season, value in results.items()
+    }
+
+
+def _truthy(value: object) -> bool:
+    text = str(value).strip().lower()
+    return text in {"1", "true", "t", "yes", "y"}
+
+
 def _resolve_simulation_params(
     context: ProjectionContext,
     *,
     teams: dict[int, TeamInfo],
     args: argparse.Namespace,
     cache: ContextCache,
+    postseason_results: dict[int, PostseasonActualStages],
 ) -> ModelAdjustments:
     fixed = _fixed_params(args)
     tune_seasons = _tuning_seasons(context.season, args)
@@ -662,7 +1199,7 @@ def _resolve_simulation_params(
                 teams=teams,
                 args=args,
                 cache=cache,
-                as_of_override=None,
+                as_of_label=context.as_of_label,
             )
             for tune_season in tune_seasons
         )
@@ -684,6 +1221,8 @@ def _resolve_simulation_params(
                 continue
             pairs: list[tuple[SeasonProjection, ProjectionContext]] = []
             evaluations: list[SeasonEvaluation] = []
+            objective_values: list[float] = []
+            playoff_briers: list[float] = []
             for tune_context in tune_contexts:
                 projection = _simulate_context(
                     tune_context,
@@ -692,16 +1231,22 @@ def _resolve_simulation_params(
                     params=candidate,
                     trials=args.tune_trials,
                 )
+                evaluation = evaluate_projection(projection, tune_context.schedule, teams)
                 pairs.append((projection, tune_context))
-                evaluations.append(
-                    evaluate_projection(projection, tune_context.schedule, teams)
+                evaluations.append(evaluation)
+                objective_values.append(
+                    _evaluation_objective(
+                        evaluation,
+                        projection,
+                        tune_context,
+                        teams=teams,
+                        objective=args.tuning_objective,
+                        postseason_results=postseason_results,
+                    )
                 )
-            objective = sum(_evaluation_objective(item) for item in evaluations) / len(
-                evaluations
-            )
-            playoff_brier = sum(item.playoff_brier for item in evaluations) / len(
-                evaluations
-            )
+                playoff_briers.append(evaluation.playoff_brier)
+            objective = sum(objective_values) / len(objective_values)
+            playoff_brier = sum(playoff_briers) / len(playoff_briers)
             score = (objective, playoff_brier, candidate, tuple(pairs))
             if best is None or score[:2] < best[:2]:
                 best = score
@@ -711,7 +1256,7 @@ def _resolve_simulation_params(
             selected_pairs = best[3]
 
     calibration_seasons: tuple[int, ...] = ()
-    playoff_calibration = None
+    calibrations: dict[str, ProbabilityCalibration] = {}
     if args.calibrate_playoff_probs and tune_seasons:
         if not selected_pairs:
             selected_pairs = tuple(
@@ -731,23 +1276,26 @@ def _resolve_simulation_params(
                         teams=teams,
                         args=args,
                         cache=cache,
-                        as_of_override=None,
+                        as_of_label=context.as_of_label,
                     )
                     for tune_season in tune_seasons
                 )
             )
-        playoff_calibration = _fit_playoff_calibration(
+        calibrations = _fit_target_calibrations(
             selected_pairs,
             teams=teams,
             min_teams=args.playoff_calibration_min_teams,
+            targets=_selected_calibration_targets(args),
+            postseason_results=postseason_results,
         )
-        calibration_seasons = tune_seasons if playoff_calibration is not None else ()
+        calibration_seasons = tune_seasons if calibrations else ()
 
     return ModelAdjustments(
         params=selected_params,
         tune_seasons=tune_seasons if args.tune_simulation_params else (),
-        playoff_calibration=playoff_calibration,
+        calibrations=calibrations,
         calibration_seasons=calibration_seasons,
+        tuning_objective=args.tuning_objective,
     )
 
 
@@ -768,22 +1316,25 @@ def _baseline_for_context(
 def _evaluate_one_season(
     *,
     season: int,
+    as_of_label: str,
     teams: dict[int, TeamInfo],
     args: argparse.Namespace,
     cache: ContextCache,
+    postseason_results: dict[int, PostseasonActualStages],
 ) -> tuple[SeasonProjection, SeasonEvaluation, SeasonProjection, SeasonEvaluation]:
     context = _projection_context(
         season,
         args=args,
         cache=cache,
         teams=teams,
-        as_of_override=args.as_of,
+        as_of_label=as_of_label,
     )
     adjustments = _resolve_simulation_params(
         context,
         teams=teams,
         args=args,
         cache=cache,
+        postseason_results=postseason_results,
     )
     params = adjustments.params
     projection = _simulate_context(
@@ -793,9 +1344,9 @@ def _evaluate_one_season(
         params=params,
         trials=args.trials,
     )
-    projection = _apply_playoff_calibration(
+    projection = _apply_target_calibrations(
         projection,
-        adjustments.playoff_calibration,
+        adjustments.calibrations,
     )
     baseline = _baseline_for_context(context, teams=teams, args=args)
     evaluation = evaluate_projection(projection, context.schedule, teams)
@@ -808,21 +1359,31 @@ def _evaluate_one_season(
         if adjustments.tune_seasons
         else " fixed_params"
     )
-    calibration_label = (
-        f" playoff_cal_slope={adjustments.playoff_calibration.slope:.2f}"
-        f" calibrated_on={min(adjustments.calibration_seasons)}-{max(adjustments.calibration_seasons)}"
-        if adjustments.playoff_calibration is not None
-        else ""
-    )
+    if adjustments.calibrations:
+        slopes = ",".join(
+            f"{target}:{calibration.slope:.2f}"
+            for target, calibration in sorted(adjustments.calibrations.items())
+        )
+        calibration_label = (
+            f" cal_slopes={slopes}"
+            f" calibrated_on={min(adjustments.calibration_seasons)}-{max(adjustments.calibration_seasons)}"
+        )
+    else:
+        calibration_label = ""
     print(
-        f"{season}: as_of={context.as_of_date} "
+        f"{season}: bucket={context.as_of_label} as_of={context.as_of_date} "
         f"train={min(context.train_seasons)}-{max(context.train_seasons)} "
         f"observed_games={context.observed_games:,} "
         f"played_games={len(context.schedule):,} trials={args.trials:,} "
+        f"objective={adjustments.tuning_objective} "
         f"logit_scale={params.probability_logit_scale:.2f} "
         f"team_sd={params.team_strength_sd:.2f} "
         f"prior_scale={params.team_prior_scale:.2f} "
+        f"team_decay={params.team_prior_decay_games or 0.0:.1f} "
         f"market_scale={params.market_prior_scale:.2f} "
+        f"market_decay={params.market_prior_decay_games or 0.0:.1f} "
+        f"roster_scale={params.roster_prior_scale:.2f} "
+        f"roster_decay={params.roster_prior_decay_games or 0.0:.1f} "
         f"schedule_scale={params.schedule_strength_scale:.2f}"
         f"{tuning_label}{calibration_label}{skipped_label}"
     )
@@ -909,6 +1470,7 @@ def _write_projection_rows(
         "projection_type",
         "season",
         "as_of_date",
+        "as_of_bucket",
         "team_id",
         "abbreviation",
         "team_name",
@@ -922,12 +1484,29 @@ def _write_projection_rows(
         "league_championship_prob",
         "world_series_prob",
         "championship_prob",
+        "team_prior_offset",
+        "team_prior_weight",
+        "market_prior_offset",
+        "market_prior_weight",
+        "roster_prior_offset",
+        "roster_prior_weight",
+        "combined_prior_offset",
         "probability_logit_scale",
         "team_strength_sd",
         "team_prior_scale",
         "market_prior_scale",
+        "team_prior_decay_games",
+        "market_prior_decay_games",
+        "roster_prior_scale",
+        "roster_prior_decay_games",
         "schedule_strength_scale",
+        "input_market_sources",
         "playoff_calibration_slope",
+        "division_calibration_slope",
+        "division_series_calibration_slope",
+        "league_championship_calibration_slope",
+        "world_series_calibration_slope",
+        "championship_calibration_slope",
         "actual_wins",
         "actual_division_winner",
         "actual_playoff_team",
@@ -951,38 +1530,89 @@ def _write_projection_rows(
                         "projection_type": labeled.projection_type,
                         "season": projection.season,
                         "as_of_date": projection.as_of_date.isoformat(),
+                        "as_of_bucket": labeled.as_of_label,
                         "abbreviation": team.abbreviation,
                         "team_name": team.team_name,
                         "league_name": team.league_name,
                         "division_name": team.division_name,
                         "probability_logit_scale": (
                             projection.probability_logit_scale
-                            if labeled.projection_type == "model"
+                            if labeled.projection_type.startswith("model")
                             else ""
                         ),
                         "team_strength_sd": (
                             projection.team_strength_sd
-                            if labeled.projection_type == "model"
+                            if labeled.projection_type.startswith("model")
                             else ""
                         ),
                         "team_prior_scale": (
                             projection.team_prior_scale
-                            if labeled.projection_type == "model"
+                            if labeled.projection_type.startswith("model")
                             else ""
                         ),
                         "market_prior_scale": (
                             projection.market_prior_scale
-                            if labeled.projection_type == "model"
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "team_prior_decay_games": (
+                            projection.team_prior_decay_games
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "market_prior_decay_games": (
+                            projection.market_prior_decay_games
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "roster_prior_scale": (
+                            projection.roster_prior_scale
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "roster_prior_decay_games": (
+                            projection.roster_prior_decay_games
+                            if labeled.projection_type.startswith("model")
                             else ""
                         ),
                         "schedule_strength_scale": (
                             projection.schedule_strength_scale
-                            if labeled.projection_type == "model"
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "input_market_sources": (
+                            projection.input_market_sources
+                            if labeled.projection_type.startswith("model")
                             else ""
                         ),
                         "playoff_calibration_slope": (
                             projection.playoff_calibration_slope
-                            if labeled.projection_type == "model"
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "division_calibration_slope": (
+                            projection.division_calibration_slope
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "division_series_calibration_slope": (
+                            projection.division_series_calibration_slope
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "league_championship_calibration_slope": (
+                            projection.league_championship_calibration_slope
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "world_series_calibration_slope": (
+                            projection.world_series_calibration_slope
+                            if labeled.projection_type.startswith("model")
+                            else ""
+                        ),
+                        "championship_calibration_slope": (
+                            projection.championship_calibration_slope
+                            if labeled.projection_type.startswith("model")
                             else ""
                         ),
                         "actual_wins": outcome.wins,
@@ -1013,14 +1643,26 @@ def _write_graphics(
 def _season_summary_rows(
     model_evaluations: Sequence[SeasonEvaluation],
     baseline_evaluations: Sequence[SeasonEvaluation],
+    as_of_labels: Sequence[str] | None = None,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    for model, baseline in zip(model_evaluations, baseline_evaluations, strict=True):
-        rows.append(_evaluation_summary_row("model", model))
-        rows.append(_evaluation_summary_row("baseline", baseline))
+    labels = (
+        tuple(as_of_labels)
+        if as_of_labels is not None
+        else tuple("" for _ in model_evaluations)
+    )
+    for label, model, baseline in zip(
+        labels,
+        model_evaluations,
+        baseline_evaluations,
+        strict=True,
+    ):
+        rows.append(_evaluation_summary_row("model", model, label))
+        rows.append(_evaluation_summary_row("baseline", baseline, label))
         rows.append(
             {
                 "season": model.season,
+                "as_of_bucket": label,
                 "projection_type": "improvement_vs_baseline",
                 "teams": model.teams,
                 "actual_wins_mae": baseline.actual_wins_mae - model.actual_wins_mae,
@@ -1038,9 +1680,11 @@ def _season_summary_rows(
 def _evaluation_summary_row(
     projection_type: str,
     evaluation: SeasonEvaluation,
+    as_of_label: str = "",
 ) -> dict[str, object]:
     return {
         "season": evaluation.season,
+        "as_of_bucket": as_of_label,
         "projection_type": projection_type,
         "teams": evaluation.teams,
         "actual_wins_mae": evaluation.actual_wins_mae,
@@ -1056,6 +1700,7 @@ def _write_summary_rows(path: Path, rows: Sequence[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "season",
+        "as_of_bucket",
         "projection_type",
         "teams",
         "actual_wins_mae",
@@ -1083,8 +1728,13 @@ def _calibration_rows(
     labeled_projections: Sequence[LabeledProjection],
     schedules: dict[int, Sequence[SeasonScheduleGame]],
     teams: dict[int, TeamInfo],
+    postseason_results: dict[int, PostseasonActualStages] | None = None,
 ) -> list[dict[str, object]]:
-    buckets: dict[tuple[str, str, float, float, str], list[tuple[float, float]]] = {}
+    buckets: dict[
+        tuple[str, str, str, float, float, str],
+        list[tuple[float, float]],
+    ] = {}
+    stage_results = postseason_results or {}
     for labeled in labeled_projections:
         projection = labeled.projection
         actual = actual_outcomes(
@@ -1092,23 +1742,33 @@ def _calibration_rows(
             teams,
             wild_cards_per_league=projection.wild_cards_per_league,
         )
+        stages = stage_results.get(projection.season)
         for row in projection.teams:
             outcome = actual[row.team_id]
-            for market, probability, target in (
-                (
-                    "division",
-                    row.division_win_prob,
-                    1.0 if outcome.division_winner else 0.0,
-                ),
-                ("playoff", row.playoff_prob, 1.0 if outcome.playoff_team else 0.0),
-            ):
+            for market in CALIBRATION_TARGETS:
+                target = _actual_target(
+                    target=market,
+                    team_id=row.team_id,
+                    outcome=outcome,
+                    stages=stages,
+                )
+                if target is None:
+                    continue
+                probability = _projection_probability(row, market)
                 lower, upper, label = _calibration_bucket(probability)
-                key = (labeled.projection_type, market, lower, upper, label)
+                key = (
+                    labeled.projection_type,
+                    labeled.as_of_label,
+                    market,
+                    lower,
+                    upper,
+                    label,
+                )
                 buckets.setdefault(key, []).append((probability, target))
 
     rows: list[dict[str, object]] = []
     for key, values in sorted(buckets.items()):
-        projection_type, market, lower, upper, label = key
+        projection_type, as_of_label, market, lower, upper, label = key
         count = len(values)
         mean_probability = sum(probability for probability, _target in values) / count
         observed_rate = sum(target for _probability, target in values) / count
@@ -1118,6 +1778,7 @@ def _calibration_rows(
         rows.append(
             {
                 "projection_type": projection_type,
+                "as_of_bucket": as_of_label,
                 "market": market,
                 "bucket": label,
                 "bucket_lower": lower,
@@ -1133,13 +1794,14 @@ def _calibration_rows(
 
 def _print_calibration(rows: Sequence[dict[str, object]]) -> None:
     print("Calibration buckets (model):")
-    for market in ("division", "playoff"):
+    markets = sorted({str(row["market"]) for row in rows if row["projection_type"] == "model"})
+    for market in markets:
         print(f"  {market}:")
         for row in rows:
             if row["projection_type"] != "model" or row["market"] != market:
                 continue
             print(
-                f"    {row['bucket']} n={row['count']} "
+                f"    {row['as_of_bucket']} {row['bucket']} n={row['count']} "
                 f"p={float(row['mean_probability']):.3f} "
                 f"obs={float(row['observed_rate']):.3f} "
                 f"brier={float(row['brier']):.4f}"
@@ -1150,6 +1812,7 @@ def _write_calibration_rows(path: Path, rows: Sequence[dict[str, object]]) -> No
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "projection_type",
+        "as_of_bucket",
         "market",
         "bucket",
         "bucket_lower",
@@ -1196,28 +1859,48 @@ def main() -> None:
         raise SystemExit("--market-prior-min-tune-seasons must be non-negative")
     if args.market_win_totals is not None and not args.market_win_totals.exists():
         raise SystemExit(f"--market-win-totals not found: {args.market_win_totals}")
+    if args.roster_priors is not None and not args.roster_priors.exists():
+        raise SystemExit(f"--roster-priors not found: {args.roster_priors}")
+    if args.postseason_results is not None and not args.postseason_results.exists():
+        raise SystemExit(f"--postseason-results not found: {args.postseason_results}")
 
+    as_of_labels = _as_of_labels(args)
+    if args.graphics_out_dir is not None and len(as_of_labels) > 1:
+        raise SystemExit("--graphics-out-dir requires a single as-of bucket")
     teams = load_team_info()
+    postseason_results = _load_postseason_results(args.postseason_results)
     context_cache: ContextCache = {}
     labeled_projections: list[LabeledProjection] = []
     model_evaluations: list[SeasonEvaluation] = []
     baseline_evaluations: list[SeasonEvaluation] = []
+    evaluation_labels: list[str] = []
     schedules: dict[int, Sequence[SeasonScheduleGame]] = {}
     for season in args.seasons:
-        projection, evaluation, baseline, baseline_evaluation = _evaluate_one_season(
-            season=season,
-            teams=teams,
-            args=args,
-            cache=context_cache,
-        )
-        labeled_projections.append(LabeledProjection("model", projection))
-        labeled_projections.append(LabeledProjection("baseline", baseline))
-        model_evaluations.append(evaluation)
-        baseline_evaluations.append(baseline_evaluation)
-        schedules[season] = context_cache[(season, args.as_of)].schedule
+        for as_of_label in as_of_labels:
+            projection, evaluation, baseline, baseline_evaluation = _evaluate_one_season(
+                season=season,
+                as_of_label=as_of_label,
+                teams=teams,
+                args=args,
+                cache=context_cache,
+                postseason_results=postseason_results,
+            )
+            labeled_projections.append(LabeledProjection("model", projection, as_of_label))
+            labeled_projections.append(
+                LabeledProjection("baseline", baseline, as_of_label)
+            )
+            model_evaluations.append(evaluation)
+            baseline_evaluations.append(baseline_evaluation)
+            evaluation_labels.append(as_of_label)
+            schedules[season] = context_cache[(season, as_of_label)].schedule
 
     _print_aggregate(model_evaluations, baseline_evaluations)
-    calibration_rows = _calibration_rows(labeled_projections, schedules, teams)
+    calibration_rows = _calibration_rows(
+        labeled_projections,
+        schedules,
+        teams,
+        postseason_results,
+    )
     _print_calibration(calibration_rows)
     if args.out is not None:
         _write_projection_rows(args.out, labeled_projections, schedules, teams)
@@ -1228,7 +1911,11 @@ def main() -> None:
     if summary_path is not None:
         _write_summary_rows(
             summary_path,
-            _season_summary_rows(model_evaluations, baseline_evaluations),
+            _season_summary_rows(
+                model_evaluations,
+                baseline_evaluations,
+                evaluation_labels,
+            ),
         )
     if args.graphics_out_dir is not None:
         _write_graphics(args.graphics_out_dir, labeled_projections, teams)

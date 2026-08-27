@@ -29,6 +29,19 @@ def resolve_target_date(date_arg: str | None) -> date:
         return datetime.now(tz=UTC).date() - timedelta(days=1)
     return datetime.strptime(date_arg, "%Y-%m-%d").replace(tzinfo=UTC).date()
 
+def completed_game_pks(pipeline_summary: dict) -> list[int]:
+    pks: list[int] = []
+    for item in pipeline_summary.get("completed", []):
+        if isinstance(item, dict):
+            if item.get("error"):
+                continue
+            game_pk = item.get("game_pk")
+        else:
+            game_pk = item
+        if game_pk is not None:
+            pks.append(int(game_pk))
+    return pks
+
 
 def main() -> None:
     from src.database import PostgresConfig
@@ -41,12 +54,17 @@ def main() -> None:
     print(f"Running daily ETL for {target_date.isoformat()}")
     pipeline_summary = run_daily_pipeline(
         target_date=target_date,
-        skip_existing=True,
+        skip_existing=False,
         poll_live=False,
     )
 
     db_config = PostgresConfig.from_env()
-    backfill_summary = run_postgres_backfill(db_config, Path("data/raw/livefeeds"))
+    completed_pks = completed_game_pks(pipeline_summary)
+    backfill_summary = run_postgres_backfill(
+        db_config,
+        Path("data/raw/livefeeds"),
+        force_game_pks=completed_pks,
+    )
 
     print("\nDaily pipeline summary")
     print(f"- date: {target_date.isoformat()}")

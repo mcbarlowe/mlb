@@ -1,4 +1,4 @@
-"""American/decimal/implied-probability conversions and two-way de-vigging.
+"""American/decimal/implied-probability conversions and de-vigging.
 
 All functions are pure and side-effect free so the conversions and the vig
 removal can be unit-tested against hand-computed values. "American" odds use
@@ -10,6 +10,7 @@ the sportsbook convention: +150 pays 150 on 100 staked; -150 risks 150 to win
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 __all__ = [
     "american_to_decimal",
@@ -17,6 +18,8 @@ __all__ = [
     "decimal_to_american",
     "decimal_to_prob",
     "devig_proportional",
+    "devig_proportional_many",
+    "no_vig_outright",
     "no_vig_two_way",
     "prob_to_american",
     "prob_to_decimal",
@@ -81,6 +84,39 @@ def devig_proportional(prob_a: float, prob_b: float) -> tuple[float, float]:
     if total <= 0.0:
         raise ValueError("Implied probabilities must be positive")
     return prob_a / total, prob_b / total
+
+
+def devig_proportional_many(
+    probabilities: Sequence[float], *, target_total: float = 1.0
+) -> tuple[float, ...]:
+    """Normalize multi-runner implied probabilities to ``target_total``.
+
+    This is the outright/futures analogue of two-way proportional de-vigging:
+    every runner is scaled by the same factor, preserving relative prices while
+    removing the book overround. ``target_total`` is normally 1 for a single
+    winner outright, but can be higher for stage markets with multiple winners.
+    """
+    if len(probabilities) < 2:
+        raise ValueError("At least two runners are required")
+    if target_total <= 0.0:
+        raise ValueError("Target total must be positive")
+    total = sum(probabilities)
+    if total <= 0.0:
+        raise ValueError("Implied probabilities must be positive")
+    if any(prob <= 0.0 or not math.isfinite(prob) for prob in probabilities):
+        raise ValueError("Implied probabilities must be finite and positive")
+    scale = target_total / total
+    return tuple(prob * scale for prob in probabilities)
+
+
+def no_vig_outright(
+    american_odds: Sequence[float], *, target_total: float = 1.0
+) -> tuple[float, ...]:
+    """Fair probabilities for a multi-runner American-odds futures market."""
+    return devig_proportional_many(
+        tuple(american_to_prob(american) for american in american_odds),
+        target_total=target_total,
+    )
 
 
 def _shin_z(prob_a: float, prob_b: float) -> float:

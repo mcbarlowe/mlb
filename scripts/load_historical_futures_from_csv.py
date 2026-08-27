@@ -18,7 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.betting.futures_odds_store import ensure_futures_odds_table, insert_futures_odds
+from src.betting.futures_odds_store import (
+    ensure_futures_odds_table,
+    insert_futures_odds,
+)
 from src.betting.ingest import team_abbrev_to_id
 from src.betting.odds import american_to_prob
 from src.database import PostgresConfig, PostgresHandler
@@ -117,16 +120,16 @@ def main() -> None:
     season_counts = Counter(row["season"] for row in rows)
     market_counts = Counter(row["market_type"] for row in rows)
     
-    print(f"\nBreakdown by season:")
+    print("\nBreakdown by season:")
     for season, count in sorted(season_counts.items()):
         print(f"  {season}: {count} odds")
     
-    print(f"\nBreakdown by market:")
+    print("\nBreakdown by market:")
     for market_type, count in sorted(market_counts.items()):
         print(f"  {market_type}: {count} odds")
     
     if args.dry_run:
-        print(f"\nSample rows:")
+        print("\nSample rows:")
         for row in rows[:10]:
             print(
                 f"  {row['season']} {row['market_type']:20s} {row['team_name']:25s} "

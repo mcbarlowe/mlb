@@ -130,12 +130,12 @@ def main() -> None:
     print(f"Failed: {len(failed_fetches)}")
     
     if successful_fetches:
-        print(f"\n✓ Fetched:")
+        print("\n✓ Fetched:")
         for season, date_str, label in successful_fetches:
             print(f"  - {season} {label} ({date_str})")
     
     if failed_fetches:
-        print(f"\n✗ Failed:")
+        print("\n✗ Failed:")
         for season, date_str, label in failed_fetches:
             print(f"  - {season} {label} ({date_str})")
         sys.exit(1)

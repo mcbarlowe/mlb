@@ -14,18 +14,16 @@ Classes:
 
 import math
 from collections.abc import Callable, Iterator
-from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import polars as pl
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 from tqdm import tqdm
 
-from src.ml.features import PITCH_TYPE_CODES, IDX_TO_PITCH_TYPE
+from src.ml.features import IDX_TO_PITCH_TYPE
 
 
 class PitchTypeConditionedMDN(nn.Module):
@@ -175,9 +173,7 @@ class PitchTypeConditionedMDN(nn.Module):
         Returns:
             Dictionary with combined MDN parameters (weighted by pitch type probs).
         """
-        batch_size = x.shape[0]
-        device = x.device
-        K = self.n_components
+        x.shape[0]
 
         # Shared backbone
         hidden = self.backbone(x)
@@ -244,8 +240,7 @@ class PitchTypeConditionedMDN(nn.Module):
             - sigma: [batch, n_pitch_types, K, 2]
             - rho: [batch, n_pitch_types, K]
         """
-        batch_size = x.shape[0]
-        K = self.n_components
+        x.shape[0]
 
         # Shared backbone
         hidden = self.backbone(x)
@@ -432,7 +427,7 @@ class PitchTypeThenLocationPredictor(nn.Module):
         features: torch.Tensor,
         lengths: torch.Tensor,
         mask: torch.Tensor,
-        location_features: Optional[torch.Tensor] = None,
+        location_features: torch.Tensor | None = None,
     ) -> dict:
         """
         Predict pitch type, then use it for location.
@@ -460,7 +455,7 @@ class PitchTypeThenLocationPredictor(nn.Module):
         pitch_type_probs = F.softmax(pitch_type_logits, dim=-1)
 
         # Flatten for location model
-        batch_size, seq_len, _ = pitch_type_logits.shape
+        _batch_size, _seq_len, _ = pitch_type_logits.shape
         flat_probs = pitch_type_probs.reshape(-1, pitch_type_probs.shape[-1])
 
         # Get location features (flattened)

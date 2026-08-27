@@ -90,7 +90,7 @@ def insert_futures_paper_trades(
     if not rows:
         return 0
     
-    placeholders = ", ".join([f"%s"] * len(INSERT_COLUMNS))
+    placeholders = ", ".join(["%s"] * len(INSERT_COLUMNS))
     insert_sql = f"""
         INSERT INTO futures_paper_trades ({", ".join(INSERT_COLUMNS)})
         VALUES ({placeholders})

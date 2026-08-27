@@ -35,10 +35,11 @@ sys.path.insert(0, str(project_root))
 from src.ml.features import PITCH_TYPE_CODES
 from src.ml.pitch_predictor import PitchPredictor
 from src.ml.postgres_data import load_pitches_from_postgres
+from src.ml.run_dirs import resolve_pitch_type_run_dir
 from src.sim.artifacts import ensure_sim_artifacts
 from src.sim.pitch_mix import PitchMixProfiles
 
-DEFAULT_MODEL_DIR = "models/attention_full/run_20260119_124719"
+DEFAULT_MODEL_DIR = "auto"
 EPS = 1e-9
 
 
@@ -53,21 +54,24 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def iter_sequences(
-    df: pl.DataFrame,
-    feature_columns: list[str],
-    target_columns: list[str],
-    max_seq_len: int,
-) -> Iterator[dict]:
-    """Yield at-bat sequences with aligned context for the baseline."""
+def add_pre_pitch_count_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Add pre-pitch count columns from historical post-pitch count rows."""
     at_bat_key = ["game_pk", "at_bat_index"]
-    counts = pl.col("count_after_pitch").str.split_exact("-", 1)
-    df = (
-        df.sort(
-            at_bat_key + ["pitch_start_time", "pitch_number"],
-            nulls_last=True,
+    df = df.sort(
+        at_bat_key + ["pitch_start_time", "pitch_number"],
+        nulls_last=True,
+    )
+    if {"_balls_before", "_strikes_before"}.issubset(df.columns):
+        return df.with_columns(
+            (
+                pl.col("is_runner_on_first").fill_null(False)
+                | pl.col("is_runner_on_second").fill_null(False)
+                | pl.col("is_runner_on_third").fill_null(False)
+            ).alias("_stretch")
         )
-        .with_columns(
+    counts = pl.col("count_after_pitch").str.split_exact("-", 1)
+    return (
+        df.with_columns(
             counts.struct.field("field_0")
             .cast(pl.Int64, strict=False)
             .alias("_balls_after"),
@@ -93,6 +97,31 @@ def iter_sequences(
             ).alias("_stretch"),
         )
     )
+
+
+def historical_rows_as_live_inputs(raw: pl.DataFrame) -> pl.DataFrame:
+    """Rewrite historical rows so feature engineering sees the pre-pitch count.
+
+    ``mlb.pitches.count_after_pitch`` is the count after an archived pitch.
+    Live next-pitch rows use that same raw column for the count before the
+    pending pitch. Rewriting keeps the evaluator aligned with deployed inputs.
+    """
+    frame = add_pre_pitch_count_columns(raw)
+    return frame.with_columns(
+        pl.concat_str(["_balls_before", "_strikes_before"], separator="-").alias(
+            "count_after_pitch"
+        )
+    )
+
+
+def iter_sequences(
+    df: pl.DataFrame,
+    feature_columns: list[str],
+    target_columns: list[str],
+    max_seq_len: int,
+) -> Iterator[dict]:
+    """Yield at-bat sequences with aligned context for the baseline."""
+    df = add_pre_pitch_count_columns(df)
 
     for _, group in df.group_by(["game_pk", "at_bat_index"], maintain_order=True):
         features = group.select(feature_columns).cast(pl.Float32).to_numpy()
@@ -133,10 +162,7 @@ def evaluate_season(
 ) -> dict:
     engine = predictor.feature_engine
     assert engine is not None
-    raw = raw.sort(
-        ["game_pk", "at_bat_index", "pitch_start_time", "pitch_number"],
-        nulls_last=True,
-    )
+    raw = historical_rows_as_live_inputs(raw)
     df = engine.transform(raw)
     sequences = iter_sequences(
         df, engine.get_feature_columns(), engine.get_target_columns(), max_seq_len
@@ -231,8 +257,9 @@ def main() -> None:
     args = parse_args()
     ensure_sim_artifacts()
     mix = PitchMixProfiles.load(seed=0)
-    print(f"Loading model from {args.model_dir}...")
-    predictor = PitchPredictor.load_lstm(args.model_dir, device=args.device)
+    model_dir = resolve_pitch_type_run_dir(args.model_dir)
+    print(f"Loading model from {model_dir}...")
+    predictor = PitchPredictor.load_lstm(model_dir, device=args.device)
 
     summary = {}
     for season in args.seasons:

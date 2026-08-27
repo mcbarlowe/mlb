@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>BARLOWE_H2H_CLOSE_END_HOUR</key>
+		<string>23</string>
+		<key>BARLOWE_H2H_CLOSE_REPO_DIR</key>
+		<string>/Users/matthewbarlowe/code/python/mlb-paper-trading</string>
+		<key>BARLOWE_H2H_CLOSE_START_HOUR</key>
+		<string>11</string>
+		<key>BARLOWE_H2H_CLOSE_TZ</key>
+		<string>America/New_York</string>
+		<key>PATH</key>
+		<string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>PYTHONUNBUFFERED</key>
+		<string>1</string>
+		<key>UV_PYTHON_PREFERENCE</key>
+		<string>managed</string>
+	</dict>
+	<key>Label</key>
+	<string>com.barloweanalytics.h2h-close-saver</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/matthewbarlowe/code/python/mlb-paper-trading/scripts/run_h2h_close_saver.sh</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/matthewbarlowe/Library/Logs/BarloweAnalytics/h2h-close-saver.err.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/matthewbarlowe/Library/Logs/BarloweAnalytics/h2h-close-saver.out.log</string>
+	<key>StartInterval</key>
+	<integer>1800</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/matthewbarlowe/code/python/mlb-paper-trading</string>
+</dict>
+</plist>

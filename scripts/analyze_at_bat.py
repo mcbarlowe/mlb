@@ -6,20 +6,18 @@ for each pitch, creates a visualization, and calculates evaluation metrics.
 """
 
 import json
-from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional
+from pathlib import Path
 
+import matplotlib.pyplot as plt
+import numpy as np
 import polars as pl
 import torch
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 from catboost import CatBoostClassifier, Pool
+from matplotlib.gridspec import GridSpec
 
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES, IDX_TO_PITCH_TYPE
+from src.ml.features import IDX_TO_PITCH_TYPE, PitchFeatureEngine
 from src.ml.mdn_location_model import BivariateMDN, get_location_density
-from src.ml.pitch_predictor import GameContext, PitchPrediction
 
 # Mapping from pitch type codes to full names
 PITCH_TYPE_NAMES = {
@@ -287,7 +285,7 @@ def evaluate_at_bat(
 
 def create_at_bat_visualization(
     evaluation: AtBatEvaluation,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """Create visualization for entire at-bat."""
 
@@ -555,7 +553,7 @@ def main():
     print(f"Top-3 Accuracy: {evaluation.top_3_accuracy:.1%} ({evaluation.n_in_top_3}/{evaluation.n_pitches})")
     print(f"Mean Location Error: {evaluation.mean_location_error:.2f} ft")
 
-    print(f"\nPitch-by-pitch:")
+    print("\nPitch-by-pitch:")
     for pred in evaluation.predictions:
         status = "✓" if pred.type_correct else ("~" if pred.in_top_3 else "✗")
         pred_name = get_pitch_name(pred.predicted_type)
@@ -564,7 +562,7 @@ def main():
               f"Actual={actual_name}, Loc Error={pred.location_error:.2f}ft {status}")
 
     # Create visualization
-    print(f"\nCreating visualization...")
+    print("\nCreating visualization...")
     fig = create_at_bat_visualization(evaluation, save_path=output_path)
     print(f"Saved to: {output_path}")
     plt.close(fig)

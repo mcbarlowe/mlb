@@ -18,32 +18,28 @@ Example:
     predictor.plot_prediction(features, save_path="prediction.png")
 """
 
-import json
 import io
+import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
-from urllib.request import urlopen, Request
-from urllib.error import URLError, HTTPError
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
+import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 import torch
-import matplotlib.pyplot as plt
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from matplotlib.patches import Circle, Ellipse
+from catboost import CatBoostClassifier, Pool
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from PIL import Image
-from catboost import CatBoostClassifier, CatBoostRegressor, Pool
 
+from src.ml.features import IDX_TO_PITCH_TYPE, PITCH_TYPE_CODES, PitchFeatureEngine
 from src.ml.mdn_location_model import (
     BivariateMDN,
     get_location_density,
-    get_point_estimate,
-    get_mixture_parameters,
 )
-from src.ml.features import PITCH_TYPE_CODES, IDX_TO_PITCH_TYPE, PitchFeatureEngine
 from src.ml.model import create_model
-from datetime import datetime
 
 # Full pitch type names for display
 PITCH_TYPE_FULL_NAMES = {
@@ -72,10 +68,10 @@ PITCH_TYPE_FULL_NAMES = {
 }
 
 # Cache for headshots to avoid repeated downloads
-_headshot_cache: dict[int, Optional[np.ndarray]] = {}
+_headshot_cache: dict[int, np.ndarray | None] = {}
 
 
-def fetch_mlb_headshot(player_id: int, size: int = 100) -> Optional[np.ndarray]:
+def fetch_mlb_headshot(player_id: int, size: int = 100) -> np.ndarray | None:
     """
     Fetch a player's headshot from MLB's CDN.
 
@@ -126,17 +122,17 @@ class GameContext:
     balls: int
     strikes: int
     outs: int
-    date: Optional[str] = None  # "YYYY-MM-DD" or display format
-    runners_on: Optional[str] = None  # e.g., "1st & 3rd", "Bases Empty" (legacy)
+    date: str | None = None  # "YYYY-MM-DD" or display format
+    runners_on: str | None = None  # e.g., "1st & 3rd", "Bases Empty" (legacy)
     runner_on_1b: bool = False  # Runner on first base
     runner_on_2b: bool = False  # Runner on second base
     runner_on_3b: bool = False  # Runner on third base
-    score_home: Optional[int] = None
-    score_away: Optional[int] = None
-    pitch_number: Optional[int] = None  # Pitch number in at-bat
-    pitcher_id: Optional[int] = None  # MLB player ID for headshot
-    batter_id: Optional[int] = None  # MLB player ID for headshot
-    pitch_result: Optional[str] = None  # e.g., "Called Strike", "Ball", "Swinging Strike", "In play, no out"
+    score_home: int | None = None
+    score_away: int | None = None
+    pitch_number: int | None = None  # Pitch number in at-bat
+    pitcher_id: int | None = None  # MLB player ID for headshot
+    batter_id: int | None = None  # MLB player ID for headshot
+    pitch_result: str | None = None  # e.g., "Called Strike", "Ball", "Swinging Strike", "In play, no out"
 
     @property
     def count_str(self) -> str:
@@ -215,15 +211,15 @@ class PitchPredictor:
 
     def __init__(
         self,
-        type_model: Optional[CatBoostClassifier] = None,
-        mdn_model: Optional[BivariateMDN] = None,
-        lstm_model: Optional[torch.nn.Module] = None,
-        feature_columns: list[str] = None,
-        categorical_features: list[str] = None,
-        mdn_feature_columns: list[str] = None,
-        feature_engine: Optional[PitchFeatureEngine] = None,
-        pitcher_to_idx: Optional[dict] = None,
-        batter_to_idx: Optional[dict] = None,
+        type_model: CatBoostClassifier | None = None,
+        mdn_model: BivariateMDN | None = None,
+        lstm_model: torch.nn.Module | None = None,
+        feature_columns: list[str] | None = None,
+        categorical_features: list[str] | None = None,
+        mdn_feature_columns: list[str] | None = None,
+        feature_engine: PitchFeatureEngine | None = None,
+        pitcher_to_idx: dict | None = None,
+        batter_to_idx: dict | None = None,
         device: str = "cpu",
         model_type: str = "catboost",  # "catboost" or "lstm"
     ):
@@ -274,7 +270,7 @@ class PitchPredictor:
         ]
 
     @classmethod
-    def load(cls, model_dir: Union[str, Path], device: str = "cpu") -> "PitchPredictor":
+    def load(cls, model_dir: str | Path, device: str = "cpu") -> "PitchPredictor":
         """
         Load a trained CatBoost + MDN predictor from disk.
 
@@ -327,7 +323,7 @@ class PitchPredictor:
         )
 
     @classmethod
-    def load_lstm(cls, model_dir: Union[str, Path], device: str = "cpu") -> "PitchPredictor":
+    def load_lstm(cls, model_dir: str | Path, device: str = "cpu") -> "PitchPredictor":
         """
         Load a trained LSTM (or LSTM+Attention) predictor from disk.
 
@@ -585,7 +581,7 @@ class PitchPredictor:
             pi = mdn_params["pi"][0, -1, :]  # [K]
             mu = mdn_params["mu"][0, -1, :, :]  # [K, 2]
             sigma = mdn_params["sigma"][0, -1, :, :]  # [K, 2]
-            rho = mdn_params["rho"][0, -1, :]  # [K]
+            mdn_params["rho"][0, -1, :]  # [K]
 
             mixture_weights = pi.cpu().numpy()
             mixture_means = mu.cpu().numpy()
@@ -799,9 +795,9 @@ class PitchPredictor:
     def plot_prediction(
         self,
         prediction: PitchPrediction,
-        title: Optional[str] = None,
-        actual_location: Optional[tuple[float, float]] = None,
-        save_path: Optional[str] = None,
+        title: str | None = None,
+        actual_location: tuple[float, float] | None = None,
+        save_path: str | None = None,
         figsize: tuple[int, int] = (14, 6),
     ) -> plt.Figure:
         """
@@ -1049,9 +1045,9 @@ class PitchPredictor:
         self,
         prediction: PitchPrediction,
         context: GameContext,
-        actual_pitch_type: Optional[str] = None,
-        actual_location: Optional[tuple[float, float]] = None,
-        save_path: Optional[str] = None,
+        actual_pitch_type: str | None = None,
+        actual_location: tuple[float, float] | None = None,
+        save_path: str | None = None,
         figsize: tuple[float, float] = (10.5, 8.0),
     ) -> plt.Figure:
         """
@@ -1411,7 +1407,7 @@ def create_pitch_card_from_row(
     catboost_features=None,
     mdn_features: torch.Tensor = None,
     lstm_features: torch.Tensor = None,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """
     Convenience function to create a pitch card directly from a data row.
@@ -1450,11 +1446,11 @@ def create_pitch_card_from_row(
         date_str = str(date_val)
         try:
             if 'T' in date_str:
-                dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                dt = datetime.fromisoformat(date_str)
             else:
                 dt = datetime.strptime(date_str[:10], '%Y-%m-%d')
             return dt.strftime('%B %d, %Y')
-        except:
+        except Exception:
             return date_str[:10] if len(date_str) >= 10 else date_str
 
     game_date = format_game_date(get_val("game_date"))
@@ -1508,7 +1504,7 @@ def create_pitch_card_from_at_bat(
     predictor: PitchPredictor,
     at_bat_df: pl.DataFrame,
     pitch_index: int = -1,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """
     Create a pitch card for a specific pitch in an at-bat using LSTM model.

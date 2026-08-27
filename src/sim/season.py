@@ -46,6 +46,12 @@ class HomeWinPredictor(Protocol):
         away_starter_id: int,
         home_starter_id: int,
         prediction_date: date | None = None,
+        away_batter_ids: Sequence[int] | None = None,
+        home_batter_ids: Sequence[int] | None = None,
+        away_active_batter_ids: Sequence[int] | None = None,
+        home_active_batter_ids: Sequence[int] | None = None,
+        away_reliever_ids: Sequence[int] | None = None,
+        home_reliever_ids: Sequence[int] | None = None,
     ) -> float: ...
 
 
@@ -100,6 +106,13 @@ class TeamProjection:
     league_championship_prob: float = 0.0
     world_series_prob: float = 0.0
     championship_prob: float = 0.0
+    team_prior_offset: float = 0.0
+    team_prior_weight: float = 1.0
+    market_prior_offset: float = 0.0
+    market_prior_weight: float = 1.0
+    roster_prior_offset: float = 0.0
+    roster_prior_weight: float = 1.0
+    combined_prior_offset: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -115,6 +128,16 @@ class SeasonProjection:
     market_prior_scale: float = 0.0
     schedule_strength_scale: float = 0.0
     playoff_calibration_slope: float | None = None
+    division_calibration_slope: float | None = None
+    division_series_calibration_slope: float | None = None
+    league_championship_calibration_slope: float | None = None
+    world_series_calibration_slope: float | None = None
+    championship_calibration_slope: float | None = None
+    team_prior_decay_games: float | None = None
+    market_prior_decay_games: float | None = None
+    roster_prior_scale: float = 0.0
+    roster_prior_decay_games: float | None = None
+    input_market_sources: str = ""
 
     def by_team_id(self) -> dict[int, TeamProjection]:
         return {team.team_id: team for team in self.teams}
@@ -294,6 +317,89 @@ def schedule_strength_offsets_from_games(
         for team_id in team_ids
     }
 
+def _games_played_from_finals(
+    games: Sequence[SeasonScheduleGame],
+    *,
+    team_ids: Iterable[int],
+    before_date: date,
+) -> dict[int, int]:
+    played = {team_id: 0 for team_id in team_ids}
+    for game in games:
+        if game.game_date >= before_date or not game.is_final:
+            continue
+        played[game.away_team_id] += 1
+        played[game.home_team_id] += 1
+    return played
+
+
+def _validate_decay_games(value: float | None, label: str) -> float | None:
+    if value is None:
+        return None
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0.0:
+        raise ValueError(f"{label} must be non-negative")
+    return parsed
+
+
+def _decayed_prior_weights(
+    *,
+    team_ids: Iterable[int],
+    games_played: Mapping[int, int],
+    decay_games: float | None,
+) -> dict[int, float]:
+    if decay_games is None or decay_games == 0.0:
+        return {team_id: 1.0 for team_id in team_ids}
+    return {
+        team_id: decay_games / (decay_games + games_played.get(team_id, 0))
+        for team_id in team_ids
+    }
+
+
+def _team_ids_for(
+    mapping: Mapping[int, Sequence[int]] | None,
+    team_id: int,
+) -> tuple[int, ...] | None:
+    if mapping is None:
+        return None
+    return tuple(mapping.get(team_id, ()))
+
+
+def _prediction_kwargs(
+    game: SeasonScheduleGame,
+    *,
+    lineup_batter_ids_by_team: Mapping[int, Sequence[int]] | None,
+    active_batter_ids_by_team: Mapping[int, Sequence[int]] | None,
+    reliever_ids_by_team: Mapping[int, Sequence[int]] | None,
+) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "season": game.season,
+        "away_team_id": game.away_team_id,
+        "home_team_id": game.home_team_id,
+        "away_starter_id": game.away_probable_pitcher_id or 0,
+        "home_starter_id": game.home_probable_pitcher_id or 0,
+        "prediction_date": game.game_date,
+    }
+    away_lineup = _team_ids_for(lineup_batter_ids_by_team, game.away_team_id)
+    home_lineup = _team_ids_for(lineup_batter_ids_by_team, game.home_team_id)
+    away_active = _team_ids_for(active_batter_ids_by_team, game.away_team_id)
+    home_active = _team_ids_for(active_batter_ids_by_team, game.home_team_id)
+    away_relievers = _team_ids_for(reliever_ids_by_team, game.away_team_id)
+    home_relievers = _team_ids_for(reliever_ids_by_team, game.home_team_id)
+    if away_lineup is not None:
+        kwargs["away_batter_ids"] = away_lineup
+    if home_lineup is not None:
+        kwargs["home_batter_ids"] = home_lineup
+    if away_active is not None:
+        kwargs["away_active_batter_ids"] = away_active
+    if home_active is not None:
+        kwargs["home_active_batter_ids"] = home_active
+    if away_relievers is not None:
+        kwargs["away_reliever_ids"] = away_relievers
+    if home_relievers is not None:
+        kwargs["home_reliever_ids"] = home_relievers
+    return kwargs
+
+
 
 def simulate_season(
     *,
@@ -308,10 +414,19 @@ def simulate_season(
     team_strength_sd: float = 0.0,
     team_prior_offsets: Mapping[int, float] | None = None,
     team_prior_scale: float = 0.0,
+    team_prior_decay_games: float | None = None,
     market_prior_offsets: Mapping[int, float] | None = None,
     market_prior_scale: float = 0.0,
+    market_prior_decay_games: float | None = None,
+    roster_prior_offsets: Mapping[int, float] | None = None,
+    roster_prior_scale: float = 0.0,
+    roster_prior_decay_games: float | None = None,
     schedule_strength_offsets: Mapping[int, float] | None = None,
     schedule_strength_scale: float = 0.0,
+    lineup_batter_ids_by_team: Mapping[int, Sequence[int]] | None = None,
+    active_batter_ids_by_team: Mapping[int, Sequence[int]] | None = None,
+    reliever_ids_by_team: Mapping[int, Sequence[int]] | None = None,
+    input_market_sources: str = "",
 ) -> SeasonProjection:
     if trials < 1:
         raise ValueError("trials must be positive")
@@ -325,8 +440,22 @@ def simulate_season(
         raise ValueError("team_prior_scale must be non-negative")
     if not math.isfinite(market_prior_scale) or market_prior_scale < 0.0:
         raise ValueError("market_prior_scale must be non-negative")
+    if not math.isfinite(roster_prior_scale) or roster_prior_scale < 0.0:
+        raise ValueError("roster_prior_scale must be non-negative")
     if not math.isfinite(schedule_strength_scale) or schedule_strength_scale < 0.0:
         raise ValueError("schedule_strength_scale must be non-negative")
+    resolved_team_decay = _validate_decay_games(
+        team_prior_decay_games,
+        "team_prior_decay_games",
+    )
+    resolved_market_decay = _validate_decay_games(
+        market_prior_decay_games,
+        "market_prior_decay_games",
+    )
+    resolved_roster_decay = _validate_decay_games(
+        roster_prior_decay_games,
+        "roster_prior_decay_games",
+    )
     if not games:
         raise ValueError("games must not be empty")
 
@@ -343,16 +472,21 @@ def simulate_season(
         before_date=as_of_date,
         require_complete=False,
     )
+    games_played_as_of = _games_played_from_finals(
+        games,
+        team_ids=team_ids,
+        before_date=as_of_date,
+    )
     future_games = tuple(game for game in games if game.game_date >= as_of_date)
     future_probabilities = tuple(
         _clamp_probability(
             predictor.predict_home_probability(
-                season=game.season,
-                away_team_id=game.away_team_id,
-                home_team_id=game.home_team_id,
-                away_starter_id=game.away_probable_pitcher_id or 0,
-                home_starter_id=game.home_probable_pitcher_id or 0,
-                prediction_date=game.game_date,
+                **_prediction_kwargs(
+                    game,
+                    lineup_batter_ids_by_team=lineup_batter_ids_by_team,
+                    active_batter_ids_by_team=active_batter_ids_by_team,
+                    reliever_ids_by_team=reliever_ids_by_team,
+                )
             )
         )
         for game in future_games
@@ -362,6 +496,7 @@ def simulate_season(
         or team_strength_sd > 0.0
         or team_prior_scale > 0.0
         or market_prior_scale > 0.0
+        or roster_prior_scale > 0.0
         or schedule_strength_scale > 0.0
     )
     future_logits = (
@@ -386,10 +521,56 @@ def simulate_season(
         )
         for team_id in team_ids
     }
+    roster_offsets = {
+        team_id: _finite_float(
+            (roster_prior_offsets or {}).get(team_id, 0.0),
+            f"roster_prior_offsets[{team_id}]",
+        )
+        for team_id in team_ids
+    }
     schedule_offsets = {
         team_id: _finite_float(
             (schedule_strength_offsets or {}).get(team_id, 0.0),
             f"schedule_strength_offsets[{team_id}]",
+        )
+        for team_id in team_ids
+    }
+    team_prior_weights = _decayed_prior_weights(
+        team_ids=team_ids,
+        games_played=games_played_as_of,
+        decay_games=resolved_team_decay,
+    )
+    market_prior_weights = _decayed_prior_weights(
+        team_ids=team_ids,
+        games_played=games_played_as_of,
+        decay_games=resolved_market_decay,
+    )
+    roster_prior_weights = _decayed_prior_weights(
+        team_ids=team_ids,
+        games_played=games_played_as_of,
+        decay_games=resolved_roster_decay,
+    )
+    team_prior_effects = {
+        team_id: team_prior_scale * prior_offsets[team_id] * team_prior_weights[team_id]
+        for team_id in team_ids
+    }
+    market_prior_effects = {
+        team_id: market_prior_scale
+        * market_offsets[team_id]
+        * market_prior_weights[team_id]
+        for team_id in team_ids
+    }
+    roster_prior_effects = {
+        team_id: roster_prior_scale
+        * roster_offsets[team_id]
+        * roster_prior_weights[team_id]
+        for team_id in team_ids
+    }
+    combined_prior_effects = {
+        team_id: (
+            team_prior_effects[team_id]
+            + market_prior_effects[team_id]
+            + roster_prior_effects[team_id]
         )
         for team_id in team_ids
     }
@@ -420,16 +601,8 @@ def simulate_season(
             home_win_probability = (
                 _logistic(
                     future_logits[game_index]
-                    + team_prior_scale
-                    * (
-                        prior_offsets.get(game.home_team_id, 0.0)
-                        - prior_offsets.get(game.away_team_id, 0.0)
-                    )
-                    + market_prior_scale
-                    * (
-                        market_offsets.get(game.home_team_id, 0.0)
-                        - market_offsets.get(game.away_team_id, 0.0)
-                    )
+                    + combined_prior_effects.get(game.home_team_id, 0.0)
+                    - combined_prior_effects.get(game.away_team_id, 0.0)
                     + schedule_strength_scale
                     * (
                         schedule_offsets.get(game.home_team_id, 0.0)
@@ -490,6 +663,13 @@ def simulate_season(
             league_championship_prob=league_championship_berths[team_id] / trials,
             world_series_prob=world_series_berths[team_id] / trials,
             championship_prob=championships[team_id] / trials,
+            team_prior_offset=prior_offsets[team_id],
+            team_prior_weight=team_prior_weights[team_id],
+            market_prior_offset=market_offsets[team_id],
+            market_prior_weight=market_prior_weights[team_id],
+            roster_prior_offset=roster_offsets[team_id],
+            roster_prior_weight=roster_prior_weights[team_id],
+            combined_prior_offset=combined_prior_effects[team_id],
         )
         for team_id in _sort_team_ids(team_ids, teams)
     )
@@ -504,6 +684,11 @@ def simulate_season(
         team_prior_scale=team_prior_scale,
         market_prior_scale=market_prior_scale,
         schedule_strength_scale=schedule_strength_scale,
+        team_prior_decay_games=resolved_team_decay,
+        market_prior_decay_games=resolved_market_decay,
+        roster_prior_scale=roster_prior_scale,
+        roster_prior_decay_games=resolved_roster_decay,
+        input_market_sources=input_market_sources,
     )
 
 

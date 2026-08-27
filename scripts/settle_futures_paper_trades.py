@@ -208,7 +208,7 @@ def main() -> None:
         })
     
     # Display results
-    print(f"\nSettlement summary:")
+    print("\nSettlement summary:")
     
     total_staked = sum(s["stake_units"] for s in settlements)
     total_profit = sum(s["profit_units"] for s in settlements)
@@ -223,7 +223,7 @@ def main() -> None:
     print(f"  Total profit: {total_profit:+.4f} units")
     print(f"  ROI: {roi:+.1f}%")
     
-    print(f"\nIndividual results:")
+    print("\nIndividual results:")
     for s in settlements:
         result_str = "✓ WON " if s["result"] == "won" else "✗ LOST"
         print(

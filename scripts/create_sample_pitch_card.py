@@ -8,15 +8,15 @@ for a sample pitch from the 2025 season.
 import json
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+import numpy as np
 import polars as pl
 import torch
-import numpy as np
-import matplotlib.pyplot as plt
 from catboost import CatBoostClassifier, Pool
 
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES, IDX_TO_PITCH_TYPE
+from src.ml.features import IDX_TO_PITCH_TYPE, PitchFeatureEngine
 from src.ml.mdn_location_model import BivariateMDN, get_location_density
-from src.ml.pitch_predictor import GameContext, PitchPrediction, PitchPredictor
+from src.ml.pitch_predictor import GameContext, PitchPrediction
 
 # Mapping from pitch type codes to full names
 PITCH_TYPE_NAMES = {
@@ -244,7 +244,7 @@ def main():
     print(f"\nActual pitch: {actual_type} at ({actual_px:.2f}, {actual_pz:.2f})")
 
     # Create the pitch card manually (since we don't have full PitchPredictor.load())
-    print(f"\nCreating pitch card...")
+    print("\nCreating pitch card...")
     fig = create_pitch_card_manual(
         prediction=prediction,
         context=context,
@@ -260,8 +260,8 @@ def main():
 def create_pitch_card_manual(
     prediction: PitchPrediction,
     context: GameContext,
-    actual_pitch_type: str = None,
-    actual_location: tuple = None,
+    actual_pitch_type: str | None = None,
+    actual_location: tuple | None = None,
 ) -> plt.Figure:
     """Create a comprehensive pitch prediction card."""
 

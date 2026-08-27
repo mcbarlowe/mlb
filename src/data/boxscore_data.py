@@ -1,7 +1,9 @@
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 import pandas as pd
+
+from src.data._type_utils import coerce_dataframe_types
 
 
 class BoxscoreData:
@@ -11,8 +13,21 @@ class BoxscoreData:
     Transforms boxscore JSON into player-level statistics tables.
     """
 
-    def transform_batting(self, data: dict, game_pk: int = None,
-                          team_type: Literal["away", "home"] = "away") -> pd.DataFrame:
+    numeric_stat_types: ClassVar[dict[str, type]] = {
+        "stolenBasePercentage": float,
+        "caughtStealingPercentage": float,
+        "strikePercentage": float,
+        "atBatsPerHomeRun": float,
+        "runsScoredPer9": float,
+        "homeRunsPer9": float,
+    }
+
+    def transform_batting(
+        self,
+        data: dict,
+        game_pk: int | None = None,
+        team_type: Literal["away", "home"] = "away",
+    ) -> pd.DataFrame:
         """
         Transform batting boxscore data into DataFrame.
 
@@ -30,7 +45,7 @@ class BoxscoreData:
         players = team_data.get("players", {})
 
         rows = []
-        for player_key, player_data in players.items():
+        for player_data in players.values():
             stats = player_data.get("stats", {}).get("batting", {})
             if not stats:  # Skip if no batting stats
                 continue
@@ -48,14 +63,18 @@ class BoxscoreData:
                 "position_name": position.get("name"),
                 "position_abbrev": position.get("abbreviation"),
                 "batting_order": player_data.get("battingOrder"),
-                **stats  # Unpack all batting stats
+                **stats,
             }
             rows.append(row)
 
-        return pd.DataFrame(rows)
+        return coerce_dataframe_types(pd.DataFrame(rows), self.numeric_stat_types)
 
-    def transform_pitching(self, data: dict, game_pk: int = None,
-                           team_type: Literal["away", "home"] = "away") -> pd.DataFrame:
+    def transform_pitching(
+        self,
+        data: dict,
+        game_pk: int | None = None,
+        team_type: Literal["away", "home"] = "away",
+    ) -> pd.DataFrame:
         """
         Transform pitching boxscore data into DataFrame.
 
@@ -73,7 +92,7 @@ class BoxscoreData:
         players = team_data.get("players", {})
 
         rows = []
-        for player_key, player_data in players.items():
+        for player_data in players.values():
             stats = player_data.get("stats", {}).get("pitching", {})
             if not stats:  # Skip if no pitching stats
                 continue
@@ -90,14 +109,18 @@ class BoxscoreData:
                 "position_code": position.get("code"),
                 "position_name": position.get("name"),
                 "position_abbrev": position.get("abbreviation"),
-                **stats  # Unpack all pitching stats
+                **stats,
             }
             rows.append(row)
 
-        return pd.DataFrame(rows)
+        return coerce_dataframe_types(pd.DataFrame(rows), self.numeric_stat_types)
 
-    def transform_fielding(self, data: dict, game_pk: int = None,
-                           team_type: Literal["away", "home"] = "away") -> pd.DataFrame:
+    def transform_fielding(
+        self,
+        data: dict,
+        game_pk: int | None = None,
+        team_type: Literal["away", "home"] = "away",
+    ) -> pd.DataFrame:
         """
         Transform fielding boxscore data into DataFrame.
 
@@ -115,7 +138,7 @@ class BoxscoreData:
         players = team_data.get("players", {})
 
         rows = []
-        for player_key, player_data in players.items():
+        for player_data in players.values():
             stats = player_data.get("stats", {}).get("fielding", {})
             if not stats:  # Skip if no fielding stats
                 continue
@@ -132,13 +155,13 @@ class BoxscoreData:
                 "position_code": position.get("code"),
                 "position_name": position.get("name"),
                 "position_abbrev": position.get("abbreviation"),
-                **stats  # Unpack all fielding stats
+                **stats,
             }
             rows.append(row)
 
-        return pd.DataFrame(rows)
+        return coerce_dataframe_types(pd.DataFrame(rows), self.numeric_stat_types)
 
-    def transform_all(self, data: dict, game_pk: int = None) -> dict:
+    def transform_all(self, data: dict, game_pk: int | None = None) -> dict:
         """
         Transform all boxscore data (batting, pitching, fielding) for both teams.
 
@@ -152,13 +175,21 @@ class BoxscoreData:
         result = {}
 
         for team_type in ["away", "home"]:
-            result[f"{team_type}_batting"] = self.transform_batting(data, game_pk, team_type)
-            result[f"{team_type}_pitching"] = self.transform_pitching(data, game_pk, team_type)
-            result[f"{team_type}_fielding"] = self.transform_fielding(data, game_pk, team_type)
+            result[f"{team_type}_batting"] = self.transform_batting(
+                data, game_pk, team_type
+            )
+            result[f"{team_type}_pitching"] = self.transform_pitching(
+                data, game_pk, team_type
+            )
+            result[f"{team_type}_fielding"] = self.transform_fielding(
+                data, game_pk, team_type
+            )
 
         return result
 
-    def save(self, df: pd.DataFrame, output_path: Path, format: str = "parquet") -> None:
+    def save(
+        self, df: pd.DataFrame, output_path: Path, format: str = "parquet"
+    ) -> None:
         """
         Save DataFrame to file.
 
@@ -179,10 +210,13 @@ class BoxscoreData:
         elif format == "json":
             df.to_json(output_path, orient="records", lines=True)
         else:
-            raise ValueError(f"Unsupported format: {format}. Use 'parquet', 'csv', or 'json'.")
+            raise ValueError(
+                f"Unsupported format: {format}. Use 'parquet', 'csv', or 'json'."
+            )
 
-    def save_to_db(self, df: pd.DataFrame, table_name: str, db_handler,
-                   if_exists: str = "append") -> None:
+    def save_to_db(
+        self, df: pd.DataFrame, table_name: str, db_handler, if_exists: str = "append"
+    ) -> None:
         """
         Save DataFrame to the configured PostgreSQL database.
 

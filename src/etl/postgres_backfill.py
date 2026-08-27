@@ -78,9 +78,16 @@ class PendingSeason:
 
 
 class PostgresBackfill:
-    def __init__(self, db_config: PostgresConfig, raw_data_path: Path):
+    def __init__(
+        self,
+        db_config: PostgresConfig,
+        raw_data_path: Path,
+        *,
+        force_game_pks: Sequence[int] | None = None,
+    ):
         self.db_config = db_config
         self.raw_data_path = raw_data_path
+        self.force_game_pks = {int(game_pk) for game_pk in force_game_pks or ()}
         self.pitch_transformer = GameFeedData()
         self.linescore_transformer = LinescoreData()
         self.boxscore_transformer = BoxscoreData()
@@ -168,7 +175,8 @@ class PostgresBackfill:
 
         for file_path in self._discover_game_files():
             source_key = self._source_key(file_path)
-            if source_key in completed_keys:
+            game_pk = int(file_path.stem)
+            if source_key in completed_keys and game_pk not in self.force_game_pks:
                 skipped_completed += 1
                 continue
             pending_games.append(
@@ -176,7 +184,7 @@ class PostgresBackfill:
                     file_path=file_path,
                     source_key=source_key,
                     season=int(file_path.parent.name),
-                    game_pk=int(file_path.stem),
+                    game_pk=game_pk,
                 )
             )
 
@@ -670,13 +678,22 @@ def download_missing_schedules(
     return asyncio.run(download_missing_schedules_async(schedule_dir, seasons))
 
 
-def run_postgres_backfill(db_config: PostgresConfig, raw_data_path: Path) -> BackfillSummary:
+def run_postgres_backfill(
+    db_config: PostgresConfig,
+    raw_data_path: Path,
+    *,
+    force_game_pks: Sequence[int] | None = None,
+) -> BackfillSummary:
     """Backfill raw live feed JSON files into PostgreSQL with resume support."""
 
     if not raw_data_path.exists():
         raise FileNotFoundError(f"Raw data path does not exist: {raw_data_path}")
 
-    return PostgresBackfill(db_config, raw_data_path).run()
+    return PostgresBackfill(
+        db_config,
+        raw_data_path,
+        force_game_pks=force_game_pks,
+    ).run()
 
 
 def run_postgres_bulk_backfill(db_config: PostgresConfig, raw_data_path: Path) -> BulkBackfillSummary:

@@ -103,7 +103,9 @@ class PostgresHandler:
         """Create the configured schema if it does not already exist."""
 
         self.connection.execute(
-            sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(self.schema))
+            sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                sql.Identifier(self.schema)
+            )
         )
         self.connection.execute(
             sql.SQL("SET search_path TO {}, public").format(sql.Identifier(self.schema))
@@ -113,7 +115,9 @@ class PostgresHandler:
         """Drop and recreate the configured schema."""
 
         self.connection.execute(
-            sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(self.schema))
+            sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                sql.Identifier(self.schema)
+            )
         )
         self.ensure_schema()
 
@@ -263,7 +267,7 @@ class PostgresHandler:
             atBats INTEGER,
             caughtStealing INTEGER,
             stolenBases INTEGER,
-            stolenBasePercentage VARCHAR,
+            stolenBasePercentage NUMERIC,
             groundIntoDoublePlay INTEGER,
             groundIntoTriplePlay INTEGER,
             plateAppearances INTEGER,
@@ -274,7 +278,7 @@ class PostgresHandler:
             sacFlies INTEGER,
             catchersInterference INTEGER,
             pickoffs INTEGER,
-            atBatsPerHomeRun VARCHAR,
+            atBatsPerHomeRun NUMERIC,
             popOuts INTEGER,
             lineOuts INTEGER,
             note VARCHAR
@@ -312,7 +316,7 @@ class PostgresHandler:
             atBats INTEGER,
             caughtStealing INTEGER,
             stolenBases INTEGER,
-            stolenBasePercentage VARCHAR,
+            stolenBasePercentage NUMERIC,
             numberOfPitches INTEGER,
             inningsPitched VARCHAR,
             wins INTEGER,
@@ -330,15 +334,15 @@ class PostgresHandler:
             pitchesThrown INTEGER,
             balls INTEGER,
             strikes INTEGER,
-            strikePercentage VARCHAR,
+            strikePercentage NUMERIC,
             hitBatsmen INTEGER,
             balks INTEGER,
             wildPitches INTEGER,
             pickoffs INTEGER,
             rbi INTEGER,
             gamesFinished INTEGER,
-            runsScoredPer9 VARCHAR,
-            homeRunsPer9 VARCHAR,
+            runsScoredPer9 NUMERIC,
+            homeRunsPer9 NUMERIC,
             inheritedRunners INTEGER,
             inheritedRunnersScored INTEGER,
             catchersInterference INTEGER,
@@ -367,8 +371,8 @@ class PostgresHandler:
             gamesStarted INTEGER,
             caughtStealing INTEGER,
             stolenBases INTEGER,
-            stolenBasePercentage VARCHAR,
-            caughtStealingPercentage VARCHAR,
+            stolenBasePercentage NUMERIC,
+            caughtStealingPercentage NUMERIC,
             assists INTEGER,
             putOuts INTEGER,
             errors INTEGER,
@@ -609,7 +613,6 @@ class PostgresHandler:
         self.create_fielding_table()
         print("\n✓ All tables created successfully!")
 
-
     def _column_types(self, table_name: str) -> dict[str, str]:
         if table_name not in self._column_type_cache:
             with self.connection.cursor() as cursor:
@@ -626,7 +629,10 @@ class PostgresHandler:
                     for column_name, data_type in cursor.fetchall()
                 }
         return self._column_type_cache[table_name]
-    def insert_dataframe(self, df: pd.DataFrame, table_name: str, if_exists: str = "append"):
+
+    def insert_dataframe(
+        self, df: pd.DataFrame, table_name: str, if_exists: str = "append"
+    ):
         if df.empty:
             print(f"⚠ Warning: DataFrame is empty, skipping insert to {table_name}")
             return
@@ -638,24 +644,34 @@ class PostgresHandler:
                     self._qualified_table(normalized_table)
                 )
             )
-        elif if_exists == "fail" and self.table_exists(normalized_table) and self.get_row_count(normalized_table) > 0:
+        elif (
+            if_exists == "fail"
+            and self.table_exists(normalized_table)
+            and self.get_row_count(normalized_table) > 0
+        ):
             raise ValueError(f"Table {normalized_table} already contains data")
         elif if_exists != "append":
             raise ValueError(f"Unsupported if_exists mode: {if_exists}")
 
-        normalized_columns = [self._normalize_identifier(column, "column") for column in df.columns]
+        normalized_columns = [
+            self._normalize_identifier(column, "column") for column in df.columns
+        ]
         df_to_load = df.copy()
         integer_column_types = {"smallint", "integer", "bigint"}
         column_types = self._column_types(normalized_table)
         for original_column, normalized_column in zip(df.columns, normalized_columns):
             if column_types.get(normalized_column) in integer_column_types:
-                df_to_load[original_column] = df_to_load[original_column].astype("Int64")
+                df_to_load[original_column] = df_to_load[original_column].astype(
+                    "Int64"
+                )
 
         buffer = io.StringIO()
         df_to_load.to_csv(buffer, index=False, header=False, na_rep=r"\N")
         buffer.seek(0)
 
-        copy_sql = sql.SQL("COPY {} ({}) FROM STDIN WITH (FORMAT CSV, NULL '\\N')").format(
+        copy_sql = sql.SQL(
+            "COPY {} ({}) FROM STDIN WITH (FORMAT CSV, NULL '\\N')"
+        ).format(
             self._qualified_table(normalized_table),
             sql.SQL(", ").join(sql.Identifier(column) for column in normalized_columns),
         )
@@ -704,7 +720,9 @@ class PostgresHandler:
     def get_row_count(self, table_name: str) -> int:
         normalized_table = self._normalize_identifier(table_name, "table")
         result = self.connection.execute(
-            sql.SQL("SELECT COUNT(*) FROM {}").format(self._qualified_table(normalized_table))
+            sql.SQL("SELECT COUNT(*) FROM {}").format(
+                self._qualified_table(normalized_table)
+            )
         ).fetchone()
         if result is None:
             raise RuntimeError(f"Count query returned no rows for {normalized_table}")
@@ -714,13 +732,17 @@ class PostgresHandler:
         for table_name in self.managed_tables:
             if self.table_exists(table_name):
                 self.connection.execute(
-                    sql.SQL("VACUUM ANALYZE {}").format(self._qualified_table(table_name))
+                    sql.SQL("VACUUM ANALYZE {}").format(
+                        self._qualified_table(table_name)
+                    )
                 )
         print("✓ Vacuumed and analyzed managed tables")
 
     def export_table_to_parquet(self, table_name: str, output_path: Path):
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        self.query(f"SELECT * FROM {self._normalize_identifier(table_name, 'table')}").to_parquet(
+        self.query(
+            f"SELECT * FROM {self._normalize_identifier(table_name, 'table')}"
+        ).to_parquet(
             output_path,
             index=False,
         )

@@ -56,5 +56,5 @@ fi
 echo "[$(date '+%F %T')] shopping batter props"
 "$UV_BIN" "${args[@]}"
 echo "[$(date '+%F %T')] settling prop paper bets"
-"$UV_BIN" run python scripts/settle_prop_alerts.py --push --ntfy-topic "$NTFY_TOPIC" || \
+"$UV_BIN" run python scripts/settle_prop_alerts.py --push --daily-report --ntfy-topic "$NTFY_TOPIC" || \
   echo "[$(date '+%F %T')] settlement failed (non-fatal)"

@@ -45,9 +45,9 @@ python_files = ["test_*.py"]
 testpaths = ["."]
 
 [tool.ruff]
-extend-exclude = [".idea", "catboost_info", "models", "notebooks", "output"]
+extend-exclude = [".idea", "catboost_info", "models", "notebooks", "output", "*.ipynb"]
 line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-ignore = ["BLE001"]
+ignore = ["BLE001", "DTZ005", "DTZ007", "DTZ011", "EXE001", "TRY002", "TRY004"]

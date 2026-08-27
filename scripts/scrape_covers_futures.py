@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -197,7 +195,7 @@ def main() -> None:
     # Show breakdown
     from collections import Counter
     season_counts = Counter(row["season"] for row in all_rows)
-    print(f"\nBreakdown by season:")
+    print("\nBreakdown by season:")
     for season in sorted(season_counts.keys()):
         print(f"  {season}: {season_counts[season]} teams")
 

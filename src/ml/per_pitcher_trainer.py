@@ -8,7 +8,7 @@ training and inference for per-pitcher CatBoost models.
 
 import json
 from pathlib import Path
-from typing import Optional
+
 import numpy as np
 import polars as pl
 from catboost import CatBoostClassifier, Pool
@@ -55,7 +55,7 @@ class PerPitcherTrainer:
 
         # Storage for trained models
         self.pitcher_models: dict[int, CatBoostClassifier] = {}
-        self.global_model: Optional[CatBoostClassifier] = None
+        self.global_model: CatBoostClassifier | None = None
         self.pitcher_stats: dict[int, dict] = {}
 
         # Feature configuration
@@ -191,8 +191,8 @@ class PerPitcherTrainer:
         train_df: pl.DataFrame,
         val_df: pl.DataFrame,
         feature_engine,
-        pitcher_counts: Optional[pl.DataFrame] = None,
-        max_pitchers: Optional[int] = None,
+        pitcher_counts: pl.DataFrame | None = None,
+        max_pitchers: int | None = None,
     ) -> dict:
         """
         Train per-pitcher models and a global fallback model.

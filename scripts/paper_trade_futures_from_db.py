@@ -25,7 +25,7 @@ from src.betting.futures_paper_trade_store import (
     ensure_futures_paper_trades_table,
     insert_futures_paper_trades,
 )
-from src.betting.odds import american_to_decimal, no_vig_outright
+from src.betting.odds import american_to_decimal
 from src.database import PostgresConfig, PostgresHandler
 from src.sim.season import (
     SeasonProjection,

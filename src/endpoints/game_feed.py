@@ -1,5 +1,5 @@
 import asyncio
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import requests
 
@@ -29,7 +29,7 @@ class GameFeed(BaseAPI, AsyncBaseAPI):
         AsyncBaseAPI.__init__(self, concurrency_limit, *args, **kwargs)
         self.base_url = "https://statsapi.mlb.com/api/v1.1/game"
 
-    def get(self, game_pk: int, timecode: str = None, *args, **kwargs) -> dict:
+    def get(self, game_pk: int, timecode: str | None = None, *args, **kwargs) -> dict:
         """
         Fetch live game feed data for a specific game (sync).
 
@@ -65,7 +65,7 @@ class GameFeed(BaseAPI, AsyncBaseAPI):
             raise Exception(f"Request error occurred: {e}")
 
     async def get_async(
-        self, game_pk: int, timecode: str = None, **kwargs
+        self, game_pk: int, timecode: str | None = None, **kwargs
     ) -> dict:
         """
         Fetch live game feed data for a specific game (async).
@@ -94,9 +94,9 @@ class GameFeed(BaseAPI, AsyncBaseAPI):
     async def get_many_async(
         self,
         game_pks: list[int],
-        on_success: Optional[Callable[[int, dict], None]] = None,
-        on_error: Optional[Callable[[int, Exception], None]] = None,
-    ) -> list[Optional[dict]]:
+        on_success: Callable[[int, dict], None] | None = None,
+        on_error: Callable[[int, Exception], None] | None = None,
+    ) -> list[dict | None]:
         """
         Fetch multiple game feeds concurrently.
 
@@ -108,7 +108,7 @@ class GameFeed(BaseAPI, AsyncBaseAPI):
         Returns:
             list: List of results in same order as game_pks (None for failed items)
         """
-        async def fetch_one(game_pk: int) -> Optional[dict]:
+        async def fetch_one(game_pk: int) -> dict | None:
             try:
                 result = await self.get_async(game_pk)
                 if on_success:

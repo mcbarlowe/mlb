@@ -31,6 +31,7 @@ from src.betting.totals_clv import (
     TotalsClvBet,
     TotalsClvGame,
     TotalsClvSummary,
+    TotalsExecution,
     consensus_totals_line,
     summarize_totals_clv,
 )
@@ -226,7 +227,9 @@ def _summary_line(edge: float, summary: TotalsClvSummary) -> str:
     )
 
 
-def _game_row(game: TotalsClvGame) -> dict[str, float | int | str]:
+def _game_row(
+    game: TotalsClvGame, *, execution: TotalsExecution = "consensus"
+) -> dict[str, float | int | str]:
     open_line = consensus_totals_line(game.open_lines)
     close_line = consensus_totals_line(game.close_lines)
     if open_line is None or close_line is None:
@@ -234,6 +237,7 @@ def _game_row(game: TotalsClvGame) -> dict[str, float | int | str]:
     return {
         "game_pk": game.game_pk,
         "season": game.season,
+        "execution": execution,
         "open_point": open_line.point,
         "close_point": close_line.point,
         "open_prob_over": open_line.prob_over,
@@ -245,7 +249,7 @@ def _game_row(game: TotalsClvGame) -> dict[str, float | int | str]:
     }
 
 
-def _bet_row(edge: float, staking: str, bet: TotalsClvBet) -> dict[str, float | int | str | bool]:
+def _bet_row(edge: float, staking: str, bet: TotalsClvBet) -> dict[str, object]:
     return {"edge_threshold": edge, "staking": staking, **asdict(bet)}
 
 
@@ -256,14 +260,18 @@ def write_outputs(
     bets_by_key: dict[tuple[str, float], list[TotalsClvBet]],
     out_json: Path | None,
     out_csv: Path | None,
+    execution: TotalsExecution = "consensus",
 ) -> None:
     if out_json is not None:
         out_json.parent.mkdir(parents=True, exist_ok=True)
         out_json.write_text(
             json.dumps(
                 {
+                    "metadata": {"execution": execution},
                     "summaries": [asdict(summary) for summary in summaries],
-                    "games": [_game_row(game) for game in games],
+                    "games": [
+                        _game_row(game, execution=execution) for game in games
+                    ],
                     "bets": [
                         _bet_row(edge, staking, bet)
                         for (staking, edge), bets in bets_by_key.items()
@@ -283,7 +291,9 @@ def write_outputs(
         ]
         out_csv.parent.mkdir(parents=True, exist_ok=True)
         with out_csv.open("w", newline="") as handle:
-            fieldnames = list(rows[0]) if rows else ["edge_threshold", "staking"]
+            fieldnames = (
+                list(rows[0]) if rows else ["edge_threshold", "staking", "execution"]
+            )
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -296,8 +306,13 @@ def main() -> None:
     parser.add_argument("--games", type=int, default=400)
     parser.add_argument("--sims", type=int, default=500)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--edges", type=_parse_floats, default=(0.0, 0.03, 0.05, 0.08))
+    parser.add_argument(
+        "--edges", type=_parse_floats, default=(0.0, 0.03, 0.05, 0.08)
+    )
     parser.add_argument("--staking", choices=("flat", "kelly", "both"), default="both")
+    parser.add_argument(
+        "--execution", choices=("consensus", "best"), default="consensus"
+    )
     parser.add_argument("--flat-stake", type=float, default=1.0)
     parser.add_argument("--kelly-multiplier", type=float, default=0.25)
     parser.add_argument("--kelly-cap", type=float, default=0.05)
@@ -311,8 +326,14 @@ def main() -> None:
     print("Totals open-close CLV report")
     print(f"seasons: {args.seasons}")
     print(f"market coverage with open+close totals: {coverage} total={len(market_lines)}")
-    print("selection: sim-vs-consensus-open side/edge; settlement: consensus open")
-    print("CLV: selected side vs consensus close; point CLV dominates price CLV")
+    print(
+        "selection: sim-vs-consensus-open side/edge; "
+        f"execution: {args.execution}"
+    )
+    print(
+        "CLV: executed side/point vs consensus close; "
+        "point CLV dominates price CLV"
+    )
     print("Kelly staking: quarter Kelly, 5% cap, fixed bankroll/no compounding")
 
     games, outcome_dirs = build_clv_games(
@@ -336,6 +357,7 @@ def main() -> None:
             summary, bets = summarize_totals_clv(
                 games,
                 edge_threshold=edge,
+                execution=args.execution,
                 staking=staking,
                 flat_stake=args.flat_stake,
                 kelly_multiplier=args.kelly_multiplier,
@@ -351,6 +373,7 @@ def main() -> None:
         bets_by_key=bets_by_key,
         out_json=args.out_json,
         out_csv=args.out_csv,
+        execution=args.execution,
     )
 
 

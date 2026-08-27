@@ -10,7 +10,7 @@ class LinescoreData:
     Transforms linescore JSON into inning-by-inning tabular format.
     """
 
-    def transform(self, data: dict, game_pk: int = None) -> pd.DataFrame:
+    def transform(self, data: dict, game_pk: int | None = None) -> pd.DataFrame:
         """
         Transform linescore JSON into DataFrame.
 

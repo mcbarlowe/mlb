@@ -4,22 +4,18 @@ LSTM-based pitch predictor for generating predictions and pitch cards.
 This module provides inference capabilities using the trained LSTM+Attention model.
 """
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
 
-import numpy as np
-import polars as pl
-import torch
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
 
+from src.ml.features import IDX_TO_PITCH_TYPE, PITCH_TYPE_CODES, PitchFeatureEngine
 from src.ml.model import create_model
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES, IDX_TO_PITCH_TYPE
 from src.ml.pitch_predictor import (
-    GameContext,
     PITCH_TYPE_FULL_NAMES,
-    fetch_mlb_headshot,
+    GameContext,
 )
 
 
@@ -38,7 +34,7 @@ class LSTMPrediction:
     location_components: dict  # MDN mixture parameters
 
     # Attention weights (optional)
-    attention_weights: Optional[np.ndarray] = None
+    attention_weights: np.ndarray | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -80,7 +76,7 @@ class LSTMPitchPredictor:
         self.device = device
 
     @classmethod
-    def load(cls, model_dir: Union[str, Path], device: str = "cpu") -> "LSTMPitchPredictor":
+    def load(cls, model_dir: str | Path, device: str = "cpu") -> "LSTMPitchPredictor":
         """
         Load a trained LSTM predictor from disk.
 
@@ -96,7 +92,7 @@ class LSTMPitchPredictor:
         # Find the run directory
         run_dirs = list(model_dir.glob("run_*"))
         if run_dirs:
-            run_dir = sorted(run_dirs)[-1]
+            run_dir = max(run_dirs)
         else:
             run_dir = model_dir
 
@@ -189,7 +185,7 @@ class LSTMPitchPredictor:
 
         predictions = []
         batch_size = features.shape[0]
-        seq_len = features.shape[1]
+        features.shape[1]
 
         for b in range(batch_size):
             for t in range(int(lengths[b].item())):
@@ -240,7 +236,7 @@ class LSTMPitchPredictor:
         runner_on_1b: bool = False,
         runner_on_2b: bool = False,
         runner_on_3b: bool = False,
-        prev_pitches: Optional[list[dict]] = None,
+        prev_pitches: list[dict] | None = None,
         throw_side: str = "R",
         bat_side: str = "R",
     ) -> LSTMPrediction:
@@ -270,11 +266,11 @@ class LSTMPitchPredictor:
         # all the feature engineering from PitchFeatureEngine
 
         # Get pitcher/batter indices
-        pitcher_idx = self.feature_engine.pitcher_to_idx.get(pitcher_id, 0)
-        batter_idx = self.feature_engine.batter_to_idx.get(batter_id, 0)
+        self.feature_engine.pitcher_to_idx.get(pitcher_id, 0)
+        self.feature_engine.batter_to_idx.get(batter_id, 0)
 
         # Build runners bitmap
-        runners = int(runner_on_1b) + 2 * int(runner_on_2b) + 4 * int(runner_on_3b)
+        int(runner_on_1b) + 2 * int(runner_on_2b) + 4 * int(runner_on_3b)
 
         # Build basic features (this is simplified - real implementation needs full feature set)
         n_features = len(self.feature_engine.get_feature_columns())
@@ -296,9 +292,9 @@ class LSTMPitchPredictor:
         self,
         prediction: LSTMPrediction,
         context: GameContext,
-        actual_pitch_type: Optional[str] = None,
-        actual_location: Optional[tuple[float, float]] = None,
-        save_path: Optional[str] = None,
+        actual_pitch_type: str | None = None,
+        actual_location: tuple[float, float] | None = None,
+        save_path: str | None = None,
         figsize: tuple[float, float] = (14, 10),
     ) -> plt.Figure:
         """

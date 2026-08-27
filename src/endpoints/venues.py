@@ -19,7 +19,7 @@ class Venues(BaseAPI, AsyncBaseAPI):
         AsyncBaseAPI.__init__(self, concurrency_limit, *args, **kwargs)
         self.base_url = "https://statsapi.mlb.com/api/v1/venues"
 
-    def get(self, season: int = None, *args, **kwargs) -> dict:
+    def get(self, season: int | None = None, *args, **kwargs) -> dict:
         """
         Fetch venue information (sync).
 
@@ -47,7 +47,7 @@ class Venues(BaseAPI, AsyncBaseAPI):
         except requests.exceptions.RequestException as e:
             raise Exception(f"Request error occurred: {e}")
 
-    async def get_async(self, season: int = None, **kwargs) -> dict:
+    async def get_async(self, season: int | None = None, **kwargs) -> dict:
         """
         Fetch venue information (async).
 

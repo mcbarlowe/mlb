@@ -25,8 +25,6 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from scripts.fetch_futures_odds import (
-    MARKET_TYPE_MAP,
-    TEAM_NAME_ALIASES,
     _normalize_market_type,
     _normalize_team_name,
 )
@@ -248,7 +246,7 @@ def main() -> None:
             args.response_json.write_text(json.dumps(payload, indent=2))
             print(f"Saved response to {args.response_json}")
         
-        print(f"API response received")
+        print("API response received")
         if "x-requests-remaining" in headers:
             print(f"  Requests remaining: {headers['x-requests-remaining']}")
         if "x-requests-used" in headers:
@@ -274,7 +272,7 @@ def main() -> None:
     # Show breakdown by market type
     from collections import Counter
     market_counts = Counter(row["market_type"] for row in rows)
-    print(f"\nBreakdown by market:")
+    print("\nBreakdown by market:")
     for market_type, count in sorted(market_counts.items()):
         print(f"  {market_type}: {count} odds")
     

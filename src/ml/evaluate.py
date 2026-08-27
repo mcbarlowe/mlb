@@ -9,12 +9,12 @@ Provides functions for:
 """
 
 import math
-from typing import Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
+from matplotlib.patches import Ellipse
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -22,9 +22,8 @@ from sklearn.metrics import (
     f1_score,
     top_k_accuracy_score,
 )
-import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
-import seaborn as sns
+from torch import nn
+from torch.utils.data import DataLoader
 
 from src.ml.features import PITCH_TYPE_CODES
 
@@ -131,7 +130,7 @@ def compute_mdn_coverage(
     sigma = mdn_params["sigma"]  # [N, K, 2]
     rho = mdn_params["rho"]  # [N, K]
 
-    N, K, _ = mu.shape
+    _N, _K, _ = mu.shape
     targets_expanded = targets[:, None, :]  # [N, 1, 2]
 
     # Compute Mahalanobis distance for each component
@@ -290,7 +289,7 @@ def evaluate_model(
 def print_classification_report(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    labels: Optional[list[str]] = None,
+    labels: list[str] | None = None,
 ) -> str:
     """
     Print detailed classification report.
@@ -324,10 +323,10 @@ def print_classification_report(
 def plot_confusion_matrix(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    labels: Optional[list[str]] = None,
+    labels: list[str] | None = None,
     normalize: bool = True,
     figsize: tuple = (10, 8),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """
     Plot confusion matrix for pitch type predictions.
@@ -382,10 +381,10 @@ def plot_confusion_matrix(
 def plot_location_predictions(
     loc_preds: np.ndarray,
     loc_targets: np.ndarray,
-    type_preds: Optional[np.ndarray] = None,
+    type_preds: np.ndarray | None = None,
     n_samples: int = 500,
     figsize: tuple = (12, 5),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """
     Visualize predicted vs actual pitch locations.
@@ -469,7 +468,7 @@ def plot_location_predictions(
 def plot_training_history(
     history: list[dict],
     figsize: tuple = (12, 4),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """
     Plot training history curves.
@@ -548,7 +547,7 @@ def analyze_predictions_by_count(
 def sample_from_mdn(
     mdn_params: dict,
     n_samples: int = 100,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> np.ndarray:
     """
     Sample locations from MDN distribution.
@@ -600,11 +599,11 @@ def sample_from_mdn(
 
 def plot_mdn_predictions(
     mdn_params: dict,
-    targets: Optional[np.ndarray] = None,
+    targets: np.ndarray | None = None,
     n_samples: int = 20,
     figsize: tuple = (10, 10),
     confidence_level: float = 0.95,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """
     Visualize MDN predictions with uncertainty ellipses.
@@ -944,7 +943,7 @@ def plot_location_by_pitch_type(
     pitch_types: np.ndarray,
     n_samples_per_type: int = 200,
     figsize: tuple = (15, 10),
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ) -> plt.Figure:
     """
     Plot actual vs predicted locations grouped by pitch type.

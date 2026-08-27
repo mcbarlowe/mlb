@@ -6,7 +6,6 @@ that share the same feature preparation and evaluation pipeline.
 """
 
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import polars as pl
@@ -49,9 +48,9 @@ class PitchCatBoostModel:
         self.random_seed = random_seed
         self.verbose = verbose
 
-        self.type_model: Optional[CatBoostClassifier] = None
-        self.px_model: Optional[CatBoostRegressor] = None
-        self.pz_model: Optional[CatBoostRegressor] = None
+        self.type_model: CatBoostClassifier | None = None
+        self.px_model: CatBoostRegressor | None = None
+        self.pz_model: CatBoostRegressor | None = None
 
         self.feature_columns: list[str] = []
         self.categorical_features: list[str] = []
@@ -140,7 +139,6 @@ class PitchCatBoostModel:
         df: pl.DataFrame,
         feature_engine,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]]:
-        from src.ml.features import PITCH_TYPE_TO_IDX
 
         df = feature_engine.transform(df)
         df = df.with_columns([

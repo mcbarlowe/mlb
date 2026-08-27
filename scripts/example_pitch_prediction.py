@@ -23,8 +23,12 @@ import numpy as np
 import polars as pl
 import torch
 
-from src.ml.pitch_predictor import PitchPredictor, GameContext, create_pitch_card_from_row
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES
+from src.ml.features import PitchFeatureEngine
+from src.ml.pitch_predictor import (
+    GameContext,
+    PitchPredictor,
+    create_pitch_card_from_row,
+)
 
 
 def main():
@@ -44,7 +48,7 @@ def main():
     print("Models loaded successfully!")
 
     # Load some sample data for demonstration
-    print(f"\nLoading sample data from 2025 season...")
+    print("\nLoading sample data from 2025 season...")
     data_path = Path(args.data_path) / "2025"
     df = pl.scan_parquet(str(data_path / "*.parquet")).head(1000).collect()
     print(f"Loaded {len(df):,} pitches")
@@ -96,7 +100,7 @@ def main():
 
     # Make predictions for sample pitches
     print(f"\n{'=' * 70}")
-    print(f"SAMPLE PREDICTIONS")
+    print("SAMPLE PREDICTIONS")
     print(f"{'=' * 70}")
 
     # Select random examples
@@ -127,12 +131,12 @@ def main():
 
         print(f"\n--- Pitch {i+1} ---")
         print(f"Actual: {actual_type} at ({actual_px:.2f}, {actual_pz:.2f})")
-        print(f"\nPitch Type Prediction:")
+        print("\nPitch Type Prediction:")
         for pitch_type, prob in prediction.top_3_types:
             marker = " <--" if pitch_type == actual_type else ""
             print(f"  {pitch_type}: {prob:.1%}{marker}")
 
-        print(f"\nLocation Prediction:")
+        print("\nLocation Prediction:")
         print(f"  Expected: ({prediction.location_point[0]:.2f}, {prediction.location_point[1]:.2f})")
         print(f"  Mode:     ({prediction.location_mode[0]:.2f}, {prediction.location_mode[1]:.2f})")
         print(f"  Actual:   ({actual_px:.2f}, {actual_pz:.2f})")
@@ -158,7 +162,7 @@ def main():
 
             # Full pitch card with game context
             card_path = Path(args.model_dir) / "example_pitch_card.png"
-            fig = create_pitch_card_from_row(
+            create_pitch_card_from_row(
                 predictor,
                 row,
                 catboost_features,
@@ -169,7 +173,7 @@ def main():
 
     # Batch prediction example
     print(f"\n{'=' * 70}")
-    print(f"BATCH PREDICTION EXAMPLE")
+    print("BATCH PREDICTION EXAMPLE")
     print(f"{'=' * 70}")
 
     batch_size = min(100, len(df))
@@ -205,7 +209,7 @@ def main():
     # Manual Pitch Card Example
     # =========================================================================
     print(f"\n{'=' * 70}")
-    print(f"MANUAL PITCH CARD EXAMPLE")
+    print("MANUAL PITCH CARD EXAMPLE")
     print(f"{'=' * 70}")
 
     # Demonstrate creating a pitch card with manually specified context

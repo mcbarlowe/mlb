@@ -1,5 +1,5 @@
 import asyncio
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import pandas as pd
 import requests
@@ -63,9 +63,9 @@ class LiveFeed(BaseAPI, AsyncBaseAPI):
     async def extract_many_async(
         self,
         game_ids: list[int],
-        on_success: Optional[Callable[[int, dict], None]] = None,
-        on_error: Optional[Callable[[int, Exception], None]] = None,
-    ) -> list[Optional[dict]]:
+        on_success: Callable[[int, dict], None] | None = None,
+        on_error: Callable[[int, Exception], None] | None = None,
+    ) -> list[dict | None]:
         """
         Extract multiple game feeds concurrently.
 
@@ -77,7 +77,7 @@ class LiveFeed(BaseAPI, AsyncBaseAPI):
         Returns:
             list: List of results in same order as game_ids (None for failed items)
         """
-        async def fetch_one(game_id: int) -> Optional[dict]:
+        async def fetch_one(game_id: int) -> dict | None:
             try:
                 result = await self.extract_async(game_id)
                 if on_success:

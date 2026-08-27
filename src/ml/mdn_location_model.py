@@ -8,15 +8,14 @@ The MDN outputs parameters for a mixture of bivariate Gaussians,
 allowing for multimodal location predictions (e.g., inside vs outside corner).
 """
 
+
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
-from typing import Optional
-import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
 from scipy import stats
+from torch import nn
+from torch.utils.data import DataLoader
 
 
 class BivariateMDN(nn.Module):
@@ -33,7 +32,7 @@ class BivariateMDN(nn.Module):
     def __init__(
         self,
         n_features: int,
-        hidden_dims: list[int] = [256, 128, 64],
+        hidden_dims: list[int] | None = None,
         n_components: int = 5,
         dropout: float = 0.2,
     ):
@@ -46,6 +45,8 @@ class BivariateMDN(nn.Module):
             n_components: Number of Gaussian mixture components.
             dropout: Dropout rate.
         """
+        if hidden_dims is None:
+            hidden_dims = [256, 128, 64]
         super().__init__()
 
         self.n_components = n_components
@@ -364,10 +365,10 @@ class MDNLocationTrainer:
 def plot_density_prediction(
     model: BivariateMDN,
     features: torch.Tensor,
-    target: Optional[torch.Tensor] = None,
+    target: torch.Tensor | None = None,
     n_samples: int = 1000,
     title: str = "Predicted Pitch Location Density",
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
     ax=None,
 ):
     """
@@ -397,7 +398,7 @@ def plot_density_prediction(
         samples = samples[0].cpu().numpy()  # [n_samples, 2]
 
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 10))
+        _fig, ax = plt.subplots(figsize=(8, 10))
 
     # Create KDE
     px_samples = samples[:, 0]
@@ -417,7 +418,7 @@ def plot_density_prediction(
         # Plot density contours
         ax.contourf(PX, PZ, density, levels=20, cmap='YlOrRd', alpha=0.8)
         ax.contour(PX, PZ, density, levels=10, colors='darkred', alpha=0.5, linewidths=0.5)
-    except:
+    except Exception:
         # Fallback to scatter if KDE fails
         ax.scatter(px_samples, pz_samples, alpha=0.3, s=5, c='red')
 
@@ -685,10 +686,10 @@ def predict_location_batch(
 def plot_multiple_densities(
     model: BivariateMDN,
     features_list: list[torch.Tensor],
-    targets_list: Optional[list[torch.Tensor]] = None,
-    titles: Optional[list[str]] = None,
+    targets_list: list[torch.Tensor] | None = None,
+    titles: list[str] | None = None,
     n_samples: int = 500,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Plot multiple density predictions in a grid.

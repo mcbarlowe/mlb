@@ -1,6 +1,6 @@
 import asyncio
 import random
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import httpx
 
@@ -15,7 +15,6 @@ class BaseAPI:
         """
         Initialize the base API endpoint.
         """
-        pass
 
     def get(self, *args, **kwargs):
         """
@@ -51,8 +50,8 @@ class AsyncBaseAPI:
             concurrency_limit: Maximum concurrent requests (default 15)
         """
         self.concurrency_limit = concurrency_limit
-        self._semaphore: Optional[asyncio.Semaphore] = None
-        self._client: Optional[httpx.AsyncClient] = None
+        self._semaphore: asyncio.Semaphore | None = None
+        self._client: httpx.AsyncClient | None = None
         self.base_url: str = ""
 
     async def __aenter__(self):
@@ -77,8 +76,8 @@ class AsyncBaseAPI:
     async def _request_with_retry(
         self,
         url: str,
-        params: Optional[dict] = None,
-        headers: Optional[dict] = None,
+        params: dict | None = None,
+        headers: dict | None = None,
         max_retries: int = 3,
         base_delay: float = 1.0,
     ) -> dict:
@@ -147,8 +146,8 @@ class AsyncBaseAPI:
     async def get_many_async(
         self,
         items: list,
-        on_success: Optional[Callable] = None,
-        on_error: Optional[Callable] = None,
+        on_success: Callable | None = None,
+        on_error: Callable | None = None,
     ) -> list:
         """
         Fetch multiple items concurrently.

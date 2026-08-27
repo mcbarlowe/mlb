@@ -113,6 +113,8 @@ class _PitchingStaff:
         elif not self.is_starter and inning != self._entered_inning:
             self.current = self._select(inning, innings_total, lead, next_bat_side)
             self._entered_inning = inning
+        if self.current is None:
+            self.current = self.starter
         return self.current
 
     def _select(
@@ -216,6 +218,55 @@ class GameSimulator:
                 return GameResult(away_team.runs, home_team.runs, inning, tie=True)
             inning += 1
 
+    def simulate_prefix(
+        self, away: Lineup, home: Lineup, innings: int = 5
+    ) -> GameResult:
+        """Simulate a fixed regulation prefix without final-inning shortcuts.
+
+        This is for derivative markets such as first-five totals: every inning
+        in the prefix plays both top and bottom halves, including bottom five
+        when the home team is already ahead. Prefix simulations never use
+        extra innings or ghost runners.
+        """
+        if innings < 1:
+            raise ValueError("innings must be positive")
+        cfg = self._config
+        if innings > cfg.innings:
+            raise ValueError("prefix innings cannot exceed regulation innings")
+
+        away_team = _BattingTeam(away)
+        home_team = _BattingTeam(home)
+        home_staff = _PitchingStaff(home.starter, home.bullpen, home.relievers)
+        away_staff = _PitchingStaff(away.starter, away.bullpen, away.relievers)
+
+        for inning in range(1, innings + 1):
+            self._play_half_inning(
+                inning,
+                is_top=True,
+                batting=away_team,
+                staff=home_staff,
+                opponent=home_team,
+                allow_walkoff=False,
+                use_ghost_runner=False,
+            )
+            self._play_half_inning(
+                inning,
+                is_top=False,
+                batting=home_team,
+                staff=away_staff,
+                opponent=away_team,
+                allow_walkoff=False,
+                use_ghost_runner=False,
+            )
+
+        return GameResult(
+            away_team.runs,
+            home_team.runs,
+            innings,
+            tie=away_team.runs == home_team.runs,
+        )
+
+
     def _play_half_inning(
         self,
         inning: int,
@@ -223,10 +274,15 @@ class GameSimulator:
         batting: _BattingTeam,
         staff: _PitchingStaff,
         opponent: _BattingTeam,
+        *,
+        allow_walkoff: bool = True,
+        use_ghost_runner: bool = True,
     ) -> bool:
         """Play one half-inning; returns True on a walk-off end."""
         cfg = self._config
-        runners = 2 if (cfg.ghost_runner and inning > cfg.innings) else 0
+        runners = (
+            2 if (use_ghost_runner and cfg.ghost_runner and inning > cfg.innings) else 0
+        )
         outs = 0
         while outs < 3:
             due = batting.lineup.batters[batting.slot % 9]
@@ -248,7 +304,12 @@ class GameSimulator:
             transition = self._engine.sample(pa.outcome, runners, outs)
             runners, outs = transition.runners_after, transition.outs_after
             batting.runs += transition.runs
-            if not is_top and inning >= cfg.innings and batting.runs > opponent.runs:
+            if (
+                allow_walkoff
+                and not is_top
+                and inning >= cfg.innings
+                and batting.runs > opponent.runs
+            ):
                 return True  # walk-off
         return False
 
@@ -263,6 +324,20 @@ class GameSimulator:
         if setter is not None:
             setter(environment)
         return [self.simulate(away, home) for _ in range(n)]
+
+    def simulate_prefix_many(
+        self,
+        away: Lineup,
+        home: Lineup,
+        n: int,
+        *,
+        innings: int = 5,
+        environment: dict[str, float] | None = None,
+    ) -> list[GameResult]:
+        setter = getattr(self._factory, "set_environment", None)
+        if setter is not None:
+            setter(environment)
+        return [self.simulate_prefix(away, home, innings=innings) for _ in range(n)]
 
 
 def summarize(results: list[GameResult]) -> dict:

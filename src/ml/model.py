@@ -11,8 +11,8 @@ Includes attention-based variant for improved sequence modeling.
 import math
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
@@ -194,7 +194,7 @@ class PitchPredictor(nn.Module):
         n_layers: int = 2,
         dropout: float = 0.3,
         n_location_components: int = 3,
-        feature_indices: dict = None,
+        feature_indices: dict | None = None,
     ):
         """
         Initialize the model.
@@ -325,7 +325,7 @@ class PitchPredictor(nn.Module):
             - pitch_type_logits: [batch, seq_len, n_pitch_types]
             - mdn_params: dict with keys 'pi', 'mu', 'sigma', 'rho'
         """
-        batch_size, seq_len, n_features = features.shape
+        _batch_size, seq_len, _n_features = features.shape
 
         # Extract embedding indices using stored positions
         pitcher_idx = features[:, :, self.pitcher_idx_pos].long().clamp(
@@ -411,7 +411,7 @@ class PitchPredictorWithAttention(nn.Module):
         n_location_components: int = 3,
         n_attention_heads: int = 4,
         n_attention_layers: int = 1,
-        feature_indices: dict = None,
+        feature_indices: dict | None = None,
     ):
         """
         Initialize the attention-based model.
@@ -532,7 +532,7 @@ class PitchPredictorWithAttention(nn.Module):
         Returns:
             Tuple of (pitch_type_logits, mdn_params, attention_weights).
         """
-        batch_size, seq_len, n_features = features.shape
+        _batch_size, seq_len, _n_features = features.shape
 
         # Extract embedding indices
         pitcher_idx = features[:, :, self.pitcher_idx_pos].long().clamp(
@@ -613,9 +613,9 @@ class HierarchicalMDN(nn.Module):
     """
 
     # Pitch family assignments (indices into PITCH_TYPE_CODES)
-    FASTBALL_INDICES = [0, 1, 2]  # FF, SI, FC
-    OFFSPEED_INDICES = [3, 8]     # CH, FS
-    BREAKING_INDICES = [4, 5, 6, 7]  # SL, CU, KC, ST
+    FASTBALL_INDICES = (0, 1, 2)  # FF, SI, FC
+    OFFSPEED_INDICES = (3, 8)  # CH, FS
+    BREAKING_INDICES = (4, 5, 6, 7)  # SL, CU, KC, ST
     # KN (9) and OTHER (10) use a generic head
 
     def __init__(
@@ -765,8 +765,6 @@ class HierarchicalMDN(nn.Module):
 
         # Combine all components into single MDN
         # Stack parameters from all families
-        K = self.n_components_per_family
-        total_K = self.total_components
 
         # Combine mixture weights (scale by family weight)
         # Each family's pi gets multiplied by its family weight
@@ -837,7 +835,7 @@ class PitchPredictorEnhanced(nn.Module):
         n_layers: int = 2,
         dropout: float = 0.3,
         n_location_components: int = 2,  # Components per family
-        feature_indices: dict = None,
+        feature_indices: dict | None = None,
         use_attention: bool = False,
         n_attention_heads: int = 4,
         n_attention_layers: int = 1,
@@ -947,7 +945,7 @@ class PitchPredictorEnhanced(nn.Module):
         Returns:
             Tuple of (pitch_type_logits, mdn_params, attention_weights).
         """
-        batch_size, seq_len, n_features = features.shape
+        _batch_size, seq_len, _n_features = features.shape
 
         # Extract embedding indices
         pitcher_idx = features[:, :, self.pitcher_idx_pos].long().clamp(
@@ -1029,7 +1027,7 @@ class PitchPredictorSimple(nn.Module):
         hidden_dim: int = 128,
         dropout: float = 0.3,
         n_location_components: int = 3,
-        feature_indices: dict = None,
+        feature_indices: dict | None = None,
     ):
         super().__init__()
 
@@ -1135,7 +1133,7 @@ def create_model(
     n_batters: int,
     n_features: int,
     model_type: str = "lstm",
-    feature_indices: dict = None,
+    feature_indices: dict | None = None,
     **kwargs,
 ) -> nn.Module:
     """

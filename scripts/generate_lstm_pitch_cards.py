@@ -23,8 +23,7 @@ import polars as pl
 import torch
 from tqdm import tqdm
 
-from src.ml.pitch_predictor import PitchPredictor, GameContext
-from src.ml.features import PITCH_TYPE_CODES
+from src.ml.pitch_predictor import GameContext, PitchPredictor
 
 
 def load_sample_at_bats(
@@ -135,7 +134,7 @@ def get_context_from_row(row: pl.DataFrame) -> GameContext:
         date_str = str(date_val)
         try:
             if 'T' in date_str:
-                dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                dt = datetime.fromisoformat(date_str)
             else:
                 dt = datetime.strptime(date_str[:10], '%Y-%m-%d')
             return dt.strftime('%B %d, %Y')

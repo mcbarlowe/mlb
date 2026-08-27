@@ -11,10 +11,10 @@ Uses async/await throughout for concurrent operations.
 
 import asyncio
 import json
-from datetime import date, datetime
+from collections.abc import Callable
+from datetime import date
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
 
 import aiofiles
 from tqdm import tqdm
@@ -110,8 +110,8 @@ class DailyPipeline:
         poll_interval: float = 3.0,
         output_dir: Path = Path("data/raw/livefeeds"),
         processed_dir: Path = Path("data/processed/livefeeds"),
-        on_game_complete: Optional[Callable[[int, dict], None]] = None,
-        on_game_update: Optional[Callable[[int, dict, GameState], None]] = None,
+        on_game_complete: Callable[[int, dict], None] | None = None,
+        on_game_update: Callable[[int, dict, GameState], None] | None = None,
     ):
         """
         Initialize the daily pipeline.
@@ -131,8 +131,8 @@ class DailyPipeline:
         self.on_game_complete = on_game_complete
         self.on_game_update = on_game_update
 
-        self._schedule: Optional[Schedule] = None
-        self._game_feed: Optional[GameFeed] = None
+        self._schedule: Schedule | None = None
+        self._game_feed: GameFeed | None = None
         self._transformer = GameFeedData()
 
     async def __aenter__(self):
@@ -263,8 +263,8 @@ class DailyPipeline:
         self,
         live_games: dict[int, dict],
         season: str,
-        stop_event: Optional[asyncio.Event] = None,
-        scheduled_games: Optional[set[int]] = None,
+        stop_event: asyncio.Event | None = None,
+        scheduled_games: set[int] | None = None,
     ) -> dict[int, dict]:
         """
         Poll live games until they complete, optionally monitoring scheduled games.
@@ -407,8 +407,8 @@ class DailyPipeline:
         self,
         target_date: date,
         skip_existing: bool = True,
-        stop_event: Optional[asyncio.Event] = None,
-        on_game_start: Optional[Callable[[int, dict], None]] = None,
+        stop_event: asyncio.Event | None = None,
+        on_game_start: Callable[[int, dict], None] | None = None,
     ) -> dict:
         """
         Monitor all games for a date until every game completes.
@@ -500,7 +500,7 @@ class DailyPipeline:
             else:
                 other_games.append({"game_pk": game_pk, "state": state.value})
 
-        print(f"\nInitial game states:")
+        print("\nInitial game states:")
         print(f"  - Completed: {len(completed_games)}")
         print(f"  - Live: {len(live_games)}")
         print(f"  - Scheduled: {len(scheduled_games)}")
@@ -551,7 +551,7 @@ class DailyPipeline:
         target_date: date,
         skip_existing: bool = True,
         poll_live: bool = True,
-        stop_event: Optional[asyncio.Event] = None,
+        stop_event: asyncio.Event | None = None,
     ) -> dict:
         """
         Run the full pipeline for a specific date.
@@ -634,7 +634,7 @@ class DailyPipeline:
             else:
                 other_games.append({"game_pk": game_pk, "state": state.value})
 
-        print(f"\nGame states:")
+        print("\nGame states:")
         print(f"  - Completed: {len(completed_games)}")
         print(f"  - Live: {len(live_games)}")
         print(f"  - Scheduled: {len(scheduled_games)}")
@@ -677,7 +677,7 @@ class DailyPipeline:
 
 
 async def run_daily_pipeline_async(
-    target_date: Optional[date] = None,
+    target_date: date | None = None,
     concurrency_limit: int = 15,
     poll_interval: float = 30.0,
     skip_existing: bool = True,
@@ -713,7 +713,7 @@ async def run_daily_pipeline_async(
 
 
 def run_daily_pipeline(
-    target_date: Optional[date] = None,
+    target_date: date | None = None,
     concurrency_limit: int = 15,
     poll_interval: float = 30.0,
     skip_existing: bool = True,
@@ -826,7 +826,7 @@ def run_date_range(
 
 
 async def monitor_full_day_async(
-    target_date: Optional[date] = None,
+    target_date: date | None = None,
     concurrency_limit: int = 15,
     poll_interval: float = 30.0,
     skip_existing: bool = True,
@@ -866,7 +866,7 @@ async def monitor_full_day_async(
 
 
 def monitor_full_day(
-    target_date: Optional[date] = None,
+    target_date: date | None = None,
     concurrency_limit: int = 15,
     poll_interval: float = 30.0,
     skip_existing: bool = True,

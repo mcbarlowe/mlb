@@ -277,6 +277,8 @@ class GameFeedData:
             if index >= len(play_events):
                 continue
             pitch = play_events[index]
+            if pitch.get("isPitch") is not True:
+                continue
             pitch_info = self._process_pitch_data(pitch)
 
             # Merge game_info, play_info, and pitch_info
@@ -290,7 +292,9 @@ class GameFeedData:
 
         return pitches
 
-    def _process_plays_data(self, plays: list, game_info: dict | None = None) -> pd.DataFrame:
+    def _process_plays_data(
+        self, plays: list, game_info: dict | None = None
+    ) -> pd.DataFrame:
         """
         Process all plays and return structured DataFrame.
 
@@ -308,8 +312,9 @@ class GameFeedData:
 
         return pd.DataFrame(rows)
 
-    def transform(self, data: dict, game_id: int | None = None,
-                  season: int | None = None) -> pd.DataFrame:
+    def transform(
+        self, data: dict, game_id: int | None = None, season: int | None = None
+    ) -> pd.DataFrame:
         """
         Transform game feed JSON into pitch-level DataFrame.
 
@@ -355,7 +360,9 @@ class GameFeedData:
 
         return pitches_df
 
-    def save(self, df: pd.DataFrame, output_path: Path, format: str = "parquet") -> None:
+    def save(
+        self, df: pd.DataFrame, output_path: Path, format: str = "parquet"
+    ) -> None:
         """
         Save DataFrame to file.
 
@@ -376,9 +383,13 @@ class GameFeedData:
         elif format == "json":
             df.to_json(output_path, orient="records", lines=True)
         else:
-            raise ValueError(f"Unsupported format: {format}. Use 'parquet', 'csv', or 'json'.")
+            raise ValueError(
+                f"Unsupported format: {format}. Use 'parquet', 'csv', or 'json'."
+            )
 
-    def save_to_db(self, df: pd.DataFrame, db_handler, if_exists: str = "append") -> None:
+    def save_to_db(
+        self, df: pd.DataFrame, db_handler, if_exists: str = "append"
+    ) -> None:
         """
         Save DataFrame to the configured PostgreSQL database.
 

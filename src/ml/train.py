@@ -5,16 +5,16 @@ Provides training loop, loss functions, and utilities for model checkpointing.
 """
 
 import math
-from pathlib import Path
-from typing import Optional
 import time
+from pathlib import Path
 
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch import nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 
 def _safe_loader_len(loader: DataLoader) -> int | None:
     """Return loader length when available, else None for streaming loaders."""
@@ -129,7 +129,7 @@ class PitchPredictionLoss(nn.Module):
         self,
         type_weight: float = 1.0,
         location_weight: float = 0.5,
-        class_weights: Optional[torch.Tensor] = None,
+        class_weights: torch.Tensor | None = None,
     ):
         """
         Initialize the loss function.
@@ -170,7 +170,7 @@ class PitchPredictionLoss(nn.Module):
         location_target = targets[:, :, 1:3]
 
         # Reshape for cross-entropy
-        batch_size, seq_len, n_classes = pitch_type_logits.shape
+        _batch_size, _seq_len, n_classes = pitch_type_logits.shape
         logits_flat = pitch_type_logits.reshape(-1, n_classes)
         type_target_flat = pitch_type_target.reshape(-1)
         mask_flat = mask.reshape(-1)
@@ -213,8 +213,8 @@ class PitchPredictionTrainer:
         weight_decay: float = 1e-4,
         type_weight: float = 1.0,
         location_weight: float = 0.5,
-        checkpoint_dir: Optional[Path] = None,
-        class_weights: Optional[torch.Tensor] = None,
+        checkpoint_dir: Path | None = None,
+        class_weights: torch.Tensor | None = None,
     ):
         """
         Initialize the trainer.
@@ -359,7 +359,7 @@ class PitchPredictionTrainer:
             pitch_type_logits, mdn_params = self.model(features, lengths, mask)
 
             # Compute loss
-            loss, loss_dict = self.loss_fn(
+            _loss, loss_dict = self.loss_fn(
                 pitch_type_logits, mdn_params, targets, mask
             )
 
@@ -499,15 +499,15 @@ class PitchPredictionTrainer:
 
 
 def train_model(
-    data_path: Optional[str] = None,
-    seasons: Optional[list[str]] = None,
+    data_path: str | None = None,
+    seasons: list[str] | None = None,
     batch_size: int = 64,
     n_epochs: int = 50,
     learning_rate: float = 1e-3,
     hidden_dim: int = 128,
     n_layers: int = 2,
     dropout: float = 0.3,
-    sample_frac: Optional[float] = None,
+    sample_frac: float | None = None,
     device: str = "auto",
 ) -> dict:
     """

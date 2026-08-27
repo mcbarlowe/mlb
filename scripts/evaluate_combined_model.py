@@ -17,17 +17,17 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import json
-import torch
-import numpy as np
-import polars as pl
 
+import numpy as np
+import torch
+
+from src.ml.cross_validation import TimeSeriesCrossValidator
+from src.ml.features import PITCH_TYPE_CODES
 from src.ml.model import create_model
 from src.ml.pitch_type_location_model import (
     PitchTypeConditionedMDN,
     PitchTypeThenLocationPredictor,
 )
-from src.ml.cross_validation import TimeSeriesCrossValidator
-from src.ml.features import PitchFeatureEngine, PITCH_TYPE_CODES
 
 
 def get_device() -> torch.device:
@@ -137,7 +137,7 @@ def main():
     print("=" * 70)
 
     print("\nLoading pitch type model (LSTM+Attention)...")
-    pitch_type_model, pt_config, pt_checkpoint = load_pitch_type_model(pitch_type_model_dir, device)
+    pitch_type_model, pt_config, _pt_checkpoint = load_pitch_type_model(pitch_type_model_dir, device)
     print(f"  Model type: {pt_config.get('model_type', 'lstm_attention')}")
     print(f"  Hidden dim: {pt_config['hidden_dim']}")
 
@@ -193,7 +193,6 @@ def main():
 
     all_type_preds = []
     all_type_targets = []
-    all_loc_preds = []
     all_loc_targets = []
 
     with torch.no_grad():
@@ -223,7 +222,7 @@ def main():
             output = combined_model(features, lengths, mask, location_features=loc_features_flat)
 
             # Extract predictions for valid positions (where mask is True)
-            batch_size, seq_len = mask.shape
+            batch_size, _seq_len = mask.shape
 
             for b in range(batch_size):
                 valid_len = lengths[b].item()
@@ -256,7 +255,7 @@ def main():
     print("RESULTS")
     print("=" * 70)
 
-    print(f"\nPitch Type Classification:")
+    print("\nPitch Type Classification:")
     print(f"  Accuracy: {accuracy:.4f} ({accuracy*100:.1f}%)")
     print(f"  Total predictions: {len(all_type_preds):,}")
 
@@ -271,7 +270,7 @@ def main():
     print("\nPitch Type Model (standalone):")
     print("  Accuracy: 72.3%")
 
-    print(f"\nCombined Pipeline:")
+    print("\nCombined Pipeline:")
     print(f"  Accuracy: {accuracy*100:.1f}%")
 
     print("\nLocation Model Comparison:")
