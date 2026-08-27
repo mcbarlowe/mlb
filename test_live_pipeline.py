@@ -20,6 +20,7 @@ from src.live.publisher import DryRunPublisher, PredictionPost, ResultPost
 def _pitch_event(pitch_number: int, balls: int, strikes: int, code: str) -> dict:
     return {
         "pitchNumber": pitch_number,
+        "isPitch": True,
         "playId": f"play-{pitch_number}",
         "details": {
             "description": "called_strike" if strikes else "ball",
@@ -180,14 +181,16 @@ def test_build_live_snapshot_handles_first_pitch_of_at_bat():
 
 def test_pending_row_feature_engineering_uses_prior_pitches_in_ab():
     from src.live.predictor import LiveNextPitchPredictor
-
-    predictor = LiveNextPitchPredictor(
-        "models/attention_full/run_20260119_124719",
-        "models/pitch_type_location_20260121_003206",
-    )
+    from src.ml.features import PitchFeatureEngine
 
     snapshot = build_live_snapshot(_live_feed(current_pitches=2, balls=1, strikes=2))
     assert snapshot is not None
+
+    predictor = LiveNextPitchPredictor.__new__(LiveNextPitchPredictor)
+    engine = PitchFeatureEngine().fit(snapshot.frame)
+    predictor.pitch_predictor = type(
+        "FeatureOnlyPitchPredictor", (), {"feature_engine": engine}
+    )()
 
     at_bat = predictor._at_bat_features(snapshot).sort("pitch_number")
     pending = at_bat.row(-1, named=True)
@@ -202,14 +205,16 @@ def test_pending_row_feature_engineering_uses_prior_pitches_in_ab():
 
 def test_pending_row_feature_engineering_handles_first_pitch_without_history():
     from src.live.predictor import LiveNextPitchPredictor
-
-    predictor = LiveNextPitchPredictor(
-        "models/attention_full/run_20260119_124719",
-        "models/pitch_type_location_20260121_003206",
-    )
+    from src.ml.features import PitchFeatureEngine
 
     snapshot = build_live_snapshot(_live_feed(current_pitches=0, balls=0, strikes=0))
     assert snapshot is not None
+
+    predictor = LiveNextPitchPredictor.__new__(LiveNextPitchPredictor)
+    engine = PitchFeatureEngine().fit(snapshot.frame)
+    predictor.pitch_predictor = type(
+        "FeatureOnlyPitchPredictor", (), {"feature_engine": engine}
+    )()
 
     at_bat = predictor._at_bat_features(snapshot).sort("pitch_number")
     pending = at_bat.row(-1, named=True)

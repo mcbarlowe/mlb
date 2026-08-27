@@ -42,6 +42,13 @@ from shop_batter_props import (
     _norm_name,
 )
 
+from src.betting.prop_settlement import (
+    kelly_prop_stake_units,
+    prop_profit,
+    resolve_prop_won,
+    summarize_prop_bet_rows,
+    summarize_prop_kelly,
+)
 from src.database import PostgresConfig
 
 ET = ZoneInfo("America/New_York")
@@ -89,39 +96,23 @@ class ArbitrageSummary:
         return self.all_profit / self.starting_bankroll
 
 
-def _load_arbitrage_summary(cur, today, starting_bankroll: float) -> ArbitrageSummary | None:
-    cur.execute("SELECT to_regclass('betting.arbitrage_paper_bets')")
-    if cur.fetchone()[0] is None:
-        return None
-    cur.execute(
-        """
-        SELECT
-            count(*) FILTER (
-                WHERE (created_at AT TIME ZONE 'America/New_York')::date = %s::date
-            )::int AS today_bets,
-            coalesce(sum(total_stake) FILTER (
-                WHERE (created_at AT TIME ZONE 'America/New_York')::date = %s::date
-            ), 0)::float8 AS today_stake,
-            coalesce(sum(expected_profit) FILTER (
-                WHERE (created_at AT TIME ZONE 'America/New_York')::date = %s::date
-            ), 0)::float8 AS today_profit,
-            count(*)::int AS all_bets,
-            coalesce(sum(total_stake), 0)::float8 AS all_stake,
-            coalesce(sum(expected_profit), 0)::float8 AS all_profit
-        FROM betting.arbitrage_paper_bets
-        """,
-        (today, today, today),
-    )
-    row = cur.fetchone()
-    return ArbitrageSummary(
-        today_bets=int(row[0]),
-        today_stake=float(row[1]),
-        today_profit=float(row[2]),
-        all_bets=int(row[3]),
-        all_stake=float(row[4]),
-        all_profit=float(row[5]),
-        starting_bankroll=starting_bankroll,
-    )
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return float(value)
+
+
+def _format_money(value: float) -> str:
+    sign = "+" if value >= 0.0 else "-"
+    return f"{sign}${abs(value):,.2f}"
+
+
+def _format_profit_roi(profit: float, roi: float | None) -> str:
+    profit_text = _format_money(profit)
+    if roi is None:
+        return f"{profit_text} (n/a stake ROI)"
+    return f"{profit_text} ({roi:+.1%} stake ROI)"
 
 
 def _format_arbitrage_summary(summary: ArbitrageSummary) -> str:
@@ -134,18 +125,6 @@ def _format_arbitrage_summary(summary: ArbitrageSummary) -> str:
         f"bankroll {_format_money(summary.current_bankroll)} "
         f"({summary.all_bankroll_return:+.1%})"
     )
-
-
-def _format_profit_roi(profit: float, roi: float | None) -> str:
-    profit_text = _format_money(profit)
-    if roi is None:
-        return f"{profit_text} (n/a stake ROI)"
-    return f"{profit_text} ({roi:+.1%} stake ROI)"
-
-
-def _format_money(value: float) -> str:
-    sign = "+" if value >= 0.0 else "-"
-    return f"{sign}${abs(value):,.2f}"
 
 
 def _format_unit_bankroll(
@@ -164,11 +143,49 @@ def _format_unit_bankroll(
     return f"{text}; today {today_net:+.2f}u ({today_net / today_start:+.1%})"
 
 
-def _env_float(name: str, default: float) -> float:
-    value = os.getenv(name)
-    if value is None or not value.strip():
-        return default
-    return float(value)
+def _load_arbitrage_summary(
+    config: PostgresConfig,
+    today: str,
+    starting_bankroll: float,
+) -> ArbitrageSummary | None:
+    conn = _connect(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('betting.arbitrage_paper_bets')")
+            if cur.fetchone()[0] is None:
+                return None
+            cur.execute(
+                """
+                SELECT
+                    count(*) FILTER (
+                        WHERE (created_at AT TIME ZONE 'America/New_York')::date = %s::date
+                    )::int AS today_bets,
+                    coalesce(sum(total_stake) FILTER (
+                        WHERE (created_at AT TIME ZONE 'America/New_York')::date = %s::date
+                    ), 0)::float8 AS today_stake,
+                    coalesce(sum(expected_profit) FILTER (
+                        WHERE (created_at AT TIME ZONE 'America/New_York')::date = %s::date
+                    ), 0)::float8 AS today_profit,
+                    count(*)::int AS all_bets,
+                    coalesce(sum(total_stake), 0)::float8 AS all_stake,
+                    coalesce(sum(expected_profit), 0)::float8 AS all_profit
+                FROM betting.arbitrage_paper_bets
+                """,
+                (today, today, today),
+            )
+            row = cur.fetchone()
+            return ArbitrageSummary(
+                today_bets=int(row[0]),
+                today_stake=float(row[1]),
+                today_profit=float(row[2]),
+                all_bets=int(row[3]),
+                all_stake=float(row[4]),
+                all_profit=float(row[5]),
+                starting_bankroll=starting_bankroll,
+            )
+    finally:
+        conn.close()
+
 
 def _load_report_state(path: Path) -> dict[str, str]:
     if not path.exists():
@@ -182,58 +199,160 @@ def _load_report_state(path: Path) -> dict[str, str]:
     return {str(key): str(value) for key, value in raw.items()}
 
 
+def _daily_report_due(path: Path, today: str) -> bool:
+    return _load_report_state(path).get("last_report_date") != today
 
-def _daily_report_due(path: Path, today) -> bool:
-    return _load_report_state(path).get("last_report_date") != str(today)
 
-
-def _mark_daily_report_sent(path: Path, today) -> None:
+def _mark_daily_report_sent(path: Path, today: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"last_report_date": str(today)}, indent=2) + "\n")
+    path.write_text(json.dumps({"last_report_date": today}, indent=2) + "\n")
 
 
 def _build_push_lines(
-    today,
-    newly,
+    today: str,
+    newly: list[dict],
     *,
-    wins: int,
-    losses: int,
-    net: float,
-    staked: int,
+    summary,
     arb_summary: ArbitrageSummary | None,
     prop_bankroll: float,
 ) -> list[str]:
-    n_w = sum(1 for x in newly if x[5] == "won")
-    n_l = sum(1 for x in newly if x[5] == "lost")
-    n_net = sum(x[7] for x in newly if x[5] in ("won", "lost"))
-    n_staked = n_w + n_l
+    graded = [x for x in newly if x["status"] in ("won", "lost")]
+    n_w = sum(1 for x in graded if x["status"] == "won")
+    n_l = len(graded) - n_w
+    n_net = sum(float(x["profit_units"]) for x in graded)
     lines = [
         f"Props settled {today}: {n_w}-{n_l}, {n_net:+.2f}u"
-        + (f" ({n_net / n_staked:+.0%} stake ROI)" if n_staked else ""),
-    ]
-    lines.append(
+        + (f" ({n_net / len(graded):+.0%} stake ROI)" if graded else ""),
         _format_unit_bankroll(
             "Props",
-            net,
+            summary.profit_units,
             prop_bankroll,
             today_net=n_net,
-        )
-    )
+        ),
+    ]
     if arb_summary is not None:
         lines.append(_format_arbitrage_summary(arb_summary))
-    for player, market, point, side, price, status, value, profit in newly:
-        mark = {"won": "W", "lost": "L", "void": "V"}[status]
-        line = f"{'o' if side == 'over' else 'u'}{float(point):g}"
+    for x in newly:
+        mark = {"won": "W", "lost": "L", "void": "V"}[str(x["status"])]
+        value = x["result_value"]
         lines.append(
-            f"{mark}: {SHORT_MARKET.get(str(market), str(market))} {line} "
-            f"{player} {float(price):+.0f} -> {value if value is not None else 'DNP'}"
+            f"{mark}: {_play_label(x)} {float(x['price']):+.0f} "
+            f"-> {value if value is not None else 'DNP'}"
         )
-    if staked:
+    if summary.settled_rows:
         lines.append(
-            f"All-time: {wins}-{losses}, {net:+.2f}u "
-            f"({net / staked:+.1%} stake ROI)"
+            f"All-time: {summary.won}-{summary.lost}, "
+            f"{summary.profit_units:+.2f}u ({summary.roi:+.1%} stake ROI)"
         )
     return lines
+
+
+def _connect(config: PostgresConfig):
+    return psycopg.connect(
+        dbname=config.dbname, user=config.user, password=config.password,
+        host=config.host, port=config.port, connect_timeout=10,
+    )
+
+
+def settle_open_prop_bets(config: PostgresConfig) -> list[dict]:
+    """Resolve every open prop bet whose game date has already passed.
+
+    Joins each bet to the player's actual line that day in ``mlb.batting``,
+    marks it won/lost (stat vs. point) or void (player never appeared), writes
+    ``result_value`` + ``profit_units``, and returns the rows newly settled this
+    run. Idempotent: already-graded rows are skipped (``status = 'open'`` gate).
+    """
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    cols = ", ".join(f"COALESCE(b.{col}, 0)::int AS {col}" for col in STAT_COLUMNS)
+    newly: list[dict] = []
+    conn = _connect(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(PAPER_DDL.format(schema=config.schema))
+            cur.execute(
+                f"""SELECT alert_date, player, market, point, side, game_date,
+                           book, price, decimal_odds, stake_units
+                    FROM {config.schema}.prop_paper_bets
+                    WHERE status = 'open' AND game_date < %s::date""",
+                (today,),
+            )
+            open_rows = cur.fetchall()
+
+            for (alert_date, player, market, point, side, game_date,
+                 book, price, dec, stake) in open_rows:
+                cur.execute(
+                    f"""
+                    SELECT p.full_name, {cols}
+                    FROM {config.schema}.batting b
+                    JOIN {config.schema}.games g USING (game_pk)
+                    JOIN {config.schema}.players p USING (player_id)
+                    WHERE g.game_date::date = %s::date
+                      AND g.abstract_game_state = 'Final'
+                      AND COALESCE(b.plateappearances, 0) > 0
+                    ORDER BY COALESCE(g.game_datetime, g.game_date), g.game_pk
+                    """,
+                    (game_date,),
+                )
+                col_names = [d.name for d in cur.description or []]
+                stats = None
+                for row in cur.fetchall():
+                    rec = dict(zip(col_names, row))
+                    if _norm_name(str(rec["full_name"])) == _norm_name(str(player)):
+                        stats = {col: int(rec[col]) for col in STAT_COLUMNS}
+                        break
+                if stats is None:
+                    status, value, profit = "void", None, 0.0
+                else:
+                    value = int(STAT_FNS[str(market)](stats))
+                    won = resolve_prop_won(value=value, point=float(point), side=str(side))
+                    profit = prop_profit(
+                        won=won, decimal_odds=float(dec), stake_units=float(stake),
+                    )
+                    status = "won" if won else "lost"
+                cur.execute(
+                    f"""UPDATE {config.schema}.prop_paper_bets
+                        SET status = %s, result_value = %s, profit_units = %s,
+                            updated_at = now()
+                        WHERE alert_date = %s AND player = %s AND market = %s
+                          AND point = %s AND side = %s""",
+                    (status, value, profit, alert_date, player, market, point, side),
+                )
+                newly.append({
+                    "player": player, "market": market, "point": point,
+                    "side": side, "price": price, "book": book,
+                    "status": status, "result_value": value,
+                    "profit_units": profit, "stake_units": stake,
+                })
+            conn.commit()
+    finally:
+        conn.close()
+    return newly
+
+
+def load_prop_bet_rows(config: PostgresConfig) -> list[dict]:
+    """Return the full prop ledger as dict rows ordered by game date."""
+    conn = _connect(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(PAPER_DDL.format(schema=config.schema))
+            cur.execute(
+                f"""SELECT game_date, player, market, point, side, price, book,
+                           status, result_value, profit_units, stake_units,
+                           decimal_odds, ev, adj_prob, matchup
+                    FROM {config.schema}.prop_paper_bets
+                    ORDER BY game_date, player, market""",
+            )
+            names = [d.name for d in cur.description or []]
+            return [dict(zip(names, row)) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _play_label(row: dict) -> str:
+    side = str(row["side"])
+    line = f"{'o' if side == 'over' else 'u'}{float(row['point']):g}"
+    market = SHORT_MARKET.get(str(row["market"]), str(row["market"]))
+    return f"{market} {line} {row['player']}"
 
 
 def main() -> None:
@@ -270,110 +389,56 @@ def main() -> None:
     if args.arb_bankroll <= 0.0:
         raise SystemExit("--arb-bankroll must be greater than zero")
 
-    c = PostgresConfig.from_env()
-    conn = psycopg.connect(
-        dbname=c.dbname, user=c.user, password=c.password,
-        host=c.host, port=c.port, connect_timeout=10,
-    )
-    today = datetime.now(ET).date()
-    cols = ", ".join(f"COALESCE(b.{col}, 0)::int AS {col}" for col in STAT_COLUMNS)
-    newly = []
-    with conn.cursor() as cur:
-        cur.execute(PAPER_DDL.format(schema=c.schema))
-        cur.execute(
-            f"""SELECT alert_date, player, market, point, side, game_date,
-                       book, price, decimal_odds
-                FROM {c.schema}.prop_paper_bets
-                WHERE status = 'open' AND game_date < %s::date""",
-            (today,),
-        )
-        open_rows = cur.fetchall()
-
-        for (alert_date, player, market, point, side, game_date,
-             book, price, dec) in open_rows:
-            cur.execute(
-                f"""
-                SELECT p.full_name, {cols}
-                FROM {c.schema}.batting b
-                JOIN {c.schema}.games g USING (game_pk)
-                JOIN {c.schema}.players p USING (player_id)
-                WHERE g.game_date::date = %s::date
-                  AND g.abstract_game_state = 'Final'
-                  AND COALESCE(b.plateappearances, 0) > 0
-                ORDER BY COALESCE(g.game_datetime, g.game_date), g.game_pk
-                """,
-                (game_date,),
-            )
-            col_names = [d.name for d in cur.description]
-            stats = None
-            for row in cur.fetchall():
-                rec = dict(zip(col_names, row))
-                if _norm_name(str(rec["full_name"])) == _norm_name(str(player)):
-                    stats = {col: int(rec[col]) for col in STAT_COLUMNS}
-                    break
-            if stats is None:
-                status, value, profit = "void", None, 0.0
-            else:
-                value = int(STAT_FNS[str(market)](stats))
-                over_won = value > float(point)
-                won = over_won if side == "over" else not over_won
-                profit = (float(dec) - 1.0) if won else -1.0
-                status = "won" if won else "lost"
-            cur.execute(
-                f"""UPDATE {c.schema}.prop_paper_bets
-                    SET status = %s, result_value = %s, profit_units = %s,
-                        updated_at = now()
-                    WHERE alert_date = %s AND player = %s AND market = %s
-                      AND point = %s AND side = %s""",
-                (status, value, profit, alert_date, player, market, point, side),
-            )
-            newly.append((player, market, point, side, price, status, value, profit))
-        conn.commit()
-
-        cur.execute(
-            f"""SELECT game_date, player, market, point, side, price, book,
-                       status, result_value, profit_units
-                FROM {c.schema}.prop_paper_bets
-                ORDER BY game_date, player, market""",
-        )
-        ledger = cur.fetchall()
-        arb_summary = _load_arbitrage_summary(cur, today, args.arb_bankroll)
-    conn.close()
+    config = PostgresConfig.from_env()
+    today = datetime.now(ET).strftime("%Y-%m-%d")
+    newly = settle_open_prop_bets(config)
+    ledger = load_prop_bet_rows(config)
+    arb_summary = _load_arbitrage_summary(config, today, args.arb_bankroll)
+    kelly_stakes = kelly_prop_stake_units(ledger)
+    for row, kelly_stake in zip(ledger, kelly_stakes, strict=True):
+        row["kelly_stake_units"] = kelly_stake
 
     print(f"{'game':<11} {'play':<42} {'price':>6} {'book':<14} {'status':<10} "
-          f"{'val':>3} {'P/L':>7}")
-    print("-" * 100)
-    wins = losses = voids = pending = 0
-    net = 0.0
-    for (game_date, player, market, point, side, price, book,
-         status, value, profit) in ledger:
-        line = f"{'o' if side == 'over' else 'u'}{float(point):g}"
-        play = f"{SHORT_MARKET.get(str(market), str(market))} {line} {player}"
+          f"{'val':>3} {'P/L':>7} {'kU':>5}")
+    print("-" * 106)
+    for row in ledger:
+        value = row["result_value"]
+        profit = row["profit_units"]
         val = "-" if value is None else str(value)
         pl = "-" if profit is None else f"{float(profit):+.2f}u"
+        status = str(row["status"])
         shown_status = status if status != "open" else "PENDING"
-        print(f"{game_date!s:<11} {play:<42.42} {float(price):>+6.0f} "
-              f"{book!s:<14.14} {shown_status:<10} {val:>3} {pl:>7}")
-        if status == "won":
-            wins += 1
-            net += float(profit)
-        elif status == "lost":
-            losses += 1
-            net += float(profit)
-        elif status == "void":
-            voids += 1
-        else:
-            pending += 1
-    print("-" * 100)
-    staked = wins + losses
-    if staked:
-        print(f"settled: {wins}-{losses} | staked {staked}u | net {net:+.2f}u | "
-              f"stake ROI {net / staked:+.1%} | pending {pending} | void {voids}")
+        print(f"{row['game_date']!s:<11} {_play_label(row):<42.42} "
+              f"{float(row['price']):>+6.0f} {row['book']!s:<14.14} "
+              f"{shown_status:<10} {val:>3} {pl:>7} "
+              f"{float(row['kelly_stake_units']):>5.2f}")
+    print("-" * 106)
+
+    summary = summarize_prop_bet_rows(ledger)
+    if summary.settled_rows:
+        print(f"settled: {summary.won}-{summary.lost} | "
+              f"staked {summary.total_staked:.0f}u | net {summary.profit_units:+.2f}u | "
+              f"stake ROI {summary.roi:+.1%} | pending {summary.open_rows} | "
+              f"void {summary.void_rows}")
     else:
-        print(f"nothing settled yet | pending {pending} | void {voids}")
-    print(_format_unit_bankroll("Props", net, args.prop_bankroll))
+        print(f"nothing settled yet | pending {summary.open_rows} | "
+              f"void {summary.void_rows}")
+    print(_format_unit_bankroll("Props", summary.profit_units, args.prop_bankroll))
     if arb_summary is not None:
         print(_format_arbitrage_summary(arb_summary))
+
+    kelly = summarize_prop_kelly(ledger, kelly_stakes)
+    open_kelly = sum(
+        stake for row, stake in zip(ledger, kelly_stakes, strict=True)
+        if str(row["status"]) == "open"
+    )
+    if kelly.settled_rows:
+        print(f"kelly (1/4K, caps): {kelly.won}-{kelly.lost} | "
+              f"staked {kelly.total_staked:.2f}u | net {kelly.profit_units:+.2f}u | "
+              f"ROI {kelly.roi:+.1%} | open {open_kelly:.2f}u")
+    else:
+        print(f"kelly (1/4K, caps): {open_kelly:.2f}u outstanding "
+              f"(flat baseline = 1u/bet)")
 
     should_push = args.push and (
         bool(newly)
@@ -386,10 +451,7 @@ def main() -> None:
         lines = _build_push_lines(
             today,
             newly,
-            wins=wins,
-            losses=losses,
-            net=net,
-            staked=staked,
+            summary=summary,
             arb_summary=arb_summary,
             prop_bankroll=args.prop_bankroll,
         )
@@ -403,6 +465,7 @@ def main() -> None:
         if args.daily_report:
             _mark_daily_report_sent(args.report_state_file, today)
         print(f"pushed settlement summary ({len(newly)} newly settled)")
+
 
 
 if __name__ == "__main__":

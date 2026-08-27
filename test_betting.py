@@ -28,6 +28,14 @@ from src.betting.paper_settlement import (
 )
 from src.betting.paper_trade_store import normalize_paper_trade_row
 from src.betting.paper_trading import PaperOddsLine, select_moneyline_paper_trade
+from src.betting.prop_settlement import (
+    kelly_prop_stake_units,
+    prop_probability,
+    prop_profit,
+    resolve_prop_won,
+    summarize_prop_bet_rows,
+    summarize_prop_kelly,
+)
 
 
 def test_american_decimal_conversions():
@@ -429,3 +437,116 @@ def test_normalize_paper_trade_row_coerces_db_values():
     assert math.isclose(normalized["best_ml"], 154.0)
     assert normalized["close_ml"] is None
     assert normalized["status"] == "open"
+
+
+def test_resolve_prop_won_over_under():
+    assert resolve_prop_won(value=2, point=1.5, side="over") is True
+    assert resolve_prop_won(value=1, point=1.5, side="over") is False
+    assert resolve_prop_won(value=0, point=0.5, side="under") is True
+    assert resolve_prop_won(value=1, point=0.5, side="under") is False
+    assert resolve_prop_won(value=3, point=2.5, side="UNDER") is False
+
+
+def test_prop_profit_flat_and_scaled_stake():
+    assert math.isclose(prop_profit(won=True, decimal_odds=2.5, stake_units=1.0), 1.5)
+    assert math.isclose(prop_profit(won=False, decimal_odds=2.5, stake_units=1.0), -1.0)
+    assert math.isclose(prop_profit(won=True, decimal_odds=3.0, stake_units=2.0), 4.0)
+
+
+def test_summarize_prop_bet_rows_aggregates_roi_and_profit():
+    rows = [
+        {"status": "won", "stake_units": 1.0, "profit_units": 1.5},
+        {"status": "lost", "stake_units": 1.0, "profit_units": -1.0},
+        {"status": "void", "stake_units": 1.0, "profit_units": 0.0},
+        {"status": "open", "stake_units": 1.0},
+    ]
+
+    summary = summarize_prop_bet_rows(rows)
+
+    assert summary.rows == 4
+    assert summary.open_rows == 1
+    assert summary.void_rows == 1
+    assert summary.settled_rows == 2
+    assert summary.won == 1
+    assert summary.lost == 1
+    assert math.isclose(summary.total_staked, 2.0)
+    assert math.isclose(summary.profit_units, 0.5)
+    assert math.isclose(summary.roi, 0.25)
+    assert math.isclose(summary.win_rate, 0.5)
+
+
+def test_summarize_prop_bet_rows_handles_no_graded_bets():
+    summary = summarize_prop_bet_rows([{"status": "open"}, {"status": "void"}])
+
+    assert summary.settled_rows == 0
+    assert summary.roi == 0.0
+    assert summary.win_rate == 0.0
+    assert summary.total_staked == 0.0
+
+
+def test_prop_probability_prefers_adj_prob_else_recovers_from_ev():
+    adj = prop_probability({"adj_prob": 0.42})
+    assert adj is not None
+    assert math.isclose(adj, 0.42)
+    # ev = p*dec - 1  ->  p = (ev + 1) / dec
+    recovered = prop_probability({"ev": 0.32, "decimal_odds": 3.05})
+    assert recovered is not None
+    assert math.isclose(recovered, 1.32 / 3.05)
+    assert prop_probability({"market": "batter_hits"}) is None
+
+
+def test_kelly_prop_stake_units_quarter_kelly_and_per_bet_cap():
+    # p=0.4, dec=3.0 (b=2): fullK=0.10 -> 1/4-Kelly=0.025 -> 2.5u (uncapped).
+    [uncapped] = kelly_prop_stake_units(
+        [{"player": "A", "matchup": "G1", "adj_prob": 0.4, "decimal_odds": 3.0}]
+    )
+    assert math.isclose(uncapped, 2.5)
+    # p=0.6, dec=3.0: fullK=0.40 -> 1/4-Kelly=0.10 -> hits the 5% (5u) per-bet cap.
+    [capped] = kelly_prop_stake_units(
+        [{"player": "B", "matchup": "G1", "adj_prob": 0.6, "decimal_odds": 3.0}]
+    )
+    assert math.isclose(capped, 5.0)
+    # No edge -> zero; missing probability -> zero.
+    assert kelly_prop_stake_units(
+        [{"player": "C", "matchup": "G1", "adj_prob": 0.2, "decimal_odds": 3.0}]
+    ) == [0.0]
+    assert kelly_prop_stake_units([{"player": "D", "matchup": "G1"}]) == [0.0]
+
+
+def test_kelly_prop_stake_units_player_and_game_exposure_caps():
+    # Two capped (5u) legs on one player -> scaled to the 5u player cap (2.5u each).
+    same_player = kelly_prop_stake_units(
+        [
+            {"player": "P", "matchup": "G", "adj_prob": 0.6, "decimal_odds": 3.0},
+            {"player": "P", "matchup": "G", "adj_prob": 0.6, "decimal_odds": 3.0},
+        ]
+    )
+    assert [round(s, 4) for s in same_player] == [2.5, 2.5]
+    # Three capped legs, distinct players, one game -> 15u raw scaled to 10u game cap.
+    one_game = kelly_prop_stake_units(
+        [
+            {"player": "P1", "matchup": "G", "adj_prob": 0.6, "decimal_odds": 3.0},
+            {"player": "P2", "matchup": "G", "adj_prob": 0.6, "decimal_odds": 3.0},
+            {"player": "P3", "matchup": "G", "adj_prob": 0.6, "decimal_odds": 3.0},
+        ]
+    )
+    assert math.isclose(sum(one_game), 10.0)
+    assert all(math.isclose(s, 10.0 / 3.0) for s in one_game)
+
+
+def test_summarize_prop_kelly_weights_by_stake_and_odds():
+    rows = [
+        {"status": "won", "decimal_odds": 3.0},
+        {"status": "lost", "decimal_odds": 2.0},
+        {"status": "void", "decimal_odds": 4.0},
+        {"status": "open", "decimal_odds": 5.0},
+    ]
+    summary = summarize_prop_kelly(rows, [2.0, 1.0, 3.0, 4.0])
+
+    assert summary.won == 1
+    assert summary.lost == 1
+    assert summary.void_rows == 1
+    assert summary.open_rows == 1
+    assert math.isclose(summary.total_staked, 3.0)   # 2.0 (won) + 1.0 (lost)
+    assert math.isclose(summary.profit_units, 3.0)   # +2*(3-1) - 1
+    assert math.isclose(summary.roi, 1.0)

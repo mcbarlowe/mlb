@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+"""Download the previous day's games and ingest them into PostgreSQL.
+
+This is the main daily data pipeline:
+1. Download missing schedules and live-feed JSON files
+2. Backfill PostgreSQL from raw feeds (with stale-progress reset)
+3. Settle paper-trade moneyline bets
+4. Resolve player prop bets and report ROI/profit
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -7,7 +17,6 @@ from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,7 +30,6 @@ def parse_args() -> argparse.Namespace:
         help="Date to process in YYYY-MM-DD format. Defaults to yesterday.",
     )
     return parser.parse_args()
-
 
 
 def resolve_target_date(date_arg: str | None) -> date:
@@ -44,7 +52,13 @@ def completed_game_pks(pipeline_summary: dict) -> list[int]:
 
 
 def main() -> None:
-    from src.database import PostgresConfig
+    from src.betting.paper_settlement import summarize_paper_trade_rows
+    from src.betting.paper_trade_store import (
+        ensure_paper_trades_table,
+        load_paper_trade_rows,
+        update_paper_trade_settlement_rows,
+    )
+    from src.database import PostgresConfig, PostgresHandler
     from src.etl.daily_pipeline import run_daily_pipeline
     from src.etl.postgres_backfill import run_postgres_backfill
 
@@ -78,6 +92,50 @@ def main() -> None:
     print(f"- processed games: {backfill_summary.processed_games}")
     print(f"- skipped already complete: {backfill_summary.skipped_completed}")
     print(f"- failed games: {backfill_summary.failed_games}")
+
+    # Settle moneyline bets
+    print("\n[Phase 3] Settling paper-trade moneyline bets...")
+    with PostgresHandler(db_config) as db:
+        ensure_paper_trades_table(db)
+
+    rows = load_paper_trade_rows()
+    sys.path.insert(0, str(project_root / "scripts"))
+    from settle_paper_trades import _settle_rows
+
+    settled_rows, updated, _, _ = _settle_rows(
+        rows, db_config=db_config
+    )
+    update_paper_trade_settlement_rows(settled_rows, db_config=db_config)
+
+    if updated > 0:
+        rows_fresh = load_paper_trade_rows()
+        summary = summarize_paper_trade_rows(rows_fresh)
+        print(f"  Updated: {updated} trades | Win Rate: {summary.win_rate:.1%} | Profit: {summary.profit_units:+.2f}u")
+    else:
+        print("  Updated: 0 trades (no new finals)")
+
+    # Settle player prop bets
+    print("[Phase 4] Settling player prop bets...")
+    sys.path.insert(0, str(project_root / "scripts"))
+    from settle_prop_alerts import load_prop_bet_rows, settle_open_prop_bets
+
+    from src.betting.prop_settlement import summarize_prop_bet_rows
+
+    newly = settle_open_prop_bets(db_config)
+    prop_summary = summarize_prop_bet_rows(load_prop_bet_rows(db_config))
+    if prop_summary.settled_rows:
+        print(
+            f"  Settled: {len(newly)} new | "
+            f"Record {prop_summary.won}-{prop_summary.lost} | "
+            f"Win Rate: {prop_summary.win_rate:.1%} | "
+            f"Profit: {prop_summary.profit_units:+.2f}u | "
+            f"ROI: {prop_summary.roi:+.2%} | pending {prop_summary.open_rows}"
+        )
+    else:
+        print(
+            f"  Settled: 0 | pending {prop_summary.open_rows} | "
+            f"void {prop_summary.void_rows}"
+        )
 
 
 if __name__ == "__main__":

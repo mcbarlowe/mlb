@@ -5,12 +5,10 @@ import pytest
 from src.betting.futures_odds_store import (
     FUTURES_ODDS_DDL,
     insert_futures_odds,
-    load_latest_futures_odds,
 )
 from src.betting.futures_paper_trade_store import (
     FUTURES_PAPER_TRADES_DDL,
     insert_futures_paper_trades,
-    load_open_futures_paper_trades,
     settle_futures_paper_trade,
 )
 

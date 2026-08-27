@@ -104,6 +104,12 @@ class PostgresBackfill:
 
         with PostgresHandler(self.db_config) as db:
             self._ensure_progress_table(db)
+            stale_reset = self._reset_stale_progress(db)
+            if stale_reset:
+                tqdm.write(
+                    f"Re-queued {stale_reset} stale progress rows "
+                    "(games premarked complete before going Final)."
+                )
             dimension_state = self._load_dimension_state(db)
             pending_games, skipped_completed = self._build_pending_games(db)
 
@@ -139,6 +145,26 @@ class PostgresBackfill:
 
         if should_load_reference_data:
             load_reference_data_to_db(self.db_config)
+
+    def _reset_stale_progress(self, db: PostgresHandler) -> int:
+        """Re-queue games premarked complete before their feed went Final.
+
+        Preview stubs downloaded ahead of schedule get processed and marked
+        complete, so the resume skip would otherwise never pick up the
+        refreshed final feed for an already-played game.
+        """
+        result = db.connection.execute(
+            f"""
+            UPDATE {BACKFILL_PROGRESS_TABLE} AS progress
+            SET status = 'pending', updated_at = now()
+            FROM games
+            WHERE games.game_pk = progress.game_pk
+              AND progress.status = 'complete'
+              AND games.abstract_game_state IS DISTINCT FROM 'Final'
+              AND games.game_datetime < now()
+            """
+        )
+        return result.rowcount
 
     def _ensure_progress_table(self, db: PostgresHandler) -> None:
         db.connection.execute(
