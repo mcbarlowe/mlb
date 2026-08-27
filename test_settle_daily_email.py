@@ -169,7 +169,20 @@ def test_daily_betting_report_includes_shared_bankroll_curve() -> None:
                 "profit_units": "-1",
                 "book": "book",
                 "matchup": "NYY@BAL",
-            }
+            },
+            {
+                "game_date": "2026-08-26",
+                "status": "open",
+                "player": "Busy Detail",
+                "market": "batter_home_runs",
+                "point": 0.5,
+                "side": "over",
+                "price": "+900",
+                "decimal_odds": "10.0",
+                "stake_units": "1",
+                "book": "book",
+                "matchup": "NYY@BAL",
+            },
         ],
         arb_summary=None,
         arb_rows=[
@@ -183,6 +196,11 @@ def test_daily_betting_report_includes_shared_bankroll_curve() -> None:
     assert "SHARED BANKROLL - all paper bets + arbs" in text
     assert "Current +$10,225.00" in text
     assert "Staked +$800.00 | Net +$225.00 | Stake ROI +28.1%" in text
+    assert "OUTSTANDING" in text
+    assert "Props pending: 1" in text
+    assert "A Batter" not in text
+    assert "Busy Detail" not in text
+    assert "NYY@BAL" not in text
 
 
 def test_send_email_report_uses_gmail_smtp_env() -> None:

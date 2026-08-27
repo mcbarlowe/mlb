@@ -47,7 +47,6 @@ from settle_prop_alerts import (
     load_prop_bet_rows,
     settle_open_prop_bets,
 )
-from shop_batter_props import SHORT_MARKET
 
 from src.betting.bankroll import format_shared_bankroll, summarize_shared_bankroll
 from src.betting.paper_settlement import PaperTradeSummary, summarize_paper_trade_rows
@@ -96,54 +95,6 @@ def _f(value: object, default: float = 0.0) -> float:
     return float(value)  # type: ignore[arg-type]
 
 
-def _ml_matchup(row: Mapping[str, object]) -> str:
-    return f"{row.get('away_team')}@{row.get('home_team')}"
-
-
-def _fmt_ml_settled(row: Mapping[str, object]) -> str:
-    result = str(row.get("result") or "")
-    mark = {"win": "W", "loss": "L"}.get(result, "?")
-    pl = row.get("profit_units")
-    pl_str = f"{_f(pl):+.2f}u" if pl not in (None, "") else "-"
-    return (
-        f"  {mark}  {_ml_matchup(row):<9} {row.get('side')!s:<4} "
-        f"{_f(row.get('best_ml')):+.0f}  {_f(row.get('stake_units')):>5.2f}u  "
-        f"{result:<4} {pl_str}"
-    )
-
-
-def _fmt_ml_open(row: Mapping[str, object]) -> str:
-    return (
-        f"  {_ml_matchup(row):<9} {row.get('side')!s:<4} "
-        f"{_f(row.get('best_ml')):+.0f}  {_f(row.get('stake_units')):>5.2f}u  "
-        f"(placed {row.get('paper_date')})"
-    )
-
-
-def _prop_play(row: Mapping[str, object]) -> str:
-    side = str(row["side"])
-    line = f"{'o' if side == 'over' else 'u'}{_f(row['point']):g}"
-    market = SHORT_MARKET.get(str(row["market"]), str(row["market"]))
-    return f"{market} {line} {row['player']}"
-
-
-def _fmt_prop_settled(row: Mapping[str, object]) -> str:
-    mark = {"won": "W", "lost": "L", "void": "V"}[str(row["status"])]
-    value = row.get("result_value")
-    pl = row.get("profit_units")
-    pl_str = f"{_f(pl):+.2f}u" if pl is not None else "-"
-    seen = value if value is not None else "DNP"
-    return (
-        f"  {mark}  {_prop_play(row):<32.32} {_f(row['price']):+.0f}  "
-        f"1u/k{_f(row.get('kelly_stake_units')):.2f}u  -> {seen!s:<3} {pl_str}"
-    )
-
-
-def _fmt_prop_open(row: Mapping[str, object]) -> str:
-    return (
-        f"  {_prop_play(row):<32.32} {_f(row['price']):+.0f}  "
-        f"1u/k{_f(row.get('kelly_stake_units')):.2f}u  ({row.get('book')})"
-    )
 
 
 def _ml_wins(rows: Sequence[Mapping[str, object]]) -> int:
@@ -207,7 +158,6 @@ def build_report(
     if ml_night:
         w = _ml_wins(ml_night)
         lines.append(f"  Moneyline: {w}-{len(ml_night) - w}, {ml_night_pl:+.2f}u")
-        lines.extend(_fmt_ml_settled(r) for r in ml_night)
     else:
         lines.append("  Moneyline: no bets graded")
     prop_graded = [r for r in prop_night if str(r["status"]) in ("won", "lost")]
@@ -227,7 +177,6 @@ def build_report(
             f"kelly {prop_night_kelly_pl:+.2f}u"
             + (f" ({pv} void)" if pv else "")
         )
-        lines.extend(_fmt_prop_settled(r) for r in prop_night)
     else:
         lines.append("  Props: no bets graded")
     lines.append(f"  Night P/L: {ml_night_pl + prop_night_pl:+.2f}u")
@@ -270,15 +219,9 @@ def build_report(
 
     # --- Outstanding -------------------------------------------------------- #
     lines.append("")
-    lines.append(f"OUTSTANDING ({len(ml_open) + len(prop_open)})")
-    if ml_open:
-        lines.append(f"  Moneyline ({len(ml_open)}):")
-        lines.extend(_fmt_ml_open(r) for r in ml_open)
-    if prop_open:
-        lines.append(f"  Props ({len(prop_open)}):")
-        lines.extend(_fmt_prop_open(r) for r in prop_open)
-    if not ml_open and not prop_open:
-        lines.append("  none")
+    lines.append("OUTSTANDING")
+    lines.append(f"  Moneyline pending: {len(ml_open)}")
+    lines.append(f"  Props pending: {len(prop_open)}")
 
     text = "\n".join(lines)
     subject = (
