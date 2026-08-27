@@ -62,6 +62,32 @@ def test_build_report_text_contains_daily_summary() -> None:
     assert "Kelly ROI:          +22.11%" in text
 
 
+def test_build_report_text_includes_arbitrage_summary() -> None:
+    summary = SimpleNamespace(
+        rows=0,
+        settled_rows=0,
+        open_rows=0,
+        win_rate=0.0,
+        roi=0.0,
+        total_staked=0.0,
+        profit_units=0.0,
+        avg_clv=0.0,
+        beat_close_rate=0.0,
+    )
+
+    text = build_report_text(
+        target_date=date(2026, 8, 24),
+        updated=0,
+        missing_final=0,
+        missing_close=0,
+        summary=summary,
+        arbitrage_summary_text="Arbs expected: today 2 bets +$4.20 (+1.2% stake ROI)",
+    )
+
+    assert "ARBITRAGE PAPER TRADING SUMMARY" in text
+    assert "Arbs expected: today 2 bets +$4.20 (+1.2% stake ROI)" in text
+
+
 def test_send_email_report_uses_gmail_smtp_env() -> None:
     with patch.dict(
         "os.environ",

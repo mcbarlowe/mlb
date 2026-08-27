@@ -44,6 +44,12 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("BARLOWE_PAPER_REPORT_EMAIL_TO") or "mcbarlowe@gmail.com",
         help="Settlement report email recipient.",
     )
+    parser.add_argument(
+        "--arb-bankroll",
+        type=float,
+        default=float(os.getenv("BARLOWE_ARB_BANKROLL", "10000")),
+        help="Starting bankroll in dollars for arbitrage bankroll-return reporting.",
+    )
     return parser.parse_args()
 
 
@@ -63,6 +69,7 @@ def build_report_text(
     prop_summary=None,
     prop_kelly_summary=None,
     props_newly_settled: int = 0,
+    arbitrage_summary_text: str | None = None,
 ) -> str:
     lines = [
         f"[{target_date.isoformat()}] Settlement scan: updated={updated} missing_final={missing_final} missing_close={missing_close}",
@@ -108,6 +115,17 @@ def build_report_text(
                     "",
                 ]
             )
+    if arbitrage_summary_text is not None:
+        lines.extend(
+            [
+                "=" * 90,
+                "ARBITRAGE PAPER TRADING SUMMARY",
+                "=" * 90,
+                "",
+                arbitrage_summary_text,
+                "",
+            ]
+        )
     lines.append("=" * 90)
     return "\n".join(lines)
 
@@ -146,6 +164,9 @@ def main() -> None:
     from src.database import PostgresConfig, PostgresHandler
 
     args = parse_args()
+    if args.arb_bankroll <= 0.0:
+        raise SystemExit("--arb-bankroll must be greater than zero")
+
     target_date = resolve_target_date(args.date)
 
     db_config = PostgresConfig()
@@ -161,7 +182,12 @@ def main() -> None:
     # Import after sys.path is set
     sys.path.insert(0, str(project_root / "scripts"))
     from settle_paper_trades import _settle_rows
-    from settle_prop_alerts import load_prop_bet_rows, settle_open_prop_bets
+    from settle_prop_alerts import (
+        _format_arbitrage_summary,
+        _load_arbitrage_summary,
+        load_prop_bet_rows,
+        settle_open_prop_bets,
+    )
 
     settled_rows, updated, missing_final, missing_close = _settle_rows(rows, db_config=db_config)
     newly_settled_props = settle_open_prop_bets(db_config)
@@ -176,7 +202,16 @@ def main() -> None:
     prop_summary = summarize_prop_bet_rows(prop_rows)
     prop_kelly_stakes = kelly_prop_stake_units(prop_rows)
     prop_kelly_summary = summarize_prop_kelly(prop_rows, prop_kelly_stakes)
-
+    arb_summary = _load_arbitrage_summary(
+        db_config,
+        target_date.isoformat(),
+        args.arb_bankroll,
+    )
+    arbitrage_summary_text = (
+        _format_arbitrage_summary(arb_summary)
+        if arb_summary is not None
+        else None
+    )
     report_text = build_report_text(
         target_date=target_date,
         updated=updated,
@@ -186,6 +221,7 @@ def main() -> None:
         prop_summary=prop_summary,
         prop_kelly_summary=prop_kelly_summary,
         props_newly_settled=len(newly_settled_props),
+        arbitrage_summary_text=arbitrage_summary_text,
     )
     print(report_text)
     if args.email_report:
