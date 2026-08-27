@@ -119,11 +119,8 @@ def _format_arbitrage_summary(summary: ArbitrageSummary) -> str:
     today = _format_profit_roi(summary.today_profit, summary.today_stake_roi)
     all_time = _format_profit_roi(summary.all_profit, summary.all_stake_roi)
     return (
-        f"Arbs expected: today {summary.today_bets} bets {today} "
-        f"({summary.today_bankroll_return:+.1%} bankroll); "
-        f"all-time {summary.all_bets} bets {all_time}; "
-        f"bankroll {_format_money(summary.current_bankroll)} "
-        f"({summary.all_bankroll_return:+.1%})"
+        f"Arbs expected: today {summary.today_bets} bets {today}; "
+        f"all-time {summary.all_bets} bets {all_time}"
     )
 
 
@@ -183,6 +180,30 @@ def _load_arbitrage_summary(
                 all_profit=float(row[5]),
                 starting_bankroll=starting_bankroll,
             )
+    finally:
+        conn.close()
+
+def _load_arbitrage_bet_rows(config: PostgresConfig) -> list[dict[str, object]]:
+    conn = _connect(config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('betting.arbitrage_paper_bets')")
+            if cur.fetchone()[0] is None:
+                return []
+            cur.execute(
+                """
+                SELECT
+                    (created_at AT TIME ZONE 'America/New_York')::date AS event_date,
+                    total_stake::float8 AS total_stake,
+                    expected_profit::float8 AS expected_profit
+                FROM betting.arbitrage_paper_bets
+                WHERE total_stake IS NOT NULL
+                  AND expected_profit IS NOT NULL
+                ORDER BY event_date, created_at
+                """,
+            )
+            names = [d.name for d in cur.description or []]
+            return [dict(zip(names, row)) for row in cur.fetchall()]
     finally:
         conn.close()
 

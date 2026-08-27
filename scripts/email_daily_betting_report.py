@@ -7,12 +7,15 @@ and sends one email. Runs in the morning for the previous night's slate.
 
 Transport is Gmail SMTP over SSL. The sender + app password come from the shell
 environment (loaded from ~/.zshrc by the LaunchAgent runner, exactly like
-ODDS_API_KEY) so no secret is ever stored in a plist:
+ODDS_API_KEY) so no secret is ever stored in a plist. Shared bankroll reporting
+uses one dollar bankroll for moneyline, props, and arbitrage; paper betting
+units are converted with BARLOWE_PAPER_UNIT_DOLLARS:
 
-  MLB_REPORT_EMAIL_TO            recipient (default mcbarlowe@gmail.com)
-  MLB_REPORT_GMAIL_USER          sender gmail address (default = recipient)
-  MLB_REPORT_GMAIL_APP_PASSWORD  16-char Google App Password (required to send)
-
+  MLB_REPORT_EMAIL_TO              recipient (default mcbarlowe@gmail.com)
+  MLB_REPORT_GMAIL_USER            sender gmail address (default = recipient)
+  MLB_REPORT_GMAIL_APP_PASSWORD    16-char Google App Password (required to send)
+  BARLOWE_SHARED_BETTING_BANKROLL  shared bankroll dollars (default 10000)
+  BARLOWE_PAPER_UNIT_DOLLARS       dollar value of 1 paper unit (default 100)
 Usage:
   uv run python scripts/email_daily_betting_report.py            # settle + email yesterday
   uv run python scripts/email_daily_betting_report.py --date 2026-08-18
@@ -39,12 +42,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from settle_prop_alerts import (
     _format_arbitrage_summary,
+    _load_arbitrage_bet_rows,
     _load_arbitrage_summary,
     load_prop_bet_rows,
     settle_open_prop_bets,
 )
 from shop_batter_props import SHORT_MARKET
 
+from src.betting.bankroll import format_shared_bankroll, summarize_shared_bankroll
 from src.betting.paper_settlement import PaperTradeSummary, summarize_paper_trade_rows
 from src.betting.paper_trade_store import (
     load_paper_trade_rows,
@@ -149,9 +154,6 @@ def _roi_str(summary: PaperTradeSummary | PropBetSummary) -> str:
     return f"{summary.roi:+.1%}" if summary.settled_rows else "n/a"
 
 
-def _bankroll_str(label: str, profit: float, bankroll: float) -> str:
-    current = bankroll + profit
-    return f"  {label} bankroll {current:+.2f}u ({profit / bankroll:+.1%})"
 
 
 # --------------------------------------------------------------------------- #
@@ -163,8 +165,9 @@ def build_report(
     prop_rows: list[dict[str, object]],
     *,
     arb_summary,
-    moneyline_bankroll: float,
-    prop_bankroll: float,
+    arb_rows: Sequence[Mapping[str, object]],
+    shared_bankroll: float,
+    paper_unit_dollars: float,
 ) -> tuple[str, str, str]:
     night_str = night.isoformat()
     ml_all = summarize_paper_trade_rows(ml_rows)
@@ -173,6 +176,13 @@ def build_report(
     for row, kelly_stake in zip(prop_rows, kelly_stakes, strict=True):
         row["kelly_stake_units"] = kelly_stake
     prop_kelly = summarize_prop_kelly(prop_rows, kelly_stakes)
+    shared_summary = summarize_shared_bankroll(
+        ml_rows,
+        prop_rows,
+        arb_rows,
+        starting_bankroll=shared_bankroll,
+        paper_unit_dollars=paper_unit_dollars,
+    )
 
     ml_night = [
         r for r in ml_rows
@@ -224,6 +234,11 @@ def build_report(
     if arb_summary is not None:
         lines.append(f"  {_format_arbitrage_summary(arb_summary)}")
 
+    # --- Shared bankroll --------------------------------------------------- #
+    lines.append("")
+    lines.append("SHARED BANKROLL - all paper bets + arbs")
+    lines.extend(f"  {line}" for line in format_shared_bankroll(shared_summary))
+
     # --- All-time moneyline ------------------------------------------------- #
     lines.append("")
     lines.append("MONEYLINE - all time")
@@ -233,7 +248,6 @@ def build_report(
         f"staked {ml_all.total_staked:.2f}u | profit {ml_all.profit_units:+.2f}u | "
         f"stake ROI {_roi_str(ml_all)}"
     )
-    lines.append(_bankroll_str("Moneyline", ml_all.profit_units, moneyline_bankroll))
     lines.append(
         f"  Avg CLV {ml_all.avg_clv:+.4f} | beat close {ml_all.beat_close_rate:.1%} | "
         f"open {ml_all.open_rows}"
@@ -247,7 +261,6 @@ def build_report(
         f"staked {prop_all.total_staked:.2f}u | profit {prop_all.profit_units:+.2f}u | "
         f"stake ROI {_roi_str(prop_all)}"
     )
-    lines.append(_bankroll_str("Props", prop_all.profit_units, prop_bankroll))
     lines.append(f"  void {prop_all.void_rows} | open {prop_all.open_rows}")
     lines.append(
         f"  Kelly 1/4 (5% cap, player/game caps): "
@@ -312,30 +325,22 @@ def main() -> None:
     ap.add_argument("--no-settle", action="store_true",
                     help="report current ledger state without settling first")
     ap.add_argument(
-        "--moneyline-bankroll",
+        "--shared-bankroll",
         type=float,
-        default=float(os.environ.get("BARLOWE_MONEYLINE_BANKROLL_UNITS", "100")),
-        help="Starting bankroll in units for moneyline bankroll-return reporting.",
+        default=float(os.environ.get("BARLOWE_SHARED_BETTING_BANKROLL", "10000")),
+        help="Starting shared bankroll in dollars for all paper bets and arbitrage.",
     )
     ap.add_argument(
-        "--prop-bankroll",
+        "--paper-unit-dollars",
         type=float,
-        default=float(os.environ.get("BARLOWE_PROP_BANKROLL_UNITS", "100")),
-        help="Starting bankroll in units for prop bankroll-return reporting.",
-    )
-    ap.add_argument(
-        "--arb-bankroll",
-        type=float,
-        default=float(os.environ.get("BARLOWE_ARB_BANKROLL", "10000")),
-        help="Starting bankroll in dollars for arbitrage bankroll-return reporting.",
+        default=float(os.environ.get("BARLOWE_PAPER_UNIT_DOLLARS", "100")),
+        help="Dollar value of one paper-bet unit in shared bankroll reporting.",
     )
     args = ap.parse_args()
-    if args.moneyline_bankroll <= 0.0:
-        raise SystemExit("--moneyline-bankroll must be greater than zero")
-    if args.prop_bankroll <= 0.0:
-        raise SystemExit("--prop-bankroll must be greater than zero")
-    if args.arb_bankroll <= 0.0:
-        raise SystemExit("--arb-bankroll must be greater than zero")
+    if args.shared_bankroll <= 0.0:
+        raise SystemExit("--shared-bankroll must be greater than zero")
+    if args.paper_unit_dollars <= 0.0:
+        raise SystemExit("--paper-unit-dollars must be greater than zero")
 
     config = PostgresConfig.from_env()
     night = resolve_night(args.date)
@@ -345,14 +350,16 @@ def main() -> None:
     ml_rows = load_paper_trade_rows(db_config=config)
     prop_rows = load_prop_bet_rows(config)
     today = datetime.now(ET).strftime("%Y-%m-%d")
-    arb_summary = _load_arbitrage_summary(config, today, args.arb_bankroll)
+    arb_summary = _load_arbitrage_summary(config, today, args.shared_bankroll)
+    arb_rows = _load_arbitrage_bet_rows(config)
     subject, text, html = build_report(
         night,
         ml_rows,
         prop_rows,
         arb_summary=arb_summary,
-        moneyline_bankroll=args.moneyline_bankroll,
-        prop_bankroll=args.prop_bankroll,
+        arb_rows=arb_rows,
+        shared_bankroll=args.shared_bankroll,
+        paper_unit_dollars=args.paper_unit_dollars,
     )
 
     if args.print_only:

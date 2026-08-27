@@ -18,6 +18,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.betting.bankroll import format_shared_bankroll, summarize_shared_bankroll
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -45,10 +47,16 @@ def parse_args() -> argparse.Namespace:
         help="Settlement report email recipient.",
     )
     parser.add_argument(
-        "--arb-bankroll",
+        "--shared-bankroll",
         type=float,
-        default=float(os.getenv("BARLOWE_ARB_BANKROLL", "10000")),
-        help="Starting bankroll in dollars for arbitrage bankroll-return reporting.",
+        default=float(os.getenv("BARLOWE_SHARED_BETTING_BANKROLL", "10000")),
+        help="Starting shared bankroll in dollars for all paper bets and arbitrage.",
+    )
+    parser.add_argument(
+        "--paper-unit-dollars",
+        type=float,
+        default=float(os.getenv("BARLOWE_PAPER_UNIT_DOLLARS", "100")),
+        help="Dollar value of one paper-bet unit in shared bankroll reporting.",
     )
     return parser.parse_args()
 
@@ -70,6 +78,7 @@ def build_report_text(
     prop_kelly_summary=None,
     props_newly_settled: int = 0,
     arbitrage_summary_text: str | None = None,
+    bankroll_summary=None,
 ) -> str:
     lines = [
         f"[{target_date.isoformat()}] Settlement scan: updated={updated} missing_final={missing_final} missing_close={missing_close}",
@@ -80,7 +89,7 @@ def build_report_text(
         "",
         f"Total Trades:        {summary.rows} ({summary.settled_rows} settled, {summary.open_rows} pending)",
         f"Win Rate:            {summary.win_rate:.1%}",
-        f"ROI:                 {summary.roi:+.2%}",
+        f"Stake ROI:           {summary.roi:+.2%}",
         "",
         f"Total Staked:        {summary.total_staked:.2f}u",
         f"Total Profit:        {summary.profit_units:+.2f}u",
@@ -99,7 +108,7 @@ def build_report_text(
                 f"Total Props:        {prop_summary.rows} ({prop_summary.settled_rows} settled, {prop_summary.open_rows} pending, {prop_summary.void_rows} void)",
                 f"Record:             {prop_summary.won}-{prop_summary.lost}",
                 f"Win Rate:           {prop_summary.win_rate:.1%}",
-                f"Flat ROI:           {prop_summary.roi:+.2%}",
+                f"Flat Stake ROI:     {prop_summary.roi:+.2%}",
                 f"Flat Staked:        {prop_summary.total_staked:.2f}u",
                 f"Flat Profit:        {prop_summary.profit_units:+.2f}u",
                 "",
@@ -109,12 +118,23 @@ def build_report_text(
             lines.extend(
                 [
                     f"Kelly Record:       {prop_kelly_summary.won}-{prop_kelly_summary.lost}",
-                    f"Kelly ROI:          {prop_kelly_summary.roi:+.2%}",
+                    f"Kelly Stake ROI:    {prop_kelly_summary.roi:+.2%}",
                     f"Kelly Staked:       {prop_kelly_summary.total_staked:.2f}u",
                     f"Kelly Profit:       {prop_kelly_summary.profit_units:+.2f}u",
                     "",
                 ]
             )
+    if bankroll_summary is not None:
+        lines.extend(
+            [
+                "=" * 90,
+                "SHARED BANKROLL - ALL PAPER BETS + ARBS",
+                "=" * 90,
+                "",
+                *format_shared_bankroll(bankroll_summary),
+                "",
+            ]
+        )
     if arbitrage_summary_text is not None:
         lines.extend(
             [
@@ -164,8 +184,10 @@ def main() -> None:
     from src.database import PostgresConfig, PostgresHandler
 
     args = parse_args()
-    if args.arb_bankroll <= 0.0:
-        raise SystemExit("--arb-bankroll must be greater than zero")
+    if args.shared_bankroll <= 0.0:
+        raise SystemExit("--shared-bankroll must be greater than zero")
+    if args.paper_unit_dollars <= 0.0:
+        raise SystemExit("--paper-unit-dollars must be greater than zero")
 
     target_date = resolve_target_date(args.date)
 
@@ -184,6 +206,7 @@ def main() -> None:
     from settle_paper_trades import _settle_rows
     from settle_prop_alerts import (
         _format_arbitrage_summary,
+        _load_arbitrage_bet_rows,
         _load_arbitrage_summary,
         load_prop_bet_rows,
         settle_open_prop_bets,
@@ -205,7 +228,15 @@ def main() -> None:
     arb_summary = _load_arbitrage_summary(
         db_config,
         target_date.isoformat(),
-        args.arb_bankroll,
+        args.shared_bankroll,
+    )
+    arb_rows = _load_arbitrage_bet_rows(db_config)
+    bankroll_summary = summarize_shared_bankroll(
+        rows_fresh,
+        prop_rows,
+        arb_rows,
+        starting_bankroll=args.shared_bankroll,
+        paper_unit_dollars=args.paper_unit_dollars,
     )
     arbitrage_summary_text = (
         _format_arbitrage_summary(arb_summary)
@@ -222,6 +253,7 @@ def main() -> None:
         prop_kelly_summary=prop_kelly_summary,
         props_newly_settled=len(newly_settled_props),
         arbitrage_summary_text=arbitrage_summary_text,
+        bankroll_summary=bankroll_summary,
     )
     print(report_text)
     if args.email_report:

@@ -4,7 +4,11 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from scripts.email_daily_betting_report import (
+    build_report as build_daily_betting_report,
+)
 from scripts.settle_daily_paper_trades import build_report_text, send_email_report
+from src.betting.bankroll import summarize_shared_bankroll
 
 
 def test_build_report_text_contains_daily_summary() -> None:
@@ -51,15 +55,13 @@ def test_build_report_text_contains_daily_summary() -> None:
     )
 
     assert "[2026-08-24] Settlement scan: updated=3 missing_final=1 missing_close=0" in text
-    assert "MONEYLINE PAPER TRADING SUMMARY" in text
-    assert "Total Trades:        12 (10 settled, 2 pending)" in text
-    assert "ROI:                 +12.34%" in text
+    assert "Stake ROI:           +12.34%" in text
     assert "PLAYER PROPS PAPER TRADING SUMMARY" in text
     assert "Newly Settled:      2" in text
     assert "Total Props:        8 (6 settled, 1 pending, 1 void)" in text
     assert "Record:             4-2" in text
-    assert "Flat ROI:           +18.42%" in text
-    assert "Kelly ROI:          +22.11%" in text
+    assert "Flat Stake ROI:     +18.42%" in text
+    assert "Kelly Stake ROI:    +22.11%" in text
 
 
 def test_build_report_text_includes_arbitrage_summary() -> None:
@@ -86,6 +88,101 @@ def test_build_report_text_includes_arbitrage_summary() -> None:
 
     assert "ARBITRAGE PAPER TRADING SUMMARY" in text
     assert "Arbs expected: today 2 bets +$4.20 (+1.2% stake ROI)" in text
+
+
+def test_shared_bankroll_summary_uses_net_profit_over_total_staked() -> None:
+    summary = summarize_shared_bankroll(
+        [
+            {
+                "paper_date": "2026-08-24",
+                "status": "settled",
+                "stake_units": 2.0,
+                "profit_units": 1.5,
+            }
+        ],
+        [
+            {
+                "game_date": "2026-08-25",
+                "status": "won",
+                "stake_units": 1.0,
+                "profit_units": 1.2,
+            },
+            {
+                "game_date": "2026-08-26",
+                "status": "lost",
+                "stake_units": 1.0,
+                "profit_units": -1.0,
+            },
+            {
+                "game_date": "2026-08-26",
+                "status": "void",
+                "stake_units": 1.0,
+                "profit_units": 0.0,
+            },
+        ],
+        [{"event_date": "2026-08-25", "total_stake": 500.0, "expected_profit": 25.0}],
+        starting_bankroll=10_000.0,
+        paper_unit_dollars=100.0,
+    )
+
+    assert summary.total_bets == 4
+    assert summary.total_staked == 900.0
+    assert summary.net_profit == 195.0
+    assert summary.roi == 195.0 / 900.0
+    assert summary.current_bankroll == 10_195.0
+    assert [point.bankroll for point in summary.daily_points] == [
+        10_150.0,
+        10_295.0,
+        10_195.0,
+    ]
+    assert summary.max_drawdown == -100.0
+
+
+def test_daily_betting_report_includes_shared_bankroll_curve() -> None:
+    subject, text, _ = build_daily_betting_report(
+        date(2026, 8, 25),
+        [
+            {
+                "paper_date": "2026-08-24",
+                "status": "settled",
+                "side": "home",
+                "away_team": "NYY",
+                "home_team": "BAL",
+                "best_ml": "+150",
+                "best_decimal": "2.5",
+                "stake_units": "2",
+                "profit_units": "3",
+                "result": "win",
+            }
+        ],
+        [
+            {
+                "game_date": "2026-08-25",
+                "status": "lost",
+                "player": "A Batter",
+                "market": "batter_hits",
+                "point": 1.5,
+                "side": "over",
+                "price": "+100",
+                "decimal_odds": "2.0",
+                "stake_units": "1",
+                "profit_units": "-1",
+                "book": "book",
+                "matchup": "NYY@BAL",
+            }
+        ],
+        arb_summary=None,
+        arb_rows=[
+            {"event_date": "2026-08-25", "total_stake": 500.0, "expected_profit": 25.0}
+        ],
+        shared_bankroll=10_000.0,
+        paper_unit_dollars=100.0,
+    )
+
+    assert subject == "MLB Betting Report 2026-08-25 - ML +3.00u / Props -1.00u"
+    assert "SHARED BANKROLL - all paper bets + arbs" in text
+    assert "Current +$10,225.00" in text
+    assert "Staked +$800.00 | Net +$225.00 | Stake ROI +28.1%" in text
 
 
 def test_send_email_report_uses_gmail_smtp_env() -> None:
