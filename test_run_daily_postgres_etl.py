@@ -16,7 +16,7 @@ def test_daily_postgres_etl_defaults_to_yesterday(monkeypatch):
         return {
             "total_games": 3,
             "skipped": [1],
-            "completed": [2, 3],
+            "completed": [{"game_pk": 2}, {"game_pk": 3}, {"game_pk": 4, "error": "boom"}],
         }
 
     class FakeConfig:
@@ -32,9 +32,25 @@ def test_daily_postgres_etl_defaults_to_yesterday(monkeypatch):
     daily_pipeline_module = import_module("src.etl.daily_pipeline")
     database_module = import_module("src.database")
     backfill_module = import_module("src.etl.postgres_backfill")
-    monkeypatch.setattr(daily_pipeline_module, "run_daily_pipeline", fake_run_daily_pipeline)
-    monkeypatch.setattr(database_module.PostgresConfig, "from_env", classmethod(lambda cls: FakeConfig()))
-    monkeypatch.setattr(backfill_module, "run_postgres_backfill", lambda config, path: FakeBackfillSummary())
+    monkeypatch.setattr(
+        daily_pipeline_module, "run_daily_pipeline", fake_run_daily_pipeline
+    )
+    monkeypatch.setattr(
+        database_module.PostgresConfig, "from_env", classmethod(lambda cls: FakeConfig())
+    )
+    def fake_run_postgres_backfill(
+        config, path, *, force_game_pks=None
+    ):
+        observed["backfill_args"] = {
+            "config": config,
+            "path": path,
+            "force_game_pks": force_game_pks,
+        }
+        return FakeBackfillSummary()
+
+    monkeypatch.setattr(
+        backfill_module, "run_postgres_backfill", fake_run_postgres_backfill
+    )
 
     target_date = module.resolve_target_date(None)
 
@@ -45,12 +61,28 @@ def test_daily_postgres_etl_defaults_to_yesterday(monkeypatch):
 
     assert observed["pipeline_args"] == {
         "target_date": target_date,
-        "skip_existing": True,
+        "skip_existing": False,
         "poll_live": False,
     }
+    assert observed["backfill_args"]["force_game_pks"] == [2, 3]
     assert target_date == datetime.now(tz=UTC).date() - timedelta(days=1)
 
 
+
+
+def test_completed_game_pks_accepts_legacy_ints_and_processed_dicts():
+    module = import_module("scripts.run_daily_postgres_etl")
+
+    assert module.completed_game_pks(
+        {
+            "completed": [
+                1,
+                {"game_pk": "2"},
+                {"game_pk": 3, "error": "failed"},
+                {"other": 4},
+            ]
+        }
+    ) == [1, 2]
 
 def test_resolve_target_date_parses_explicit_date():
     module = import_module("scripts.run_daily_postgres_etl")

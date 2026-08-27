@@ -6,7 +6,7 @@ for fetching game data by date and handling live game polling.
 """
 
 import asyncio
-from datetime import date, timedelta
+from datetime import date
 
 from src.etl.daily_pipeline import (
     DailyPipeline,

@@ -178,6 +178,64 @@ def test_simulate_season_applies_market_prior_offsets_to_future_logits():
     assert projection.market_prior_scale == 1.0
 
 
+def test_simulate_season_reports_decayed_prior_contributions():
+    teams = {1: _team(1, "AL", "East"), 2: _team(2, "AL", "East")}
+    games = [
+        _game(
+            1,
+            date(2026, 3, 28),
+            1,
+            2,
+            status="Final",
+            away_runs=5,
+            home_runs=3,
+        ),
+        _game(2, date(2026, 3, 29), 1, 2),
+    ]
+    predictor = PairPredictor({(1, 2): 0.5})
+
+    projection = simulate_season(
+        games=games,
+        teams=teams,
+        as_of_date=date(2026, 3, 29),
+        trials=3,
+        predictor=predictor,
+        wild_cards_per_league=0,
+        team_prior_offsets={1: 2.0, 2: 0.0},
+        team_prior_scale=0.5,
+        team_prior_decay_games=1.0,
+    )
+
+    row = projection.by_team_id()[1]
+    assert row.actual_wins_as_of == 1
+    assert row.team_prior_offset == pytest.approx(2.0)
+    assert row.team_prior_weight == pytest.approx(0.5)
+    assert row.combined_prior_offset == pytest.approx(0.5)
+    assert projection.team_prior_decay_games == pytest.approx(1.0)
+
+
+def test_simulate_season_applies_roster_prior_offsets_to_future_logits():
+    teams = {1: _team(1, "AL", "East"), 2: _team(2, "AL", "East")}
+    games = [_game(1, date(2026, 3, 29), 1, 2)]
+    predictor = PairPredictor({(1, 2): 0.5})
+
+    projection = simulate_season(
+        games=games,
+        teams=teams,
+        as_of_date=date(2026, 3, 29),
+        trials=3,
+        predictor=predictor,
+        wild_cards_per_league=0,
+        roster_prior_offsets={2: 100.0},
+        roster_prior_scale=1.0,
+    )
+
+    by_team = projection.by_team_id()
+    assert by_team[2].expected_wins == 1.0
+    assert by_team[2].roster_prior_offset == pytest.approx(100.0)
+    assert projection.roster_prior_scale == 1.0
+
+
 def test_simulate_season_applies_schedule_strength_offsets_to_future_logits():
     teams = {1: _team(1, "AL", "East"), 2: _team(2, "AL", "East")}
     games = [_game(1, date(2026, 3, 29), 1, 2)]
@@ -261,6 +319,26 @@ def test_simulate_season_rejects_invalid_probability_adjustments():
             predictor=predictor,
             market_prior_scale=-0.1,
         )
+    with pytest.raises(ValueError, match="roster_prior_scale"):
+        simulate_season(
+            games=games,
+            teams=teams,
+            as_of_date=date(2026, 3, 29),
+            trials=1,
+            predictor=predictor,
+            roster_prior_scale=-0.1,
+        )
+
+    with pytest.raises(ValueError, match="team_prior_decay_games"):
+        simulate_season(
+            games=games,
+            teams=teams,
+            as_of_date=date(2026, 3, 29),
+            trials=1,
+            predictor=predictor,
+            team_prior_decay_games=-1.0,
+        )
+
 
     with pytest.raises(ValueError, match="schedule_strength_scale"):
         simulate_season(

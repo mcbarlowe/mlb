@@ -7,7 +7,14 @@ to convert API responses into tabular formats.
 
 from pathlib import Path
 
-from src.data import BoxscoreData, GameFeedData, LinescoreData, PlayerData, ReferenceData, TeamData
+from src.data import (
+    BoxscoreData,
+    GameFeedData,
+    LinescoreData,
+    PlayerData,
+    ReferenceData,
+    TeamData,
+)
 from src.endpoints.game_feed import GameFeed
 from src.endpoints.pitch_types import PitchTypes
 from src.endpoints.positions import Positions
@@ -149,7 +156,6 @@ def example_batch_processing():
     """
     Example: Batch process multiple games.
     """
-    import json
 
     game_pks = [716828, 716829, 716830]  # Example game IDs
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+from datetime import date
 
+from scripts import settle_paper_trades
 from src.betting.backtest import (
     MoneylineGame,
     backtest_moneyline,
@@ -394,7 +396,51 @@ def test_paper_trade_summary_aggregates_settled_rows():
     assert math.isclose(summary.total_staked, 4.0)
     assert math.isclose(summary.profit_units, 0.4)
     assert math.isclose(summary.roi, 0.1)
+    assert math.isclose(summary.starting_bankroll, 100.0)
+    assert math.isclose(summary.current_bankroll, 100.4)
+    assert math.isclose(summary.bankroll_return, 0.004)
     assert summary.clv_rows == 2
+
+
+def test_settle_paper_trades_report_prints_bankroll_return(capsys):
+    win = settle_paper_trade_row(_paper_settlement_row("home"), home_won=True)
+    loss = settle_paper_trade_row(_paper_settlement_row("away"), home_won=True)
+
+    settle_paper_trades._print_report(
+        [win, loss, {"status": "open"}],
+        bankroll_units=50.0,
+    )
+
+    captured = capsys.readouterr()
+    assert "Stake ROI +10.00%" in captured.out
+    assert "Bankroll +50.40u (+0.80%)" in captured.out
+
+
+def test_prior_open_game_pks_filters_settled_and_today_rows():
+    rows = [
+        {"game_pk": "1", "paper_date": "2026-08-14", "status": "open"},
+        {"game_pk": "2", "paper_date": "2026-08-14", "status": "settled"},
+        {"game_pk": "3", "paper_date": "2026-08-15", "status": "open"},
+        {"game_pk": "4", "paper_date": "2026-08-13", "status": "open"},
+    ]
+
+    assert settle_paper_trades._prior_open_game_pks(
+        rows,
+        today=date(2026, 8, 15),
+    ) == [1, 4]
+
+
+def test_prior_paper_game_pks_includes_settled_prior_rows():
+    rows = [
+        {"game_pk": "1", "paper_date": "2026-08-14", "status": "open"},
+        {"game_pk": "2", "paper_date": "2026-08-14", "status": "settled"},
+        {"game_pk": "3", "paper_date": "2026-08-15", "status": "open"},
+    ]
+
+    assert settle_paper_trades._prior_paper_game_pks(
+        rows,
+        today=date(2026, 8, 15),
+    ) == [1, 2]
 
 
 def test_normalize_paper_trade_row_coerces_db_values():

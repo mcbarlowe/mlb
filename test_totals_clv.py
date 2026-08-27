@@ -14,9 +14,15 @@ from src.betting.totals_clv import (
 )
 
 
-def _line(point: float, over_ml: float = -110, under_ml: float = -110) -> TotalsBookLine:
+def _line(
+    point: float,
+    over_ml: float = -110,
+    under_ml: float = -110,
+    *,
+    bookmaker: str = "draftkings",
+) -> TotalsBookLine:
     return TotalsBookLine(
-        bookmaker="draftkings",
+        bookmaker=bookmaker,
         point=point,
         over_ml=over_ml,
         under_ml=under_ml,
@@ -79,6 +85,108 @@ def test_select_totals_clv_bet_records_under_push_and_kelly_cap() -> None:
     assert bet.result == "push"
     assert bet.profit == 0.0
     assert math.isclose(bet.stake, 0.05)
+
+
+def test_best_execution_over_uses_lower_point_then_better_price() -> None:
+    game = TotalsClvGame(
+        game_pk=4,
+        season=2025,
+        open_lines=[
+            _line(
+                8.0,
+                over_ml=150,
+                under_ml=-180,
+                bookmaker="lower_better_price",
+            ),
+            _line(8.5, over_ml=-110, under_ml=-110, bookmaker="mid_a"),
+            _line(8.5, over_ml=-115, under_ml=-105, bookmaker="mid_b"),
+            _line(
+                9.0,
+                over_ml=-130,
+                under_ml=110,
+                bookmaker="higher_worse_price",
+            ),
+            _line(9.0, over_ml=105, under_ml=-125, bookmaker="higher_best_price"),
+        ],
+        close_lines=[_line(9.5)],
+        simulated_totals=[10, 10, 9, 8, 7],
+        actual_total=10,
+    )
+
+    bet = select_totals_clv_bet(
+        game,
+        edge_threshold=0.05,
+        execution="best",
+        staking="flat",
+    )
+
+    assert bet is not None
+    assert bet.side == "over"
+    assert math.isclose(bet.model_prob, 0.6)
+    assert bet.open_point == 8.0
+    assert bet.open_ml == 150
+    assert math.isclose(bet.open_decimal, 2.5)
+    assert bet.execution == "best"
+    assert bet.execution_bookmakers == ("lower_better_price",)
+    assert bet.execution_fair_prob == bet.open_market_prob
+    assert math.isclose(bet.execution_model_prob or 0.0, 0.7)
+    assert math.isclose(bet.point_clv, 1.5)
+
+
+def test_best_execution_under_uses_higher_point_then_better_price() -> None:
+    game = TotalsClvGame(
+        game_pk=5,
+        season=2025,
+        open_lines=[
+            _line(
+                8.5,
+                over_ml=-180,
+                under_ml=150,
+                bookmaker="higher_best_price",
+            ),
+            _line(
+                8.5,
+                over_ml=-170,
+                under_ml=140,
+                bookmaker="higher_other_price",
+            ),
+            _line(8.0, over_ml=110, under_ml=-130, bookmaker="mid"),
+            _line(
+                7.5,
+                over_ml=110,
+                under_ml=-130,
+                bookmaker="lower_worse_price",
+            ),
+            _line(
+                7.5,
+                over_ml=-135,
+                under_ml=115,
+                bookmaker="lower_best_price",
+            ),
+        ],
+        close_lines=[_line(7.0)],
+        simulated_totals=[5, 6, 7, 8, 9],
+        actual_total=6,
+    )
+
+    bet = select_totals_clv_bet(
+        game,
+        edge_threshold=0.05,
+        execution="best",
+        staking="flat",
+    )
+
+    assert bet is not None
+    assert bet.side == "under"
+    assert math.isclose(bet.model_prob, 0.7)
+    assert bet.open_point == 8.5
+    assert bet.open_ml == 150
+    assert math.isclose(bet.open_decimal, 2.5)
+    assert bet.execution == "best"
+    assert bet.execution_bookmakers == ("higher_best_price",)
+    assert bet.execution_fair_prob == bet.open_market_prob
+    assert math.isclose(bet.execution_model_prob or 0.0, 0.8)
+    assert math.isclose(bet.point_clv, 1.5)
 
 
 def test_summarize_totals_clv_reports_roi_and_beat_close_rate() -> None:
@@ -149,10 +257,15 @@ def test_write_outputs_exports_totals_clv_json_and_csv(tmp_path) -> None:
     )
 
     payload = json.loads(out_json.read_text())
+    assert payload["metadata"]["execution"] == "consensus"
     assert payload["summaries"][0]["n_bets"] == 1
+    assert payload["summaries"][0]["settings"]["execution"] == "consensus"
     assert payload["games"][0]["open_point"] == 8.0
+    assert payload["games"][0]["execution"] == "consensus"
     assert payload["bets"][0]["side"] == "over"
+    assert payload["bets"][0]["execution"] == "consensus"
     with out_csv.open() as handle:
         csv_rows = list(csv.DictReader(handle))
     assert csv_rows[0]["staking"] == "flat"
     assert csv_rows[0]["side"] == "over"
+    assert csv_rows[0]["execution"] == "consensus"

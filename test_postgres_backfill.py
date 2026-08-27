@@ -54,13 +54,19 @@ def test_postgres_backfill_resumes_completed_games(tmp_path):
             {"source_key": "2022/631220.json", "status": "complete"}
         ]
         assert db.get_row_count("games") == 1
-        assert db.get_row_count("pitches") == 259
+        assert db.get_row_count("pitches") == 256
 
     second_run = run_postgres_backfill(db_config, tmp_path)
     assert second_run.discovered_files == 1
     assert second_run.processed_games == 0
     assert second_run.skipped_completed == 1
     assert second_run.failed_games == 0
+
+    forced_run = run_postgres_backfill(db_config, tmp_path, force_game_pks=[631220])
+    assert forced_run.discovered_files == 1
+    assert forced_run.processed_games == 1
+    assert forced_run.skipped_completed == 0
+    assert forced_run.failed_games == 0
 
 
 
@@ -87,7 +93,7 @@ def test_postgres_bulk_backfill_resumes_completed_seasons(tmp_path):
             {"season": 2022, "status": "complete"}
         ]
         assert db.get_row_count("games") == 1
-        assert db.get_row_count("pitches") == 259
+        assert db.get_row_count("pitches") == 256
 
     second_run = run_postgres_bulk_backfill(db_config, tmp_path)
     assert second_run.discovered_seasons == 1
