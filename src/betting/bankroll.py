@@ -92,16 +92,28 @@ def _prop_events(
     rows: Sequence[Mapping[str, object]],
     *,
     paper_unit_dollars: float,
+    prop_stakes: Sequence[float] | None,
 ) -> list[BankrollEvent]:
     events: list[BankrollEvent] = []
-    for row in rows:
+    if prop_stakes is not None and len(prop_stakes) != len(rows):
+        raise ValueError("prop_stakes must match prop rows length")
+    for index, row in enumerate(rows):
         if str(row.get("status", "")).lower() not in {"won", "lost"}:
             continue
         event_date = _as_date(row.get("game_date") or row.get("alert_date"))
         if event_date is None:
             continue
-        stake_units = _as_float(row.get("stake_units"), 1.0)
-        profit_units = _as_float(row.get("profit_units"))
+        if prop_stakes is None:
+            stake_units = _as_float(row.get("stake_units"), 1.0)
+            profit_units = _as_float(row.get("profit_units"))
+        else:
+            stake_units = prop_stakes[index]
+            decimal_odds = _as_float(row.get("decimal_odds"))
+            profit_units = (
+                stake_units * (decimal_odds - 1.0)
+                if str(row.get("status", "")).lower() == "won"
+                else -stake_units
+            )
         if stake_units <= 0.0:
             continue
         events.append(
@@ -145,12 +157,15 @@ def summarize_shared_bankroll(
     *,
     starting_bankroll: float,
     paper_unit_dollars: float,
+    prop_stakes: Sequence[float] | None = None,
 ) -> SharedBankrollSummary:
     """Aggregate all paper ledgers into one realized bankroll curve.
 
-    ROI is always net profit divided by total money staked. Moneyline and prop
-    rows are stored in units, so ``paper_unit_dollars`` converts those stakes and
-    profits into the same dollar bankroll used by arbitrage rows.
+    ROI is always net profit divided by total money staked. Moneyline rows are
+    stored in units; prop rows use ``prop_stakes`` when supplied so reports can
+    aggregate Kelly-sized prop bets instead of the flat stake persisted in the
+    ledger. ``paper_unit_dollars`` converts those units into the same dollar
+    bankroll used by arbitrage rows.
     """
     if starting_bankroll <= 0.0:
         raise ValueError("starting_bankroll must be greater than zero")
@@ -160,7 +175,11 @@ def summarize_shared_bankroll(
     events = sorted(
         [
             *_moneyline_events(moneyline_rows, paper_unit_dollars=paper_unit_dollars),
-            *_prop_events(prop_rows, paper_unit_dollars=paper_unit_dollars),
+            *_prop_events(
+                prop_rows,
+                paper_unit_dollars=paper_unit_dollars,
+                prop_stakes=prop_stakes,
+            ),
             *_arbitrage_events(arbitrage_rows),
         ],
         key=lambda event: event.event_date,

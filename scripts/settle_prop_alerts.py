@@ -240,12 +240,13 @@ def _build_push_lines(
     graded = [x for x in newly if x["status"] in ("won", "lost")]
     n_w = sum(1 for x in graded if x["status"] == "won")
     n_l = len(graded) - n_w
-    n_net = sum(float(x["profit_units"]) for x in graded)
+    n_stake = sum(float(x.get("kelly_stake_units", x.get("stake_units", 0.0))) for x in graded)
+    n_net = sum(float(x.get("kelly_profit_units", x.get("profit_units", 0.0))) for x in graded)
     lines = [
-        f"Props settled {today}: {n_w}-{n_l}, {n_net:+.2f}u"
-        + (f" ({n_net / len(graded):+.0%} stake ROI)" if graded else ""),
+        f"Props settled {today}: {n_w}-{n_l}, kelly {n_net:+.2f}u"
+        + (f" ({n_net / n_stake:+.0%} stake ROI)" if n_stake else ""),
         _format_unit_bankroll(
-            "Props",
+            "Props Kelly",
             summary.profit_units,
             prop_bankroll,
             today_net=n_net,
@@ -339,8 +340,10 @@ def settle_open_prop_bets(config: PostgresConfig) -> list[dict]:
                     (status, value, profit, alert_date, player, market, point, side),
                 )
                 newly.append({
+                    "alert_date": alert_date, "game_date": game_date,
                     "player": player, "market": market, "point": point,
                     "side": side, "price": price, "book": book,
+                    "matchup": None, "decimal_odds": dec,
                     "status": status, "result_value": value,
                     "profit_units": profit, "stake_units": stake,
                 })
@@ -435,31 +438,51 @@ def main() -> None:
               f"{float(row['kelly_stake_units']):>5.2f}")
     print("-" * 106)
 
-    summary = summarize_prop_bet_rows(ledger)
-    if summary.settled_rows:
-        print(f"settled: {summary.won}-{summary.lost} | "
-              f"staked {summary.total_staked:.0f}u | net {summary.profit_units:+.2f}u | "
-              f"stake ROI {summary.roi:+.1%} | pending {summary.open_rows} | "
-              f"void {summary.void_rows}")
-    else:
-        print(f"nothing settled yet | pending {summary.open_rows} | "
-              f"void {summary.void_rows}")
-    print(_format_unit_bankroll("Props", summary.profit_units, args.prop_bankroll))
-    if arb_summary is not None:
-        print(_format_arbitrage_summary(arb_summary))
-
+    flat = summarize_prop_bet_rows(ledger)
     kelly = summarize_prop_kelly(ledger, kelly_stakes)
     open_kelly = sum(
         stake for row, stake in zip(ledger, kelly_stakes, strict=True)
         if str(row["status"]) == "open"
     )
+    kelly_by_key = {
+        (
+            str(row.get("player")),
+            str(row.get("market")),
+            float(row.get("point")),
+            str(row.get("side")),
+            str(row.get("game_date")),
+        ): stake
+        for row, stake in zip(ledger, kelly_stakes, strict=True)
+    }
+    for row in newly:
+        stake = kelly_by_key.get(
+            (
+                str(row.get("player")),
+                str(row.get("market")),
+                float(row.get("point")),
+                str(row.get("side")),
+                str(row.get("game_date")),
+            ),
+            0.0,
+        )
+        row["kelly_stake_units"] = stake
+        if str(row["status"]) == "won":
+            row["kelly_profit_units"] = stake * (float(row["decimal_odds"]) - 1.0)
+        elif str(row["status"]) == "lost":
+            row["kelly_profit_units"] = -stake
+        else:
+            row["kelly_profit_units"] = 0.0
     if kelly.settled_rows:
-        print(f"kelly (1/4K, caps): {kelly.won}-{kelly.lost} | "
-              f"staked {kelly.total_staked:.2f}u | net {kelly.profit_units:+.2f}u | "
-              f"ROI {kelly.roi:+.1%} | open {open_kelly:.2f}u")
+        print(f"settled: {kelly.won}-{kelly.lost} | "
+              f"kelly staked {kelly.total_staked:.2f}u | net {kelly.profit_units:+.2f}u | "
+              f"stake ROI {kelly.roi:+.1%} | pending {flat.open_rows} | "
+              f"void {flat.void_rows} | open {open_kelly:.2f}u")
     else:
-        print(f"kelly (1/4K, caps): {open_kelly:.2f}u outstanding "
-              f"(flat baseline = 1u/bet)")
+        print(f"nothing settled yet | pending {flat.open_rows} | "
+              f"void {flat.void_rows} | open {open_kelly:.2f}u")
+    print(_format_unit_bankroll("Props Kelly", kelly.profit_units, args.prop_bankroll))
+    if arb_summary is not None:
+        print(_format_arbitrage_summary(arb_summary))
 
     should_push = args.push and (
         bool(newly)
@@ -472,7 +495,7 @@ def main() -> None:
         lines = _build_push_lines(
             today,
             newly,
-            summary=summary,
+            summary=kelly,
             arb_summary=arb_summary,
             prop_bankroll=args.prop_bankroll,
         )

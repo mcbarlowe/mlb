@@ -133,6 +133,7 @@ def build_report(
         arb_rows,
         starting_bankroll=shared_bankroll,
         paper_unit_dollars=paper_unit_dollars,
+        prop_stakes=kelly_stakes,
     )
 
     ml_night = [
@@ -161,7 +162,6 @@ def build_report(
     else:
         lines.append("  Moneyline: no bets graded")
     prop_graded = [r for r in prop_night if str(r["status"]) in ("won", "lost")]
-    prop_night_pl = sum(_f(r.get("profit_units")) for r in prop_graded)
     prop_night_kelly_pl = sum(
         _f(r.get("kelly_stake_units")) * (_f(r.get("decimal_odds")) - 1.0)
         if str(r["status"]) == "won"
@@ -173,13 +173,12 @@ def build_report(
         pl_ = sum(1 for r in prop_night if str(r["status"]) == "lost")
         pv = sum(1 for r in prop_night if str(r["status"]) == "void")
         lines.append(
-            f"  Props: {pw}-{pl_}, flat {prop_night_pl:+.2f}u / "
-            f"kelly {prop_night_kelly_pl:+.2f}u"
+            f"  Props: {pw}-{pl_}, kelly {prop_night_kelly_pl:+.2f}u"
             + (f" ({pv} void)" if pv else "")
         )
     else:
         lines.append("  Props: no bets graded")
-    lines.append(f"  Night P/L: {ml_night_pl + prop_night_pl:+.2f}u")
+    lines.append(f"  Night P/L: {ml_night_pl + prop_night_kelly_pl:+.2f}u")
     if arb_summary is not None:
         lines.append(f"  {_format_arbitrage_summary(arb_summary)}")
 
@@ -204,18 +203,14 @@ def build_report(
 
     # --- All-time props ----------------------------------------------------- #
     lines.append("")
-    lines.append("PROPS - all time")
+    lines.append("PROPS - all time (Kelly)")
     lines.append(
-        f"  Record {prop_all.won}-{prop_all.lost} ({prop_all.win_rate:.1%}) | "
-        f"staked {prop_all.total_staked:.2f}u | profit {prop_all.profit_units:+.2f}u | "
-        f"stake ROI {_roi_str(prop_all)}"
+        f"  Record {prop_kelly.won}-{prop_kelly.lost} ({prop_kelly.win_rate:.1%}) | "
+        f"staked {prop_kelly.total_staked:.2f}u | "
+        f"profit {prop_kelly.profit_units:+.2f}u | "
+        f"stake ROI {_roi_str(prop_kelly)}"
     )
     lines.append(f"  void {prop_all.void_rows} | open {prop_all.open_rows}")
-    lines.append(
-        f"  Kelly 1/4 (5% cap, player/game caps): "
-        f"staked {prop_kelly.total_staked:.2f}u | "
-        f"profit {prop_kelly.profit_units:+.2f}u | stake ROI {_roi_str(prop_kelly)}"
-    )
 
     # --- Outstanding -------------------------------------------------------- #
     lines.append("")
@@ -226,7 +221,7 @@ def build_report(
     text = "\n".join(lines)
     subject = (
         f"MLB Betting Report {night_str} - "
-        f"ML {ml_all.profit_units:+.2f}u / Props {prop_all.profit_units:+.2f}u"
+        f"ML {ml_all.profit_units:+.2f}u / Props Kelly {prop_kelly.profit_units:+.2f}u"
     )
     html = (
         '<pre style="font-family:ui-monospace,Menlo,monospace;font-size:13px;'

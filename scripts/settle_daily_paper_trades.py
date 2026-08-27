@@ -101,26 +101,21 @@ def build_report_text(
         lines.extend(
             [
                 "=" * 90,
-                "PLAYER PROPS PAPER TRADING SUMMARY",
+                "PLAYER PROPS PAPER TRADING SUMMARY (KELLY)",
                 "=" * 90,
                 "",
                 f"Newly Settled:      {props_newly_settled}",
                 f"Total Props:        {prop_summary.rows} ({prop_summary.settled_rows} settled, {prop_summary.open_rows} pending, {prop_summary.void_rows} void)",
                 f"Record:             {prop_summary.won}-{prop_summary.lost}",
                 f"Win Rate:           {prop_summary.win_rate:.1%}",
-                f"Flat Stake ROI:     {prop_summary.roi:+.2%}",
-                f"Flat Staked:        {prop_summary.total_staked:.2f}u",
-                f"Flat Profit:        {prop_summary.profit_units:+.2f}u",
-                "",
             ]
         )
         if prop_kelly_summary is not None:
             lines.extend(
                 [
-                    f"Kelly Record:       {prop_kelly_summary.won}-{prop_kelly_summary.lost}",
-                    f"Kelly Stake ROI:    {prop_kelly_summary.roi:+.2%}",
-                    f"Kelly Staked:       {prop_kelly_summary.total_staked:.2f}u",
-                    f"Kelly Profit:       {prop_kelly_summary.profit_units:+.2f}u",
+                    f"Stake ROI:          {prop_kelly_summary.roi:+.2%}",
+                    f"Total Staked:       {prop_kelly_summary.total_staked:.2f}u",
+                    f"Total Profit:       {prop_kelly_summary.profit_units:+.2f}u",
                     "",
                 ]
             )
@@ -237,6 +232,7 @@ def main() -> None:
         arb_rows,
         starting_bankroll=args.shared_bankroll,
         paper_unit_dollars=args.paper_unit_dollars,
+        prop_stakes=prop_kelly_stakes,
     )
     arbitrage_summary_text = (
         _format_arbitrage_summary(arb_summary)

@@ -56,12 +56,13 @@ def test_build_report_text_contains_daily_summary() -> None:
 
     assert "[2026-08-24] Settlement scan: updated=3 missing_final=1 missing_close=0" in text
     assert "Stake ROI:           +12.34%" in text
-    assert "PLAYER PROPS PAPER TRADING SUMMARY" in text
+    assert "PLAYER PROPS PAPER TRADING SUMMARY (KELLY)" in text
     assert "Newly Settled:      2" in text
     assert "Total Props:        8 (6 settled, 1 pending, 1 void)" in text
     assert "Record:             4-2" in text
-    assert "Flat Stake ROI:     +18.42%" in text
-    assert "Kelly Stake ROI:    +22.11%" in text
+    assert "Stake ROI:          +22.11%" in text
+    assert "Total Staked:       12.50u" in text
+    assert "Flat" not in text
 
 
 def test_build_report_text_includes_arbitrage_summary() -> None:
@@ -106,12 +107,14 @@ def test_shared_bankroll_summary_uses_net_profit_over_total_staked() -> None:
                 "status": "won",
                 "stake_units": 1.0,
                 "profit_units": 1.2,
+                "decimal_odds": 2.2,
             },
             {
                 "game_date": "2026-08-26",
                 "status": "lost",
                 "stake_units": 1.0,
                 "profit_units": -1.0,
+                "decimal_odds": 2.0,
             },
             {
                 "game_date": "2026-08-26",
@@ -123,19 +126,20 @@ def test_shared_bankroll_summary_uses_net_profit_over_total_staked() -> None:
         [{"event_date": "2026-08-25", "total_stake": 500.0, "expected_profit": 25.0}],
         starting_bankroll=10_000.0,
         paper_unit_dollars=100.0,
+        prop_stakes=[2.0, 0.5, 0.0],
     )
 
     assert summary.total_bets == 4
-    assert summary.total_staked == 900.0
-    assert summary.net_profit == 195.0
-    assert summary.roi == 195.0 / 900.0
-    assert summary.current_bankroll == 10_195.0
+    assert summary.total_staked == 950.0
+    assert summary.net_profit == 365.0
+    assert summary.roi == 365.0 / 950.0
+    assert summary.current_bankroll == 10_365.0
     assert [point.bankroll for point in summary.daily_points] == [
         10_150.0,
-        10_295.0,
-        10_195.0,
+        10_415.0,
+        10_365.0,
     ]
-    assert summary.max_drawdown == -100.0
+    assert summary.max_drawdown == -50.0
 
 
 def test_daily_betting_report_includes_shared_bankroll_curve() -> None:
@@ -165,6 +169,7 @@ def test_daily_betting_report_includes_shared_bankroll_curve() -> None:
                 "side": "over",
                 "price": "+100",
                 "decimal_odds": "2.0",
+                "adj_prob": "0.75",
                 "stake_units": "1",
                 "profit_units": "-1",
                 "book": "book",
@@ -192,10 +197,11 @@ def test_daily_betting_report_includes_shared_bankroll_curve() -> None:
         paper_unit_dollars=100.0,
     )
 
-    assert subject == "MLB Betting Report 2026-08-25 - ML +3.00u / Props -1.00u"
+    assert subject == "MLB Betting Report 2026-08-25 - ML +3.00u / Props Kelly -5.00u"
+    assert "Props: 0-1, kelly -5.00u" in text
     assert "SHARED BANKROLL - all paper bets + arbs" in text
-    assert "Current +$10,225.00" in text
-    assert "Staked +$800.00 | Net +$225.00 | Stake ROI +28.1%" in text
+    assert "Current +$9,825.00" in text
+    assert "Staked +$1,200.00 | Net -$175.00 | Stake ROI -14.6%" in text
     assert "OUTSTANDING" in text
     assert "Props pending: 1" in text
     assert "A Batter" not in text
