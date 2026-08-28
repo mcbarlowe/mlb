@@ -44,6 +44,17 @@ class PredictorBuilder(Protocol):
 TeamLabels = Mapping[int, tuple[str, str]]
 
 
+
+
+def resolve_registered_model_version(
+    tracking_uri: str | None,
+    model_name: str,
+) -> str:
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(tracking_uri=tracking_uri)
+    version = client.get_model_version_by_alias(model_name, "champion")
+    return f"v{version.version}"
 def _parse_date(value: str) -> date:
     try:
         return date.fromisoformat(value)
@@ -131,6 +142,7 @@ def build_prediction_batch(
     model_name: str = DEFAULT_REGISTERED_STRENGTH_MODEL,
     tracking_uri: str | None = DEFAULT_MLFLOW_TRACKING_URI,
     all_games: bool = False,
+    model_version: str | None = None,
     include_active_rosters: bool = True,
     slate_loader: Callable[..., Sequence[SlateGame]] = fetch_slate_games,
     team_label_loader: Callable[[int], TeamLabels] = _fetch_team_labels,
@@ -139,6 +151,9 @@ def build_prediction_batch(
         [int, str], tuple[tuple[int, ...], tuple[int, ...]]
     ] = active_roster_ids,
     clock: Callable[[], datetime] | None = None,
+    model_version_resolver: Callable[[str | None, str], str] = (
+        resolve_registered_model_version
+    ),
 ) -> MoneylinePredictionBatch:
     """Score a slate without loading odds or applying any betting policy."""
     states = None if all_games else {"Preview"}
@@ -147,6 +162,10 @@ def build_prediction_batch(
         raise ValueError(f"No slate games found for {target_date.isoformat()}")
 
     labels = team_label_loader(target_date.year)
+    resolved_model_version = model_version or model_version_resolver(
+        tracking_uri,
+        model_name,
+    )
     predictor = predictor_builder(
         target_date,
         tracking_uri=tracking_uri,
@@ -192,6 +211,7 @@ def build_prediction_batch(
         prediction_date=target_date.isoformat(),
         predicted_at=predicted_at.astimezone(UTC).isoformat(),
         model_name=model_name,
+        model_version=resolved_model_version,
         games=tuple(predictions),
     )
 

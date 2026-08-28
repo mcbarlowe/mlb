@@ -44,6 +44,7 @@ def prediction_batch(
         prediction_date="2026-08-27",
         predicted_at=PREDICTED_AT.isoformat(),
         model_name="mlb-team-strength-win",
+        model_version="v42",
         games=games if games is not None else (game_prediction(),),
     )
 
@@ -61,6 +62,7 @@ def test_contract_round_trip_and_atomic_replace(tmp_path: Path) -> None:
         "prediction_date",
         "predicted_at",
         "model_name",
+        "model_version",
         "games",
     }
     assert payload["contract_version"] == "v1"
@@ -87,6 +89,7 @@ def test_contract_rejects_invalid_probability_duplicate_key_and_version() -> Non
             prediction_date="2026-08-27",
             predicted_at=PREDICTED_AT.isoformat(),
             model_name="model",
+            model_version="v1",
             games=(),
             contract_version="v2",
         )
@@ -147,6 +150,7 @@ def test_build_batch_reuses_live_model_inference_without_betting_inputs() -> Non
         date(2026, 8, 27),
         model_name="registered-win-model",
         tracking_uri="file:mlruns",
+        model_version="v42",
         slate_loader=slate_loader,
         team_label_loader=lambda season: {
             111: ("Boston Red Sox", "BOS"),
@@ -174,4 +178,5 @@ def test_build_batch_reuses_live_model_inference_without_betting_inputs() -> Non
         }
     ]
     assert batch.model_name == "registered-win-model"
+    assert batch.model_version == "v42"
     assert batch.games == (game_prediction(),)

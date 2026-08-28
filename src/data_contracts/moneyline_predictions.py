@@ -123,6 +123,7 @@ class MoneylinePredictionBatch:
     prediction_date: str
     predicted_at: str
     model_name: str
+    model_version: str
     games: tuple[MoneylineGamePrediction, ...]
     contract_version: str = CONTRACT_VERSION
 
@@ -143,6 +144,11 @@ class MoneylinePredictionBatch:
             self,
             "model_name",
             _required_text(self.model_name, "model_name"),
+        )
+        object.__setattr__(
+            self,
+            "model_version",
+            _required_text(self.model_version, "model_version"),
         )
         games = tuple(self.games)
         game_pks = [game.game_pk for game in games]
@@ -174,6 +180,7 @@ class MoneylinePredictionBatch:
             prediction_date=str(payload.get("prediction_date") or ""),
             predicted_at=str(payload.get("predicted_at") or ""),
             model_name=str(payload.get("model_name") or ""),
+            model_version=str(payload.get("model_version") or ""),
             games=tuple(games),
         )
 
