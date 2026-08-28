@@ -21,12 +21,15 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.backtest_moneyline import load_finals, walkforward_home_probs
-from scripts.backtest_moneyline_lineshop import PANEL_PRIORITY, load_quotes
 from src.database import PostgresConfig
+from src.market_data.moneyline_quotes import (
+    MONEYLINE_PANEL,
+    load_normalized_moneyline_quotes,
+)
+from src.model_evaluation.market_inputs import load_finals
+from src.model_evaluation.moneyline_inputs import walkforward_home_probs
 
 SEASONS = (2020, 2021, 2022, 2023, 2024, 2025)
-PANEL = PANEL_PRIORITY[:5]
 OUT = Path("data/analysis/model_vs_market.parquet")
 
 
@@ -66,7 +69,7 @@ def game_context(season: int) -> dict[int, dict[str, object]]:
 
 def dispersion(season: int, line_type: str) -> dict[int, float]:
     """Cross-book spread of the de-vigged home probability: a market-uncertainty proxy."""
-    from src.betting.odds import no_vig_two_way
+    from src.market_data.pricing import no_vig_two_way
 
     c = PostgresConfig.from_env()
     conn = psycopg.connect(
@@ -82,7 +85,7 @@ def dispersion(season: int, line_type: str) -> dict[int, float]:
               AND o.bookmaker = ANY(%s)
               AND o.home_ml IS NOT NULL AND o.away_ml IS NOT NULL
             """,
-            (season, line_type, list(PANEL)),
+            (season, line_type, list(MONEYLINE_PANEL)),
         )
         buf: dict[int, list[float]] = {}
         for pk, home, away in cur.fetchall():
@@ -100,8 +103,12 @@ def main() -> None:
             "game_pk"
         )["model_prob_home"]
         finals = load_finals([season]).set_index("game_pk")
-        close = load_quotes(season, PANEL, "close", "proportional")
-        openq = load_quotes(season, PANEL, "open", "proportional")
+        close = load_normalized_moneyline_quotes(
+            season, MONEYLINE_PANEL, "close", "proportional"
+        )
+        openq = load_normalized_moneyline_quotes(
+            season, MONEYLINE_PANEL, "open", "proportional"
+        )
         ctx = game_context(season)
         disp = dispersion(season, "close")
 

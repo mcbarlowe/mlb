@@ -302,7 +302,7 @@ async def main():
     print("\n" + "=" * 80)
     print("Next steps:")
     print("  1. Load to database: uv run python scripts/load_odds_to_db.py data/odds_history/moneyline_*.parquet")
-    print("  2. Run backtests: uv run python scripts/backtest_moneyline.py --season 2020 2021 2022 2023")
+    print("  2. Evaluate market-price behavior from the sibling betting repository.")
     print("=" * 80)
 
 

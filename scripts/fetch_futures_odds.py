@@ -23,12 +23,12 @@ import requests
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.betting.futures_odds_store import (
+from src.database import PostgresConfig, PostgresHandler
+from src.market_data.futures_odds_store import (
     ensure_futures_odds_table,
     insert_futures_odds,
 )
-from src.betting.odds import american_to_prob
-from src.database import PostgresConfig, PostgresHandler
+from src.market_data.pricing import american_to_prob
 
 OUTRIGHTS_URL = "https://api.the-odds-api.com/v4/sports/baseball_mlb/outrights"
 
@@ -209,7 +209,7 @@ def _parse_futures_odds(
 def _load_team_id_map() -> dict[str, int]:
     """Load team name to team_id mapping from resources."""
     # Use the same mapping as other odds scripts
-    from src.betting.ingest import team_abbrev_to_id
+    from src.market_data.team_mapping import team_abbrev_to_id
     
     mapping = team_abbrev_to_id()
     

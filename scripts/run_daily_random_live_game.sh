@@ -5,6 +5,7 @@ REPO_DIR="/Users/matthewbarlowe/code/python/mlb"
 UV_BIN="/usr/local/bin/uv"
 CAFFEINATE_BIN="/usr/bin/caffeinate"
 RUN_PATTERN="scripts/run_live_pipeline.py --random-game"
+SOCIAL_ENV="${BARLOWE_SOCIAL_ENV:-/Users/matthewbarlowe/.config/barlowe/social.env}"
 
 POST_ENABLED="${BARLOWE_RANDOM_GAME_POST:-1}"
 POST_PROVIDER="${BARLOWE_RANDOM_GAME_POST_PROVIDER:-bluesky}"
@@ -13,6 +14,13 @@ LEAD_MINUTES="${BARLOWE_RANDOM_GAME_LEAD_MINUTES:-15}"
 POLL_INTERVAL="${BARLOWE_RANDOM_GAME_POLL_INTERVAL:-3}"
 OUTCOME_RUN_DIR="${BARLOWE_RANDOM_GAME_OUTCOME_RUN_DIR:-auto}"
 SEED="${BARLOWE_RANDOM_GAME_SEED:-}"
+
+if [[ -f "$SOCIAL_ENV" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$SOCIAL_ENV"
+  set +a
+fi
 
 cd "$REPO_DIR"
 

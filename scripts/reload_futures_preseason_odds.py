@@ -37,13 +37,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.load_historical_futures_from_csv import _load_team_id_map
 from scripts.scrape_covers_all_futures import scrape_market
-from src.betting.futures_odds_store import (
+from src.database import PostgresConfig, PostgresHandler
+from src.market_data.futures_odds_store import (
     ensure_futures_odds_table,
     insert_futures_odds,
     load_latest_futures_odds,
 )
-from src.betting.odds import american_to_prob
-from src.database import PostgresConfig, PostgresHandler
+from src.market_data.pricing import american_to_prob
 
 SEASONS = [2013, 2014, 2015, 2016, 2017, 2018, 2019, 2021, 2022, 2023, 2024, 2025, 2026]
 MARKETS = ["division", "championship", "al_pennant", "nl_pennant"]

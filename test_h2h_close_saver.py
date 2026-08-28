@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 
-from scripts import paper_trade_moneyline
 from scripts import save_current_h2h_closing_lines as close_saver
+from src.market_data import current_h2h
 from src.sim.slate import ProbablePitcher, SlateGame
 
 
@@ -28,7 +28,7 @@ def test_close_odds_rows_builds_db_ready_h2h_close_rows():
         slate_games=(_slate_game(),),
         odds_by_game={
             123: (
-                paper_trade_moneyline.PaperOddsLine(
+                current_h2h.PaperOddsLine(
                     "book_a",
                     home_ml=-125,
                     away_ml=110,
@@ -114,7 +114,7 @@ def test_close_saver_main_dry_run_does_not_write_db(monkeypatch, capsys):
         lambda rows: db_calls.append(list(rows)) or len(rows),
     )
     monkeypatch.setattr(
-        paper_trade_moneyline,
+        current_h2h,
         "team_abbrev_to_id",
         lambda: {"AWY": 1, "HME": 2},
     )

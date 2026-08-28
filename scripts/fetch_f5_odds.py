@@ -23,9 +23,9 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.betting.f5_odds import F5_MARKETS, F5OddsApiRow, parse_f5_odds_rows
-from src.betting.f5_odds_store import upsert_f5_odds_rows
-from src.betting.ingest import team_abbrev_to_id
+from src.market_data.f5_odds import F5_MARKETS, F5OddsApiRow, parse_f5_odds_rows
+from src.market_data.f5_odds_store import upsert_f5_odds_rows
+from src.market_data.team_mapping import team_abbrev_to_id
 from src.sim.slate import SlateGame, fetch_slate_games
 
 CURRENT_ODDS_URL = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"

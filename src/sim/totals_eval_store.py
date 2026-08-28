@@ -26,16 +26,13 @@ CREATE TABLE IF NOT EXISTS totals_eval_runs (
     push_games integer NOT NULL,
     sims_per_game integer NOT NULL,
     seed integer NOT NULL,
-    edge_threshold double precision NOT NULL,
-    edge_buckets double precision[] NOT NULL,
     pa_calibration_path text,
     mlflow_tracking_uri text NOT NULL,
     outcome_run_dir text NOT NULL,
     contact_environment boolean NOT NULL,
     metrics jsonb NOT NULL,
     totals jsonb NOT NULL,
-    calibration jsonb NOT NULL,
-    roi_by_edge jsonb NOT NULL
+    calibration jsonb NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS totals_eval_games (
@@ -56,15 +53,37 @@ CREATE TABLE IF NOT EXISTS totals_eval_games (
     market_brier double precision,
     sim_log_loss double precision,
     market_log_loss double precision,
-    sim_edge_over double precision NOT NULL,
-    sim_edge_under double precision NOT NULL,
-    bet_side_at_threshold text CHECK (bet_side_at_threshold IN ('over', 'under')),
-    bet_result_at_threshold text CHECK (bet_result_at_threshold IN ('win', 'loss', 'push')),
     PRIMARY KEY (run_id, game_pk)
 );
 
 CREATE INDEX IF NOT EXISTS totals_eval_games_season_game_idx
     ON totals_eval_games (season, game_pk);
+"""
+
+TOTALS_EVAL_EVOLUTION_DDL = """
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'totals_eval_runs'
+          AND column_name = 'edge_threshold'
+    ) THEN
+        ALTER TABLE totals_eval_runs ALTER COLUMN edge_threshold DROP NOT NULL;
+        ALTER TABLE totals_eval_runs ALTER COLUMN edge_buckets DROP NOT NULL;
+        ALTER TABLE totals_eval_runs ALTER COLUMN roi_by_edge DROP NOT NULL;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'totals_eval_games'
+          AND column_name = 'sim_edge_over'
+    ) THEN
+        ALTER TABLE totals_eval_games ALTER COLUMN sim_edge_over DROP NOT NULL;
+        ALTER TABLE totals_eval_games ALTER COLUMN sim_edge_under DROP NOT NULL;
+    END IF;
+END
+$$;
 """
 
 RUN_COLUMNS = (
@@ -76,8 +95,6 @@ RUN_COLUMNS = (
     "push_games",
     "sims_per_game",
     "seed",
-    "edge_threshold",
-    "edge_buckets",
     "pa_calibration_path",
     "mlflow_tracking_uri",
     "outcome_run_dir",
@@ -85,7 +102,6 @@ RUN_COLUMNS = (
     "metrics",
     "totals",
     "calibration",
-    "roi_by_edge",
 )
 
 GAME_COLUMNS = (
@@ -106,17 +122,27 @@ GAME_COLUMNS = (
     "market_brier",
     "sim_log_loss",
     "market_log_loss",
-    "sim_edge_over",
-    "sim_edge_under",
-    "bet_side_at_threshold",
-    "bet_result_at_threshold",
 )
 
-JSONB_COLUMNS = frozenset({"metrics", "totals", "calibration", "roi_by_edge"})
+JSONB_COLUMNS = frozenset({"metrics", "totals", "calibration"})
 
 
 def ensure_totals_eval_tables(db: PostgresHandler) -> None:
     db.connection.execute(TOTALS_EVAL_DDL)
+    needs_evolution = db.connection.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'totals_eval_runs'
+              AND column_name = 'roi_by_edge'
+              AND is_nullable = 'NO'
+        )
+        """
+    ).fetchone()[0]
+    if needs_evolution:
+        db.connection.execute(TOTALS_EVAL_EVOLUTION_DDL)
 
 
 def _run_value(run: Mapping[str, Any], column: str) -> object:

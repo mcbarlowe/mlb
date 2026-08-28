@@ -28,12 +28,12 @@ from scripts.fetch_futures_odds import (
     _normalize_market_type,
     _normalize_team_name,
 )
-from src.betting.futures_odds_store import (
+from src.database import PostgresConfig, PostgresHandler
+from src.market_data.futures_odds_store import (
     ensure_futures_odds_table,
     insert_futures_odds,
 )
-from src.betting.odds import american_to_prob
-from src.database import PostgresConfig, PostgresHandler
+from src.market_data.pricing import american_to_prob
 
 HISTORICAL_OUTRIGHTS_URL = "https://api.the-odds-api.com/v4/historical/sports/baseball_mlb/outrights"
 
@@ -167,7 +167,7 @@ def _parse_historical_futures(
 
 def _load_team_id_map() -> dict[str, int]:
     """Load team name to team_id mapping."""
-    from src.betting.ingest import team_abbrev_to_id
+    from src.market_data.team_mapping import team_abbrev_to_id
     
     mapping = team_abbrev_to_id()
     

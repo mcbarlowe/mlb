@@ -2,8 +2,8 @@
 """Diagnose first-five totals residual calibration against F5 market rows.
 
 This is a research diagnostic. It reads historical F5 totals from ``mlb.f5_odds``
-and first-five actuals from ``mlb.linescore`` without writing to Postgres. When a
-JSON report from ``scripts/f5_clv_report.py`` is supplied, sim probabilities are
+and actuals from ``mlb.linescore``. When a model-only per-game simulation
+artifact is supplied, sim probabilities are
 merged by ``game_pk`` and a residual calibration model is evaluated on a
 chronological holdout.
 """
@@ -29,12 +29,11 @@ from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.betting.f5_clv import F5BookLine, consensus_f5_totals_line
 from src.database import PostgresConfig
+from src.model_evaluation.f5_market import F5BookLine, consensus_f5_totals_line
 
 EPS = 1e-6
 DEFAULT_TRAIN_FRACTION = 0.67
-DEFAULT_MIN_TEST_ROWS = 500
 MARKET_BASE_FEATURE_NAMES = ("market_logit", "point")
 RESIDUAL_BASE_FEATURE_NAMES = (
     "market_logit",
@@ -224,24 +223,16 @@ def load_f5_market_rows(
 
 
 def load_sim_probabilities_from_report(path: Path) -> dict[int, float]:
-    """Extract per-game sim over probabilities from an F5 CLV report JSON file.
+    """Extract per-game over probabilities from a model simulation artifact.
 
-    Current ``f5_clv_report.py`` JSON exposes selected-side ``model_prob`` in
-    ``bets`` rows. For edge-threshold 0.0 rows, that selected side is present for
-    every simulated game; under probabilities are converted back to over
-    probabilities. If future reports add game-level ``sim_prob_over`` style
-    fields, those are preferred.
+    The artifact must expose a ``games`` list with ``game_pk`` and one of the
+    supported simulation-probability fields. Betting selections are deliberately
+    not accepted as a model input.
     """
     payload = json.loads(path.read_text())
     if not isinstance(payload, dict):
-        raise TypeError("F5 CLV report JSON must contain an object")
-
-    probabilities = _sim_probabilities_from_games(payload.get("games"))
-    for game_pk, probability in _sim_probabilities_from_zero_edge_bets(
-        payload.get("bets")
-    ).items():
-        probabilities.setdefault(game_pk, probability)
-    return dict(sorted(probabilities.items()))
+        raise TypeError("F5 simulation JSON must contain an object")
+    return dict(sorted(_sim_probabilities_from_games(payload.get("games")).items()))
 
 
 def merge_sim_probabilities(
@@ -329,7 +320,6 @@ def build_report(
     line_type: str = "open",
     prefix_innings: int = 5,
     sim_report_json: str | None = None,
-    min_test_rows: int = DEFAULT_MIN_TEST_ROWS,
 ) -> dict[str, Any]:
     """Fit market and optional sim-residual calibrators and return JSON-safe output."""
     if not rows:
@@ -365,7 +355,6 @@ def build_report(
     sim_rows = [row for row in rows if row.sim_prob_over is not None]
     sim_train_rows: list[F5ResidualRow] = []
     sim_test_rows: list[F5ResidualRow] = []
-    comparison_metrics: tuple[Mapping[str, Any], Mapping[str, Any]] | None = None
     if sim_rows:
         sim_train_rows, sim_test_rows = split_rows(sim_rows, train_fraction=train_fraction)
         residual_model, residual_features = fit_calibration_model(
@@ -405,10 +394,6 @@ def build_report(
                 sim_test_outcomes,
             ).as_dict(),
         }
-        comparison_metrics = (
-            metrics["sim_test"]["market"],
-            metrics["sim_test"]["residual_calibrated"],
-        )
 
     report = {
         "model_type": "f5_totals_residual_calibration",
@@ -435,58 +420,7 @@ def build_report(
         "metrics": metrics,
         "coefficients": coefficients,
     }
-    report["betting_gate"] = decide_betting_gate(
-        comparison_metrics=comparison_metrics,
-        residual_test_rows=len(sim_test_rows),
-        min_test_rows=min_test_rows,
-    )
     return report
-
-
-def decide_betting_gate(
-    *,
-    comparison_metrics: tuple[Mapping[str, Any], Mapping[str, Any]] | None,
-    residual_test_rows: int,
-    min_test_rows: int,
-) -> dict[str, Any]:
-    """Keep the research gate closed unless held-out residual scores beat market."""
-    has_residual_calibration = comparison_metrics is not None
-    enough_heldout_sample = residual_test_rows >= min_test_rows
-    brier_improvement: float | None = None
-    log_loss_improvement: float | None = None
-    test_brier_improves = False
-    test_log_loss_improves = False
-    if comparison_metrics is not None:
-        market_metrics, residual_metrics = comparison_metrics
-        brier_improvement = float(market_metrics["brier"]) - float(residual_metrics["brier"])
-        log_loss_improvement = float(market_metrics["log_loss"]) - float(residual_metrics["log_loss"])
-        test_brier_improves = brier_improvement > 0.0
-        test_log_loss_improves = log_loss_improvement > 0.0
-
-    checks = {
-        "has_residual_calibration": has_residual_calibration,
-        "enough_heldout_sample": enough_heldout_sample,
-        "test_brier_improves_vs_market": test_brier_improves,
-        "test_log_loss_improves_vs_market": test_log_loss_improves,
-    }
-    status = "open" if all(checks.values()) else "closed"
-    if status == "open":
-        reason = "Residual-calibrated F5 totals beat market Brier/log loss on enough held-out rows"
-    else:
-        failed = [name for name, passed in checks.items() if not passed]
-        reason = "Gate closed: " + ", ".join(failed)
-    return {
-        "status": status,
-        "reason": reason,
-        "checks": checks,
-        "thresholds": {"min_test_rows": min_test_rows},
-        "metrics": {
-            "comparison_model": "residual_calibrated",
-            "test_rows": residual_test_rows,
-            "brier_improvement_vs_market": brier_improvement,
-            "log_loss_improvement_vs_market": log_loss_improvement,
-        },
-    }
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -498,10 +432,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--sim-report-json",
         type=Path,
-        default=None,
-        help="optional JSON emitted by scripts/f5_clv_report.py",
+        help="optional model-only JSON containing game-level F5 probabilities",
     )
-    parser.add_argument("--min-test-rows", type=int, default=DEFAULT_MIN_TEST_ROWS)
     parser.add_argument("--out-json", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -524,7 +456,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         line_type=args.line_type,
         prefix_innings=args.prefix_innings,
         sim_report_json=str(args.sim_report_json) if args.sim_report_json else None,
-        min_test_rows=args.min_test_rows,
     )
     output = json.dumps(report, indent=2, sort_keys=True, default=str) + "\n"
     if args.out_json is None:
@@ -612,33 +543,6 @@ def _sim_probabilities_from_games(games: object) -> dict[int, float]:
     return probabilities
 
 
-def _sim_probabilities_from_zero_edge_bets(bets: object) -> dict[int, float]:
-    if not isinstance(bets, list):
-        return {}
-    probabilities: dict[int, float] = {}
-    for item in bets:
-        if not isinstance(item, dict):
-            continue
-        if float(item.get("edge_threshold", math.nan)) != 0.0:
-            continue
-        if "game_pk" not in item or "side" not in item or "model_prob" not in item:
-            continue
-        side = str(item["side"]).lower()
-        model_probability = _validate_probability(
-            float(item["model_prob"]), field="bets.model_prob"
-        )
-        if side == "over":
-            probability = model_probability
-        elif side == "under":
-            probability = 1.0 - model_probability
-        else:
-            continue
-        game_pk = int(item["game_pk"])
-        existing = probabilities.get(game_pk)
-        if existing is not None and not math.isclose(existing, probability, abs_tol=1e-12):
-            raise ValueError(f"conflicting edge=0 sim probabilities for game_pk={game_pk}")
-        probabilities[game_pk] = probability
-    return probabilities
 
 
 def _first_present_probability(

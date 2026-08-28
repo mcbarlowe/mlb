@@ -46,13 +46,13 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.backtest_moneyline import load_finals, walkforward_home_probs
-from scripts.backtest_moneyline_lineshop import PANEL_PRIORITY
-from src.betting.odds import american_to_decimal, no_vig_two_way
 from src.database import PostgresConfig
+from src.market_data.moneyline_quotes import MONEYLINE_PANEL
+from src.market_data.pricing import american_to_decimal, no_vig_two_way
+from src.model_evaluation.market_inputs import load_finals
+from src.model_evaluation.moneyline_inputs import walkforward_home_probs
 
 SEASONS = (2020, 2021, 2022, 2023, 2024, 2025)
-PANEL = PANEL_PRIORITY[:5]
 OUT = Path("data/analysis/line_movement.parquet")
 EPS = 1e-6
 
@@ -74,7 +74,7 @@ def load_book_level(conn, schema: str, season: int, line_type: str):
               AND o.bookmaker = ANY(%s)
               AND o.home_ml IS NOT NULL AND o.away_ml IS NOT NULL
             """,
-            (season, line_type, list(PANEL)),
+            (season, line_type, list(MONEYLINE_PANEL)),
         )
         rows = cur.fetchall()
 

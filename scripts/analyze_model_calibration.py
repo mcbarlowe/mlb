@@ -1,7 +1,4 @@
-"""Analyze model probability calibration across seasons.
-
-Shows why 2021-2022 models are overconfident and how to fix it.
-"""
+"""Analyze held-out model probability calibration across seasons."""
 
 import sys
 from pathlib import Path
@@ -10,23 +7,40 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.backtest_moneyline import build_rows, walkforward_home_probs
+from src.sim.team_strength import (
+    FEATURE_NAMES,
+    load_completed_games,
+    train_strength_model,
+)
 
 
-def analyze_calibration(season: int, train_seasons: list[int]):
-    """Check if model probabilities are well-calibrated."""
-    
-    # Get model predictions
-    probs_df = walkforward_home_probs(season, train_seasons)
-    
-    # Get actual outcomes
-    rows = build_rows(season, probs_df)
-    
-    # Convert to DataFrame
-    df = pd.DataFrame(rows, columns=[
-        'game_pk', 'model_prob_home', 'open_home', 'open_away',
-        'close_home', 'close_away', 'home_won'
-    ])
+def heldout_home_probabilities(
+    season: int, train_seasons: list[int]
+) -> pd.DataFrame:
+    """Fit on prior seasons and return held-out home-win probabilities."""
+    games = load_completed_games(
+        start_season=min(train_seasons),
+        end_season=season,
+    )
+    fitted = train_strength_model(
+        games,
+        prediction_season=season,
+        train_seasons=train_seasons,
+    )
+    heldout = fitted.feature_frame[fitted.feature_frame["season"] == season].copy()
+    if heldout.empty:
+        raise ValueError(f"No held-out games found for {season}")
+    heldout["model_prob_home"] = fitted.estimator.predict_proba(
+        heldout[list(FEATURE_NAMES)]
+    )[:, 1]
+    return heldout[["game_pk", "model_prob_home", "home_won"]]
+
+
+def analyze_calibration(
+    season: int, train_seasons: list[int]
+) -> tuple[pd.DataFrame, float]:
+    """Check whether held-out model probabilities are well calibrated."""
+    df = heldout_home_probabilities(season, train_seasons)
     
     print(f"\n{'='*60}")
     print(f"Season {season} (trained on {min(train_seasons)}-{max(train_seasons)})")
@@ -123,12 +137,9 @@ def main():
     print("INTERPRETATION")
     print('='*60)
     print()
-    print("Reliability is comparable in every season (MAE ~1.5-1.9%, Brier ~0.24),")
-    print("so a season's poor betting ROI is NOT explained by model miscalibration.")
-    print("When bet volume or ROI differs sharply between seasons, inspect the odds")
-    print("side first: cross-book price dispersion within one game/line_type should")
-    print("sit near 2-3%, and any snapshot at or after commence_time is an in-play")
-    print("price that must be excluded before the market probability is computed.")
+    print("Compare reliability, Brier score, and probability distributions across")
+    print("seasons. If predictive scores deteriorate while calibration remains stable,")
+    print("inspect feature drift, training-window changes, and input-data integrity.")
 
 
 if __name__ == "__main__":

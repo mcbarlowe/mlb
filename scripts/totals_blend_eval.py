@@ -1,9 +1,9 @@
-"""Evaluate a market+sim blend for totals (over/under) betting.
+"""Evaluate a market+sim probability blend for game totals.
 
 Reads per-game rows of (season, point, sim_over, mkt_over, actual_total) from
 ``sim_totals_eval`` log files and reports discrimination (AUC) and calibration
-*separately*, plus a flat-bet ROI, using a leak-free rolling walk-forward blend
-(each season is predicted only from strictly earlier seasons).
+separately, using a leak-free rolling walk-forward blend (each season is
+predicted only from strictly earlier seasons).
 
     uv run python scripts/totals_blend_eval.py \
         --logs 2024:/tmp/sim_totals_2024.log \
@@ -268,63 +268,6 @@ def report_blend(res: BlendResult) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Flat-bet ROI at -110
-# ---------------------------------------------------------------------------
-
-EDGES = (0.03, 0.05, 0.08)
-WIN_PROFIT = 100.0 / 110.0  # net win units on a -110 bet
-
-
-def roi_for_signal(
-    signal_over: np.ndarray, mkt: np.ndarray, y: np.ndarray, edge: float
-) -> tuple[int, float, float]:
-    """Bet the side ``signal`` favors vs market by > edge. Returns (bets, wins, roi)."""
-    bet_over = signal_over - mkt > edge
-    bet_under = mkt - signal_over > edge
-    bets = int(bet_over.sum() + bet_under.sum())
-    if bets == 0:
-        return 0, 0.0, 0.0
-    wins = float(np.sum((bet_over & (y == 1)) | (bet_under & (y == 0))))
-    roi = (wins * WIN_PROFIT - (bets - wins)) / bets
-    return bets, wins, roi
-
-
-def report_roi(pooled: list[Row], res: BlendResult) -> None:
-    print("\n=== Flat-bet ROI @ -110 ===")
-    sim, mkt, y = arrays(pooled)
-
-    print("  sim-only (bet where sim favors a side vs market by > edge):")
-    print("    edge    bets    wins    win%      ROI")
-    for edge in EDGES:
-        bets, wins, roi = roi_for_signal(sim, mkt, y, edge)
-        if bets == 0:
-            print(f"    {edge:.2f}       0     0.0     n/a      n/a")
-        else:
-            print(
-                f"    {edge:.2f}   {bets:5d}  {wins:6.1f}  {wins / bets:6.1%}"
-                f"  {roi:+7.1%}"
-            )
-
-    print("  blend-vs-market (bet where blend favors a side vs market by > edge):")
-    if len(res.oos_rows) == 0:
-        print("    no held-out blend predictions available.")
-        return
-    tag = " [IN-SAMPLE]" if res.in_sample else ""
-    b_mkt = np.array([r.mkt for r in res.oos_rows], dtype=float)
-    b_y = np.array([r.y for r in res.oos_rows], dtype=int)
-    print(f"    edge    bets    wins    win%      ROI{tag}")
-    for edge in EDGES:
-        bets, wins, roi = roi_for_signal(res.blend_p, b_mkt, b_y, edge)
-        if bets == 0:
-            print(f"    {edge:.2f}       0     0.0     n/a      n/a")
-        else:
-            print(
-                f"    {edge:.2f}   {bets:5d}  {wins:6.1f}  {wins / bets:6.1%}"
-                f"  {roi:+7.1%}"
-            )
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -352,7 +295,6 @@ def main() -> None:
 
     res = rolling_blend(by_season)
     report_blend(res)
-    report_roi(pooled, res)
 
 
 if __name__ == "__main__":

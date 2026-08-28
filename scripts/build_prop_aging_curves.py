@@ -4,9 +4,8 @@ Delta-method aging curves on the log-odds of clearing each prop line
 (stat > point), per (market, point): for every player with >= 60 games at
 consecutive integer ages, average the within-player year-over-year logit
 change (weighted by harmonic-mean games), then integrate into a cumulative
-curve anchored at age 27. Written to ``models/props/aging_curves.json`` for
-``scripts/shop_batter_props.py`` to project each batter's trailing rate from
-the age it was earned at to the age he is today.
+curve anchored at age 27. Written to ``models/props/aging_curves.json`` for the
+model-only ``scripts/publish_prop_predictions.py`` producer.
 
 Usage: uv run python scripts/build_prop_aging_curves.py [--start 2015] [--out ...]
 """
@@ -27,8 +26,7 @@ import psycopg
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
-from shop_batter_props import STAT_COLUMNS, STAT_FNS
-
+from src.data_contracts.prop_predictions import STAT_COLUMNS, STAT_FNS
 from src.database import PostgresConfig
 
 MARKET_POINTS: dict[str, tuple[float, ...]] = {

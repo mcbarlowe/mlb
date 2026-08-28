@@ -21,9 +21,9 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.betting.ingest import champion_home_probs, load_finals
-from src.betting.odds import no_vig_two_way
 from src.database import PostgresConfig
+from src.market_data.pricing import no_vig_two_way
+from src.model_evaluation.market_inputs import champion_home_probs, load_finals
 
 LEAGUE_HOME_RATE = 0.543
 EPS = 1e-9

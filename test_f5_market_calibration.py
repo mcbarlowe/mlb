@@ -46,4 +46,3 @@ def test_build_report_fits_market_logit_calibration() -> None:
     assert set(report.coefficients) == {"intercept", "market_logit"}
     assert report.train["market"].n == 4
     assert report.test["calibrated"].n == 2
-    assert report.betting_gate["status"] == "closed"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fit and evaluate a first-five totals market calibration.
 
-This is a research diagnostic, not a betting gate opener. It uses historical F5
+This is a predictive-calibration diagnostic. It uses historical F5
 open totals from ``mlb.f5_odds`` and first-five actuals from ``mlb.linescore`` to
 measure whether a simple Platt transform of the devigged market probability
 improves Brier/log-loss on a chronological holdout.
@@ -27,9 +27,12 @@ from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.f5_clv_report import load_f5_actual_totals
-from src.betting.f5_clv import F5BookLine, consensus_f5_totals_line
 from src.database import PostgresConfig
+from src.model_evaluation.f5_market import (
+    F5BookLine,
+    consensus_f5_totals_line,
+    load_f5_actual_totals,
+)
 
 EPS = 1e-6
 
@@ -66,7 +69,6 @@ class CalibrationReport:
     coefficients: dict[str, float]
     train: dict[str, Metrics]
     test: dict[str, Metrics]
-    betting_gate: dict[str, object]
 
 
 def _parse_ints(value: str) -> tuple[int, ...]:
@@ -214,8 +216,6 @@ def build_report(
         "market": _metrics(market_test, y_test),
         "calibrated": _metrics(calibrated_test, y_test),
     }
-    brier_improves = test["calibrated"].brier < test["market"].brier
-    log_loss_improves = test["calibrated"].log_loss < test["market"].log_loss
     return CalibrationReport(
         rows=len(rows),
         train_rows=len(train_rows),
@@ -228,18 +228,6 @@ def build_report(
         },
         train=train,
         test=test,
-        betting_gate={
-            "status": "closed",
-            "reason": (
-                "Research-only F5 market calibration: partial single-season split. "
-                "Use as a probability diagnostic, not a betting approval."
-            ),
-            "checks": {
-                "test_brier_improves": brier_improves,
-                "test_log_loss_improves": log_loss_improves,
-                "multi_season_holdout": False,
-            },
-        },
     )
 
 
@@ -275,7 +263,6 @@ def main() -> None:
     print("\nTEST")
     print(_metrics_line("market", report.test["market"]))
     print(_metrics_line("calibrated", report.test["calibrated"]))
-    print("betting_gate", report.betting_gate)
     if args.out_json is not None:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)
         args.out_json.write_text(

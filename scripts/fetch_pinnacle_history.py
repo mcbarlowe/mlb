@@ -32,8 +32,8 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.backtest_moneyline_lineshop import PANEL_PRIORITY
 from src.database import PostgresConfig
+from src.market_data.moneyline_quotes import MONEYLINE_PANEL
 
 BASE_URL = "https://api.the-odds-api.com/v4/historical/sports/baseball_mlb/odds"
 TARGET_BOOKS = ("pinnacle",)
@@ -135,7 +135,7 @@ async def run(season: int, line_type: str, limit: int, books: tuple[str, ...],
     key = os.environ.get("ODDS_API_KEY")
     if not key:
         raise SystemExit("ODDS_API_KEY is not set")
-    panel = list(PANEL_PRIORITY[:5])
+    panel = list(MONEYLINE_PANEL)
     stamps = existing_snapshots(season, line_type, panel)
     if not stamps:
         raise SystemExit(f"no stored {line_type} snapshots for {season}")

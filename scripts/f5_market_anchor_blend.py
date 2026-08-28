@@ -24,7 +24,6 @@ from typing import Any, Literal
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.f5_residual_calibration import (
-    DEFAULT_MIN_TEST_ROWS,
     DEFAULT_TRAIN_FRACTION,
     EPS,
     F5ResidualRow,
@@ -39,6 +38,7 @@ Objective = Literal["log_loss", "brier"]
 DEFAULT_LAMBDA_MIN = 0.0
 DEFAULT_LAMBDA_MAX = 1.0
 DEFAULT_LAMBDA_STEPS = 101
+DEFAULT_MIN_TEST_ROWS = 500
 
 
 def _parse_ints(value: str) -> tuple[int, ...]:
@@ -160,10 +160,6 @@ def build_report(
             test_rows=len(test_rows),
             min_test_rows=min_test_rows,
         ),
-        "betting_gate": {
-            "status": "closed",
-            "reason": "Probability blend is not a betting approval. Validate ROI/CLV with the blended probabilities before paper or production use.",
-        },
     }
 
 

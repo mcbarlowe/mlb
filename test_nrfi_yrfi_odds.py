@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from src.betting.nrfi_yrfi_odds import parse_nrfi_yrfi_odds_rows
-from src.betting.nrfi_yrfi_odds_store import normalize_nrfi_yrfi_odds_row
+from src.market_data.nrfi_yrfi_odds import parse_nrfi_yrfi_odds_rows
+from src.market_data.nrfi_yrfi_odds_store import normalize_nrfi_yrfi_odds_row
 
 
 def test_parse_nrfi_yrfi_odds_rows_maps_first_inning_total_sides() -> None:

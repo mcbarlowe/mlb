@@ -54,7 +54,7 @@ def test_probability_metrics_match_binary_score_definitions() -> None:
     assert log_loss_score(probabilities, outcomes) == pytest.approx(-math.log(0.8))
 
 
-def test_build_report_keeps_tiny_fixture_gate_closed() -> None:
+def test_build_report_contains_predictive_metrics_and_coefficients() -> None:
     train_rows = [
         MarketResidualRow(1, 2024, 8.5, 0.80, 0.50, 10.0, 1),
         MarketResidualRow(2, 2024, 8.5, 0.20, 0.50, 7.0, 0),
@@ -67,15 +67,13 @@ def test_build_report_keeps_tiny_fixture_gate_closed() -> None:
         MarketResidualRow(7, 2025, 8.5, 0.60, 0.50, 7.0, 0),
     ]
 
-    report = build_report(train_rows, eval_rows, edge_thresholds=(0.0, 0.03))
+    report = build_report(train_rows, eval_rows)
 
     assert report["metrics"]["model"]["n"] == 3
     assert report["metrics"]["market"]["n"] == 3
-    assert report["edge_buckets"][1]["edge_threshold"] == 0.03
-    assert report["betting_gate"]["status"] == "closed"
-    assert (
-        report["betting_gate"]["checks"][
-            "nonzero_edge_bucket_has_positive_evidence"
-        ]
-        is False
-    )
+    assert "brier_model_minus_market" in report["metrics"]["gaps"]
+    assert report["coefficients"]["features"].keys() == {
+        "market_logit",
+        "sim_minus_market_logit",
+    }
+    assert "edge_buckets" not in report

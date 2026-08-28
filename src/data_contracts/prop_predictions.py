@@ -23,7 +23,8 @@ from src.database import PostgresConfig
 
 CONTRACT_VERSION = "v1"
 MODEL_NAME = "mlb-prop-rate-estimator"
-MODEL_VERSION = "props-cond-v3"
+MODEL_VERSION = "prop-rate-cond-v3"
+LEGACY_MODEL_VERSION_TAGS = {"props-cond-v3": MODEL_VERSION}
 RECENT_SEASONS = 3
 START_PA = 3
 EXP_PA_WINDOW = 30
@@ -431,7 +432,6 @@ def resolve_registry_artifacts(
     tracking_uri: str, *, repo: Path
 ) -> tuple[Path | None, Path | None, str]:
     """Resolve matching champion artifacts with the legacy offline cache fallback."""
-
     cache_root = repo / "models/mlflow_cache/prop_rate_estimator"
     os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "5")
     os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
@@ -441,9 +441,15 @@ def resolve_registry_artifacts(
 
         client = MlflowClient(tracking_uri=tracking_uri)
         version = client.get_model_version_by_alias(MODEL_NAME, "champion")
-        strategy = version.tags.get("strategy_version", "?")
-        if strategy != MODEL_VERSION:
-            return None, None, f"incompatible champion v{version.version}: {strategy}"
+        model_version = version.tags.get("model_contract_version")
+        if model_version is None:
+            model_version = LEGACY_MODEL_VERSION_TAGS.get(
+                version.tags.get("strategy_version", "")
+            )
+        if model_version != MODEL_VERSION:
+            return None, None, (
+                f"incompatible champion v{version.version}: {model_version}"
+            )
         cache = cache_root / f"v{version.version}"
         curves = cache / "estimator/aging_curves.json"
         parks = cache / "estimator/park_factors.json"
@@ -455,7 +461,11 @@ def resolve_registry_artifacts(
                 dst_path=str(cache),
                 tracking_uri=tracking_uri,
             )
-        return curves if curves.exists() else None, parks if parks.exists() else None, f"mlflow champion v{version.version}"
+        return (
+            curves if curves.exists() else None,
+            parks if parks.exists() else None,
+            f"mlflow champion v{version.version} ({model_version})",
+        )
     except Exception as exc:
         if cache_root.exists():
             cache_directories = sorted(

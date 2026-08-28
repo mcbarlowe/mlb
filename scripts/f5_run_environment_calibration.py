@@ -235,10 +235,6 @@ def build_report(
         ],
         "metrics": metrics,
         "calibration_gate": gate,
-        "betting_gate": {
-            "status": "closed",
-            "reason": "Run-mean calibration is not a betting-probability approval. Validate betting probabilities separately before paper or production use.",
-        },
     }
 
 

@@ -4,8 +4,7 @@ For each (market, line) and venue (home team), the shrunk log-odds offset of
 clearing the line at that park vs league, from the last three completed-ish
 seasons of starts (PA >= 3): delta = logit(park rate) - logit(league rate),
 shrunk by n/(n + 2000) games of prior weight. Written to
-``models/props/park_factors.json`` for shop_batter_props.py to apply to
-tonight's venue on conditioned markets.
+``models/props/park_factors.json`` for the model-only prop prediction producer.
 
 Usage: uv run python scripts/build_prop_park_factors.py [--start 2024] [--out ...]
 """
@@ -27,8 +26,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from build_prop_aging_curves import MARKET_POINTS
-from shop_batter_props import STAT_COLUMNS, STAT_FNS
 
+from src.data_contracts.prop_predictions import STAT_COLUMNS, STAT_FNS
 from src.database import PostgresConfig
 
 START_PA = 3

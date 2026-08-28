@@ -57,7 +57,7 @@ JOIN mlb.games AS g USING (game_pk);
 COMMENT ON VIEW mlb.betting_player_results_v1 IS
     'Read-only v1 player result contract. Missing rows and null appeared remain pending.';
 COMMENT ON COLUMN mlb.betting_player_results_v1.appeared IS
-    'False only when batting.gamesplayed explicitly equals zero; null is unknown.';
+    'False only when batting.gamesplayed explicitly equals zero, while null is unknown.';
 """
 
 

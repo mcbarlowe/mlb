@@ -2,7 +2,7 @@
 
 The sim's whole-game score distribution yields P(total > line) directly. We
 compare that to the consensus de-vigged market P(over) against realized totals
-(Brier + log loss + flat-bet ROI), on a sample of games.
+using Brier score, log loss, calibration, and total-error diagnostics.
 
     uv run python scripts/sim_totals_eval.py --season 2025 --games 500 --sims 500
 
@@ -36,8 +36,8 @@ from psycopg import sql
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.betting.odds import no_vig_two_way
 from src.database import PostgresConfig
+from src.market_data.pricing import no_vig_two_way
 from src.ml.mlflow_utils import DEFAULT_MLFLOW_TRACKING_URI
 from src.sim.contact_environment import ContactEnvironment, parse_weather
 from src.sim.db_games import GameDataStore
@@ -45,8 +45,6 @@ from src.sim.slate import build_day_ahead_simulator
 from src.sim.totals_eval_store import insert_totals_eval_run
 
 EPS = 1e-9
-DEFAULT_EDGE_BUCKETS = (0.03, 0.05, 0.08)
-WIN_PROFIT = 100.0 / 110.0
 
 
 @dataclass(frozen=True)
@@ -255,37 +253,6 @@ def _model_probability(row: TotalsEvalRow, model: str) -> float:
     raise ValueError(f"unknown model {model!r}")
 
 
-def roi_by_edge(
-    rows: Sequence[TotalsEvalRow],
-    edges: Sequence[float],
-) -> list[dict[str, float | int]]:
-    scored = scored_rows(rows)
-    out: list[dict[str, float | int]] = []
-    for edge in edges:
-        bets = wins = 0
-        for row in scored:
-            actual_over = row.actual_over
-            if actual_over is None:
-                continue
-            if row.sim_prob_over - row.market_prob_over > edge:
-                bets += 1
-                wins += actual_over
-            elif row.market_prob_over - row.sim_prob_over > edge:
-                bets += 1
-                wins += 1 - actual_over
-        losses = bets - wins
-        profit = wins * WIN_PROFIT - losses
-        out.append(
-            {
-                "edge": edge,
-                "bets": bets,
-                "wins": wins,
-                "roi": profit / bets if bets else 0.0,
-            }
-        )
-    return out
-
-
 def summarize_rows(
     rows: Sequence[TotalsEvalRow],
     *,
@@ -294,8 +261,6 @@ def summarize_rows(
     games_requested: int,
     sims: int,
     seed: int,
-    edge: float,
-    edge_buckets: Sequence[float],
     pa_calibration_path: str | None,
     contact_environment_enabled: bool,
     mlflow_tracking_uri: str,
@@ -306,7 +271,6 @@ def summarize_rows(
     sim_probs = [row.sim_prob_over for row in scored]
     market_probs = [row.market_prob_over for row in scored]
     gap = bootstrap_brier_gap(scored)
-    roi = roi_by_edge(scored, edge_buckets)
     return {
         "run_id": run_id,
         "season": season,
@@ -316,8 +280,6 @@ def summarize_rows(
         "push_games": len(rows) - len(scored),
         "sims_per_game": sims,
         "seed": seed,
-        "edge_threshold": edge,
-        "edge_buckets": list(edge_buckets),
         "pa_calibration_path": pa_calibration_path,
         "contact_environment": contact_environment_enabled,
         "mlflow_tracking_uri": mlflow_tracking_uri,
@@ -361,34 +323,15 @@ def summarize_rows(
             "sim": calibration_buckets(scored, model="sim"),
             "market": calibration_buckets(scored, model="market"),
         },
-        "roi_by_edge": roi,
     }
-
-
-def selected_side(row: TotalsEvalRow, edge: float) -> str | None:
-    if row.sim_prob_over - row.market_prob_over > edge:
-        return "over"
-    if row.market_prob_over - row.sim_prob_over > edge:
-        return "under"
-    return None
 
 
 def row_output(
     row: TotalsEvalRow,
-    edge: float,
     *,
     run_id: str | None = None,
 ) -> dict[str, float | int | str | None]:
     actual_over = row.actual_over
-    side = selected_side(row, edge)
-    if side is None:
-        bet_result = None
-    elif row.outcome == "push":
-        bet_result = "push"
-    elif side == row.outcome:
-        bet_result = "win"
-    else:
-        bet_result = "loss"
     output: dict[str, float | int | str | None] = {
         **asdict(row),
         "actual_over": actual_over,
@@ -402,10 +345,6 @@ def row_output(
         "market_log_loss": None
         if actual_over is None
         else logloss(row.market_prob_over, actual_over),
-        "sim_edge_over": row.sim_prob_over - row.market_prob_over,
-        "sim_edge_under": row.market_prob_over - row.sim_prob_over,
-        "bet_side_at_threshold": side,
-        "bet_result_at_threshold": bet_result,
     }
     if run_id is not None:
         output = {"run_id": run_id, **output}
@@ -416,12 +355,11 @@ def write_outputs(
     *,
     rows: Sequence[TotalsEvalRow],
     summary: dict[str, Any],
-    edge: float,
     out_json: Path | None,
     out_csv: Path | None,
 ) -> None:
     run_id = str(summary["run_id"])
-    row_dicts = [row_output(row, edge, run_id=run_id) for row in rows]
+    row_dicts = [row_output(row, run_id=run_id) for row in rows]
     if out_json is not None:
         out_json.parent.mkdir(parents=True, exist_ok=True)
         out_json.write_text(
@@ -430,7 +368,7 @@ def write_outputs(
         print(f"wrote JSON totals eval to {out_json}")
     if out_csv is not None:
         out_csv.parent.mkdir(parents=True, exist_ok=True)
-        fieldnames = list(row_dicts[0]) if row_dicts else list(row_output(_empty_row(), edge))
+        fieldnames = list(row_dicts[0]) if row_dicts else list(row_output(_empty_row()))
         with out_csv.open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
             writer.writeheader()
@@ -452,24 +390,6 @@ def _empty_row() -> TotalsEvalRow:
         actual_total=0.0,
         outcome="push",
     )
-
-
-def parse_edges(value: str) -> tuple[float, ...]:
-    try:
-        edges = tuple(float(part) for part in value.split(",") if part.strip())
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "--edge-buckets must be comma-separated numbers"
-        ) from exc
-    if not edges:
-        raise argparse.ArgumentTypeError("--edge-buckets must not be empty")
-    if any(edge < 0.0 for edge in edges):
-        raise argparse.ArgumentTypeError("--edge-buckets must be non-negative")
-    return edges
-
-
-def _edge_buckets_with_active(edges: Sequence[float], edge: float) -> tuple[float, ...]:
-    return tuple(dict.fromkeys((*edges, edge)))
 
 
 def default_run_id(season: int) -> str:
@@ -503,19 +423,6 @@ def print_summary(summary: dict[str, Any]) -> None:
             f"{gap:+.4f}  95% CI [{ci['lo']:+.4f}, {ci['hi']:+.4f}]  "
             "(neg = sim better)"
         )
-    active_edge = summary["edge_threshold"]
-    active_roi = next(
-        item for item in summary["roi_by_edge"] if item["edge"] == active_edge
-    )
-    if active_roi["bets"]:
-        print(
-            f"flat-bet @ edge>{active_edge}: {active_roi['bets']} bets, "
-            f"{active_roi['wins']:.1f} wins "
-            f"({active_roi['wins'] / active_roi['bets']:.1%}), "
-            f"ROI {active_roi['roi']:+.1%}"
-        )
-    else:
-        print("no bets")
     totals = summary["totals"]
     print(
         "totals diagnostics: "
@@ -537,13 +444,6 @@ def main() -> None:
     ap.add_argument("--games", type=int, default=500)
     ap.add_argument("--sims", type=int, default=500)
     ap.add_argument("--seed", type=int, default=7)
-    ap.add_argument("--edge", type=float, default=0.03, help="flat-bet edge threshold")
-    ap.add_argument(
-        "--edge-buckets",
-        type=parse_edges,
-        default=DEFAULT_EDGE_BUCKETS,
-        help="comma-separated edge thresholds for structured ROI reporting",
-    )
     ap.add_argument(
         "--pa-calibration",
         default=None,
@@ -612,7 +512,6 @@ def main() -> None:
 
     if not rows:
         raise SystemExit("no games")
-    edge_buckets = _edge_buckets_with_active(args.edge_buckets, args.edge)
     run_id = args.run_id or default_run_id(args.season)
     summary = summarize_rows(
         rows,
@@ -621,8 +520,6 @@ def main() -> None:
         games_requested=args.games,
         sims=args.sims,
         seed=args.seed,
-        edge=args.edge,
-        edge_buckets=edge_buckets,
         pa_calibration_path=args.pa_calibration,
         mlflow_tracking_uri=args.mlflow_tracking_uri,
         outcome_run_dir=str(outcome_run_dir),
@@ -632,14 +529,13 @@ def main() -> None:
     write_outputs(
         rows=rows,
         summary=summary,
-        edge=args.edge,
         out_json=args.out_json,
         out_csv=args.out_csv,
     )
     if args.no_db_log:
         print("totals eval DB log skipped by --no-db-log")
         return
-    db_rows = [row_output(row, args.edge, run_id=run_id) for row in rows]
+    db_rows = [row_output(row, run_id=run_id) for row in rows]
     run_inserted, game_inserted = insert_totals_eval_run(run=summary, rows=db_rows)
     print(
         "inserted totals eval DB rows: "

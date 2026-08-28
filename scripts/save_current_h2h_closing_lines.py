@@ -17,14 +17,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from scripts.paper_trade_moneyline import (
+from src.market_data.current_h2h import (
     PaperOddsLine,
     _fetch_current_odds,
     _h2h_odds_rows,
     _odds_by_game_pk,
     _parse_date,
 )
-from src.betting.h2h_odds_store import upsert_h2h_odds_rows
+from src.market_data.h2h_odds_store import upsert_h2h_odds_rows
 from src.sim.slate import SlateGame, fetch_slate_games
 
 

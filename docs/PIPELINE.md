@@ -2,9 +2,9 @@
 
 A comprehensive ETL pipeline for extracting, transforming, and loading MLB baseball game data from the MLB Stats API into a local PostgreSQL analytical schema.
 
-> Pipeline, schema, and operational reference. Moved out of `README.md` so the root document
-> carries the betting conclusions. For what this project established about tradeable edge, and
-> the operating rules that follow from it, see [`README.md`](../README.md).
+> Pipeline, schema, model-production, and operational reference. Sportsbook
+> execution, paper ledgers, settlement, ROI, alerts, and reports are owned by
+> the sibling `betting` repository.
 
 ## Features
 

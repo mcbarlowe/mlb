@@ -2469,4 +2469,4 @@ COMMENT ON VIEW betting_player_results_v1 IS
     'Read-only v1 betting player result contract. Missing rows and null appeared values are unknown and must remain pending even for Final games.';
 
 COMMENT ON COLUMN betting_player_results_v1.appeared IS
-    'Derived from batting.gamesplayed. False is emitted only when the source explicitly stores gamesplayed=0; null means appearance is unknown and must not void a bet.';
+    'Derived from batting.gamesplayed. False is emitted only when the source explicitly stores gamesplayed=0, while null means appearance is unknown and must not void a bet.';

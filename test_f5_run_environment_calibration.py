@@ -64,7 +64,7 @@ def test_fit_bucket_adjustments_shrinks_toward_global_residual() -> None:
     assert adjustments["total=5"].shrunk_adjustment == pytest.approx(0.5)
 
 
-def test_build_report_calibration_gate_and_betting_gate_are_separate() -> None:
+def test_build_report_exposes_predictive_calibration_gate() -> None:
     rows = [
         _row(1, point=4.0, sim_mean=4.0, actual=5.0),
         _row(2, point=4.0, sim_mean=4.0, actual=5.0),
@@ -91,7 +91,6 @@ def test_build_report_calibration_gate_and_betting_gate_are_separate() -> None:
     assert report["metrics"]["test"]["calibrated"]["mae"] < report["metrics"]["test"]["base_sim"]["mae"]
     assert report["calibration_gate"]["status"] == "closed"
     assert report["calibration_gate"]["checks"]["enough_heldout_sample"] is False
-    assert report["betting_gate"]["status"] == "closed"
 
 
 def test_bucket_key_supports_month_and_rejects_unknown_group() -> None:

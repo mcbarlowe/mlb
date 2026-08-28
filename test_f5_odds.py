@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from src.betting.f5_odds import parse_f5_odds_rows
-from src.betting.f5_odds_store import normalize_f5_odds_row
+from src.market_data.f5_odds import parse_f5_odds_rows
+from src.market_data.f5_odds_store import normalize_f5_odds_row
 
 
 def _payload() -> list[dict[str, object]]:

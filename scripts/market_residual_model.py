@@ -25,10 +25,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 
 EPS = 1e-9
-WIN_PROFIT = 100.0 / 110.0
 FEATURE_NAMES = ("market_logit", "sim_minus_market_logit")
-DEFAULT_EDGE_THRESHOLDS = (0.0, 0.03, 0.05, 0.08)
-MIN_GATE_BUCKET_BETS = 25
 _FLOAT_RE = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)"
 LINE_RE = re.compile(
     rf"(?P<game_pk>\d+)\s+pt=(?P<point>{_FLOAT_RE})\s+"
@@ -73,21 +70,6 @@ def infer_season_from_path(path: str | Path) -> int:
     if match is None:
         raise ValueError(f"Could not infer season from log path: {path}")
     return int(match.group(1))
-
-
-def parse_edge_thresholds(value: str) -> tuple[float, ...]:
-    """Parse a comma-separated list of non-negative edge thresholds."""
-    try:
-        thresholds = tuple(float(part) for part in value.split(",") if part.strip())
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"edge thresholds must be comma-separated numbers: {value!r}"
-        ) from exc
-    if not thresholds:
-        raise argparse.ArgumentTypeError("at least one edge threshold is required")
-    if any(not math.isfinite(threshold) or threshold < 0.0 for threshold in thresholds):
-        raise argparse.ArgumentTypeError("edge thresholds must be finite and non-negative")
-    return thresholds
 
 
 def parse_log_spec(spec: str) -> tuple[int | None, Path]:
@@ -197,8 +179,6 @@ def predict_residual_probabilities(
 def evaluate_residual_model(
     model: LogisticRegression,
     rows: Sequence[MarketResidualRow],
-    *,
-    edge_thresholds: Sequence[float] = DEFAULT_EDGE_THRESHOLDS,
 ) -> dict[str, Any]:
     """Evaluate fitted residual-model probabilities against raw market probabilities."""
     if not rows:
@@ -208,13 +188,10 @@ def evaluate_residual_model(
     market_probs = [row.market_over for row in rows]
     model_metrics = probability_metrics(model_probs, outcomes)
     market_metrics = probability_metrics(market_probs, outcomes)
-    gaps = metric_gaps(model_metrics, market_metrics)
-    buckets = edge_bucket_summaries(model_probs, market_probs, outcomes, edge_thresholds)
     return {
         "model": model_metrics.as_dict(),
         "market": market_metrics.as_dict(),
-        "gaps": gaps,
-        "edge_buckets": buckets,
+        "gaps": metric_gaps(model_metrics, market_metrics),
     }
 
 
@@ -231,64 +208,6 @@ def metric_gaps(
         "log_loss_improvement": -log_loss_gap,
     }
 
-
-def edge_bucket_summaries(
-    model_over: Sequence[float],
-    market_over: Sequence[float],
-    outcomes: Sequence[int],
-    edge_thresholds: Sequence[float],
-) -> list[dict[str, float | int]]:
-    """Summarize flat -110 bets where model-market side edge clears thresholds."""
-    model_probs, y = _aligned_arrays(model_over, outcomes)
-    market_probs, _ = _aligned_arrays(market_over, outcomes)
-    if len(market_probs) != len(model_probs):
-        raise ValueError("model and market probabilities must have the same length")
-
-    summaries: list[dict[str, float | int]] = []
-    edge_delta = model_probs - market_probs
-    for threshold in edge_thresholds:
-        selected = np.abs(edge_delta) > threshold
-        bets = int(np.sum(selected))
-        if bets == 0:
-            summaries.append(
-                {
-                    "edge_threshold": float(threshold),
-                    "bets": 0,
-                    "wins": 0,
-                    "win_rate": 0.0,
-                    "roi": 0.0,
-                    "avg_edge": 0.0,
-                    "avg_market_side_probability": 0.0,
-                    "win_rate_minus_market_probability": 0.0,
-                }
-            )
-            continue
-
-        selected_delta = edge_delta[selected]
-        selected_y = y[selected]
-        selected_market = market_probs[selected]
-        bet_over = selected_delta >= 0.0
-        wins_array = (bet_over & (selected_y == 1)) | (~bet_over & (selected_y == 0))
-        market_side_probability = np.where(bet_over, selected_market, 1.0 - selected_market)
-        wins = int(np.sum(wins_array))
-        win_rate = wins / bets
-        roi = (wins * WIN_PROFIT - (bets - wins)) / bets
-        avg_market_probability = float(np.mean(market_side_probability))
-        summaries.append(
-            {
-                "edge_threshold": float(threshold),
-                "bets": bets,
-                "wins": wins,
-                "win_rate": float(win_rate),
-                "roi": float(roi),
-                "avg_edge": float(np.mean(np.abs(selected_delta))),
-                "avg_market_side_probability": avg_market_probability,
-                "win_rate_minus_market_probability": float(
-                    win_rate - avg_market_probability
-                ),
-            }
-        )
-    return summaries
 
 
 def model_coefficients(model: LogisticRegression) -> dict[str, float | dict[str, float]]:
@@ -319,83 +238,36 @@ def validate_leak_free_split(
         )
 
 
-def decide_betting_gate(metrics: dict[str, Any]) -> dict[str, Any]:
-    """Conservatively open only when scores and nonzero edge buckets agree."""
-    gaps = metrics["gaps"]
-    score_checks = {
-        "model_brier_beats_market": gaps["brier_model_minus_market"] < 0.0,
-        "model_log_loss_beats_market": gaps["log_loss_model_minus_market"] < 0.0,
-    }
-    evidence_buckets = [
-        bucket
-        for bucket in metrics["edge_buckets"]
-        if bucket["edge_threshold"] > 0.0
-        and bucket["bets"] >= MIN_GATE_BUCKET_BETS
-        and bucket["roi"] > 0.0
-        and bucket["win_rate_minus_market_probability"] > 0.0
-    ]
-    checks = {
-        **score_checks,
-        "nonzero_edge_bucket_has_positive_evidence": bool(evidence_buckets),
-    }
-    status = "open" if all(checks.values()) else "closed"
-    if status == "open":
-        reason = "Residual model beat market scores with positive nonzero-edge evidence"
-    else:
-        failed = [name for name, passed in checks.items() if not passed]
-        reason = "Gate closed: " + ", ".join(failed)
-    return {
-        "status": status,
-        "reason": reason,
-        "checks": checks,
-        "metrics": {
-            "brier_improvement": gaps["brier_improvement"],
-            "log_loss_improvement": gaps["log_loss_improvement"],
-            "min_bucket_bets": MIN_GATE_BUCKET_BETS,
-            "evidence_buckets": evidence_buckets,
-        },
-    }
-
 
 def build_report(
     train_rows: Sequence[MarketResidualRow],
     eval_rows: Sequence[MarketResidualRow],
     *,
-    edge_thresholds: Sequence[float] = DEFAULT_EDGE_THRESHOLDS,
     train_logs: Sequence[str] = (),
     eval_log: str | None = None,
 ) -> dict[str, Any]:
     """Fit on train rows, evaluate held-out rows, and build a JSON-safe report."""
     validate_leak_free_split(train_rows, eval_rows)
     model = fit_residual_model(train_rows)
-    eval_metrics = evaluate_residual_model(
-        model, eval_rows, edge_thresholds=edge_thresholds
-    )
-    train_metrics = evaluate_residual_model(
-        model, train_rows, edge_thresholds=edge_thresholds
-    )
     train_seasons = sorted({row.season for row in train_rows})
     eval_seasons = sorted({row.season for row in eval_rows})
-    report = {
+    return {
         "model_type": "sklearn.linear_model.LogisticRegression",
         "feature_names": list(FEATURE_NAMES),
         "train": {
             "logs": list(train_logs),
             "seasons": train_seasons,
             "rows": len(train_rows),
-            "metrics": train_metrics,
+            "metrics": evaluate_residual_model(model, train_rows),
         },
         "eval": {
             "log": eval_log,
             "seasons": eval_seasons,
             "rows": len(eval_rows),
         },
-        "metrics": eval_metrics,
-        "edge_buckets": eval_metrics["edge_buckets"],
+        "metrics": evaluate_residual_model(model, eval_rows),
         "coefficients": model_coefficients(model),
     }
-    report["betting_gate"] = decide_betting_gate(eval_metrics)
-    return report
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -408,12 +280,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("--eval-log", required=True, help="held-out totals log path")
     parser.add_argument("--out-json", required=True, help="path for JSON report")
-    parser.add_argument(
-        "--edge-thresholds",
-        type=parse_edge_thresholds,
-        default=DEFAULT_EDGE_THRESHOLDS,
-        help="comma-separated side-edge thresholds (default: 0.0,0.03,0.05,0.08)",
-    )
     args = parser.parse_args(argv)
 
     train_rows, train_paths = read_log_specs(args.train_log)
@@ -422,7 +288,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     report = build_report(
         train_rows,
         eval_rows,
-        edge_thresholds=args.edge_thresholds,
         train_logs=train_paths,
         eval_log=str(eval_path),
     )

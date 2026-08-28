@@ -12,7 +12,7 @@ from scripts.f5_residual_calibration import (
     merge_sim_probabilities,
     split_rows,
 )
-from src.betting.f5_clv import F5BookLine
+from src.model_evaluation.f5_market import F5BookLine
 
 
 def _row(
@@ -60,19 +60,15 @@ def test_build_market_rows_drops_pushes_and_keeps_chronological_order() -> None:
     assert all(row.book_count == 1 for row in rows)
 
 
-def test_load_sim_probabilities_from_current_f5_clv_report_shape(tmp_path) -> None:
-    report_path = tmp_path / "f5_clv.json"
+def test_load_sim_probabilities_from_model_artifact(tmp_path) -> None:
+    report_path = tmp_path / "f5_simulation.json"
     report_path.write_text(
         """
         {
           "games": [
-            {"game_pk": 10, "take_prob_over": 0.51},
-            {"game_pk": 11, "sim_prob_over": 0.62}
-          ],
-          "bets": [
-            {"game_pk": 10, "edge_threshold": 0.0, "staking": "flat", "side": "under", "model_prob": 0.58},
-            {"game_pk": 10, "edge_threshold": 0.03, "staking": "flat", "side": "under", "model_prob": 0.58},
-            {"game_pk": 12, "edge_threshold": 0.0, "staking": "flat", "side": "over", "model_prob": 0.57}
+            {"game_pk": 10, "sim_prob_over": 0.42},
+            {"game_pk": 11, "sim_prob_over": 0.62},
+            {"game_pk": 12, "sim_prob_over": 0.57}
           ]
         }
         """
@@ -80,7 +76,11 @@ def test_load_sim_probabilities_from_current_f5_clv_report_shape(tmp_path) -> No
 
     probabilities = load_sim_probabilities_from_report(report_path)
 
-    assert probabilities == {10: pytest.approx(0.42), 11: pytest.approx(0.62), 12: pytest.approx(0.57)}
+    assert probabilities == {
+        10: pytest.approx(0.42),
+        11: pytest.approx(0.62),
+        12: pytest.approx(0.57),
+    }
 
 
 def test_split_rows_rejects_empty_sides() -> None:
@@ -88,7 +88,7 @@ def test_split_rows_rejects_empty_sides() -> None:
         split_rows([_row(1, market_prob_over=0.5, actual_over=1)], train_fraction=0.5)
 
 
-def test_build_report_without_sim_rows_reports_market_only_gate_closed() -> None:
+def test_build_report_without_sim_rows_reports_market_metrics() -> None:
     rows = [
         _row(1, market_prob_over=0.40, actual_over=0),
         _row(2, market_prob_over=0.45, actual_over=0),
@@ -104,8 +104,6 @@ def test_build_report_without_sim_rows_reports_market_only_gate_closed() -> None
     assert report["rows"]["sim_merged"] == 0
     assert set(report["metrics"]) == {"train", "test"}
     assert set(report["metrics"]["test"]) == {"market", "market_calibrated"}
-    assert report["betting_gate"]["status"] == "closed"
-    assert report["betting_gate"]["checks"]["has_residual_calibration"] is False
 
 
 def test_build_report_with_sim_rows_compares_sim_and_residual_on_holdout() -> None:
@@ -124,7 +122,6 @@ def test_build_report_with_sim_rows_compares_sim_and_residual_on_holdout() -> No
         rows,
         seasons=(2025,),
         train_fraction=0.5,
-        min_test_rows=100,
     )
 
     assert report["split"]["sim_train_rows"] == 4
@@ -137,8 +134,6 @@ def test_build_report_with_sim_rows_compares_sim_and_residual_on_holdout() -> No
         "book_count",
     ]
     assert report["metrics"]["sim_test"]["residual_calibrated"]["brier"] < report["metrics"]["sim_test"]["market"]["brier"]
-    assert report["betting_gate"]["status"] == "closed"
-    assert report["betting_gate"]["checks"]["enough_heldout_sample"] is False
 
 
 def test_merge_sim_probabilities_validates_probability_bounds() -> None:

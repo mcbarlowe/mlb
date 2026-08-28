@@ -5,6 +5,7 @@ REPO_DIR="/Users/matthewbarlowe/code/python/mlb"
 UV_BIN="/usr/local/bin/uv"
 CAFFEINATE_BIN="/usr/bin/caffeinate"
 RUN_PATTERN="scripts/run_daily_sim_slate.py"
+SOCIAL_ENV="${BARLOWE_SOCIAL_ENV:-/Users/matthewbarlowe/.config/barlowe/social.env}"
 
 POST_ENABLED="${BARLOWE_DAILY_SIM_POST:-1}"
 WATCH_STARTERS="${BARLOWE_DAILY_SIM_WATCH_STARTERS:-1}"
@@ -17,6 +18,13 @@ OUTCOME_RUN_DIR="${BARLOWE_DAILY_SIM_OUTCOME_RUN_DIR:-auto}"
 WIN_MODEL_NAME="${BARLOWE_DAILY_SIM_WIN_MODEL:-mlb-team-strength-win}"
 OUTPUT_DIR="${BARLOWE_DAILY_SIM_OUTPUT_DIR:-output/sim_cards/daily}"
 STATE_DIR="${BARLOWE_DAILY_SIM_STATE_DIR:-output/sim_state}"
+
+if [[ -f "$SOCIAL_ENV" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$SOCIAL_ENV"
+  set +a
+fi
 
 cd "$REPO_DIR"
 load_from_zsh() {

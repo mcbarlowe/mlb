@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.betting.h2h_odds_store import normalize_h2h_odds_row
+from src.market_data.h2h_odds_store import normalize_h2h_odds_row
 
 
 def test_normalize_h2h_odds_row_defaults_to_open_h2h_source():

@@ -1,15 +1,9 @@
 """Tests for futures betting infrastructure."""
 
-import pytest
 
-from src.betting.futures_odds_store import (
+from src.market_data.futures_odds_store import (
     FUTURES_ODDS_DDL,
     insert_futures_odds,
-)
-from src.betting.futures_paper_trade_store import (
-    FUTURES_PAPER_TRADES_DDL,
-    insert_futures_paper_trades,
-    settle_futures_paper_trade,
 )
 
 
@@ -23,14 +17,6 @@ def test_futures_odds_ddl_valid():
     assert "bookmaker" in FUTURES_ODDS_DDL
 
 
-def test_futures_paper_trades_ddl_valid():
-    """Futures paper trades DDL should be valid SQL."""
-    assert "CREATE TABLE" in FUTURES_PAPER_TRADES_DDL
-    assert "futures_paper_trades" in FUTURES_PAPER_TRADES_DDL
-    assert "strategy_version" in FUTURES_PAPER_TRADES_DDL
-    assert "season" in FUTURES_PAPER_TRADES_DDL
-    assert "market_type" in FUTURES_PAPER_TRADES_DDL
-    assert "team_id" in FUTURES_PAPER_TRADES_DDL
 
 
 def test_insert_futures_odds_empty_rows():
@@ -42,31 +28,6 @@ def test_insert_futures_odds_empty_rows():
     assert result == 0
 
 
-def test_insert_futures_paper_trades_empty_rows():
-    """Inserting empty list should return 0."""
-    from unittest.mock import MagicMock
-    
-    pg = MagicMock()
-    result = insert_futures_paper_trades(pg, [])
-    assert result == 0
-
-
-def test_settle_futures_paper_trade_validates_result():
-    """Settle should reject invalid result values."""
-    from unittest.mock import MagicMock
-    
-    pg = MagicMock()
-    
-    with pytest.raises(ValueError, match="Invalid result"):
-        settle_futures_paper_trade(
-            pg,
-            strategy_version="test",
-            season=2027,
-            market_type="championship",
-            team_id=119,
-            result="invalid",
-            profit_units=1.0,
-        )
 
 
 def test_fetch_futures_odds_normalizes_market_types():
@@ -89,25 +50,6 @@ def test_fetch_futures_odds_normalizes_team_names():
     assert _normalize_team_name("Cleveland Guardians") == "Cleveland Guardians"
     assert _normalize_team_name("Los Angeles Dodgers") == "Los Angeles Dodgers"
 
-
-def test_settlement_profit_calculation():
-    """Profit calculation should match American odds payout rules."""
-    from scripts.settle_futures_paper_trades import _calculate_profit
-    
-    # Positive odds: +500 means $100 bet wins $500
-    # 1 unit at +500 should win 5 units profit
-    assert _calculate_profit(500, 1.0, won=True) == pytest.approx(5.0)
-    
-    # Negative odds: -150 means need to bet $150 to win $100
-    # 1 unit at -150 should win ~0.667 units profit
-    assert _calculate_profit(-150, 1.0, won=True) == pytest.approx(0.6667, rel=0.01)
-    
-    # Lost bet should return negative stake
-    assert _calculate_profit(500, 1.0, won=False) == -1.0
-    assert _calculate_profit(-150, 2.5, won=False) == -2.5
-    
-    # Even odds (+100) should double money when won
-    assert _calculate_profit(100, 1.0, won=True) == 1.0
 
 
 def test_parse_futures_odds_valid_payload():

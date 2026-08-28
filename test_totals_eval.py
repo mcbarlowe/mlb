@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import csv
 import json
 from pathlib import Path
@@ -10,7 +9,6 @@ import pytest
 from scripts.sim_totals_eval import (
     TotalsEvalRow,
     make_eval_row,
-    parse_edges,
     row_output,
     summarize_rows,
     write_outputs,
@@ -35,7 +33,7 @@ def test_make_eval_row_records_distribution_and_outcome() -> None:
     assert row.actual_over == 1
 
 
-def test_summarize_rows_scores_non_push_games_and_roi() -> None:
+def test_summarize_rows_scores_non_push_games() -> None:
     rows = [
         TotalsEvalRow(
             season=2025,
@@ -85,8 +83,6 @@ def test_summarize_rows_scores_non_push_games_and_roi() -> None:
         games_requested=3,
         sims=100,
         seed=7,
-        edge=0.05,
-        edge_buckets=(0.05,),
         pa_calibration_path=None,
         mlflow_tracking_uri="http://example.test:5001",
         outcome_run_dir="models/outcome/test",
@@ -98,9 +94,8 @@ def test_summarize_rows_scores_non_push_games_and_roi() -> None:
     assert summary["metrics"]["sim"]["brier"] == pytest.approx(0.09)
     assert summary["metrics"]["market"]["brier"] == pytest.approx(0.25)
     assert summary["totals"]["mean_sim_minus_actual_total"] == pytest.approx(0.0)
-    assert summary["roi_by_edge"] == [
-        {"edge": 0.05, "bets": 2, "wins": 2, "roi": pytest.approx(100 / 110)}
-    ]
+    assert "roi_by_edge" not in summary
+    assert "edge_threshold" not in summary
 
 
 def test_write_outputs_json_and_csv(tmp_path: Path) -> None:
@@ -124,8 +119,6 @@ def test_write_outputs_json_and_csv(tmp_path: Path) -> None:
         games_requested=1,
         sims=100,
         seed=7,
-        edge=0.05,
-        edge_buckets=(0.05,),
         pa_calibration_path="models/sim/example.json",
         contact_environment_enabled=False,
         mlflow_tracking_uri="http://example.test:5001",
@@ -137,7 +130,6 @@ def test_write_outputs_json_and_csv(tmp_path: Path) -> None:
     write_outputs(
         rows=[row],
         summary=summary,
-        edge=0.05,
         out_json=out_json,
         out_csv=out_csv,
     )
@@ -145,7 +137,7 @@ def test_write_outputs_json_and_csv(tmp_path: Path) -> None:
     payload = json.loads(out_json.read_text())
     assert payload["summary"]["run_id"] == "test-run"
     assert payload["rows"][0]["run_id"] == "test-run"
-    assert payload["rows"][0]["bet_side_at_threshold"] == "over"
+    assert "bet_side_at_threshold" not in payload["rows"][0]
 
     with out_csv.open() as handle:
         csv_rows = list(csv.DictReader(handle))
@@ -169,17 +161,9 @@ def test_row_output_marks_push_metrics_blank() -> None:
         outcome="push",
     )
 
-    output = row_output(row, 0.03, run_id="run")
+    output = row_output(row, run_id="run")
 
     assert output["actual_over"] is None
     assert output["sim_brier"] is None
-    assert output["bet_side_at_threshold"] == "over"
-    assert output["bet_result_at_threshold"] == "push"
-
-
-def test_parse_edges_requires_comma_separated_numbers() -> None:
-    assert parse_edges("0.03,0.05") == (0.03, 0.05)
-    with pytest.raises(argparse.ArgumentTypeError):
-        parse_edges("")
-    with pytest.raises(argparse.ArgumentTypeError):
-        parse_edges("nope")
+    assert "bet_side_at_threshold" not in output
+    assert "bet_result_at_threshold" not in output

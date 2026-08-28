@@ -67,7 +67,7 @@ def test_fit_lambda_stays_at_market_when_sim_is_harmful() -> None:
     assert scores["0"] < scores["1"]
 
 
-def test_build_report_keeps_betting_gate_closed_after_probability_fit() -> None:
+def test_build_report_evaluates_probability_fit_on_holdout() -> None:
     rows = [
         _row(1, market=0.5, sim=0.2, actual_over=0),
         _row(2, market=0.5, sim=0.8, actual_over=1),
@@ -89,7 +89,6 @@ def test_build_report_keeps_betting_gate_closed_after_probability_fit() -> None:
     assert report["metrics"]["test"]["blended"]["brier"] < report["metrics"]["test"]["market"]["brier"]
     assert report["probability_gate"]["status"] == "closed"
     assert report["probability_gate"]["checks"]["enough_heldout_sample"] is False
-    assert report["betting_gate"]["status"] == "closed"
 
 
 def test_blend_probability_is_market_anchor_interpolation() -> None:

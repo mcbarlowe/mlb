@@ -1,7 +1,7 @@
 """Leak-free calibration + lineage metrics for the batter prop estimator.
 
 Reproduces the estimator lineage and evaluates every version on held-out
-2024 and 2025 starts (PA >= 3, matching live alert semantics):
+2024 and 2025 starts (PA >= 3, matching production scoring eligibility):
 
   v1 props-raw-shrink-v1      uniform window, no aging, EB shrink k=50
   v2 props-decay400-age-k50   + recency decay (H=400 games) + aging curves
@@ -10,10 +10,8 @@ Reproduces the estimator lineage and evaluates every version on held-out
                               the v2 estimator - calibration shows conditioning
                               does not help HR)
 
-Metrics per (test season, stat in {hr1, h1}): max-pick and top-decile
-realized/estimated, UNDER-side top-decile realized/estimated, Brier, log
-loss, and flat-1u ROI at the production text-gate price (HR +15%, H +11%,
-price = (1+gate)/estimate: "book is gate-cheap vs our number").
+Metrics per (test season, stat in {hr1, h1}): top- and bottom-decile
+realized/estimated calibration ratios, Brier score, and log loss.
 
 Used by scripts/register_prop_model_mlflow.py; run directly for the table.
 """
@@ -43,7 +41,6 @@ K_PARK = 2000.0
 EXP_PA_WINDOW = 30
 CURVE_MIN_GP = 60
 AGE_LO, AGE_HI = 21, 38
-GATE = {"hr1": 0.15, "h1": 0.11}
 VERSIONS = ("props-raw-shrink-v1", "props-decay400-age-k50-mkt", "props-cond-v3")
 
 
@@ -185,18 +182,15 @@ def _estimate(f: pd.DataFrame, mu: float, curve: dict[int, float] | None,
 def _metrics(rows: pd.DataFrame, stat: str, col: str) -> dict[str, float]:
     y = rows[stat].to_numpy(float)
     p = rows[col].to_numpy(float)
-    picks = rows.loc[rows.groupby("game_date")[col].idxmax()]
     top = rows[rows[col] >= rows[col].quantile(0.9)]
     bot = rows[rows[col] <= rows[col].quantile(0.1)]
-    dec = (1.0 + GATE[stat]) / picks[col].to_numpy()
-    profit = picks[stat].to_numpy(float) * (dec - 1.0) - (1.0 - picks[stat].to_numpy(float))
     return {
-        "maxpick_ratio": float(picks[stat].mean() / picks[col].mean()),
         "top10_ratio": float(top[stat].mean() / top[col].mean()),
-        "under10_ratio": float((1 - bot[stat]).mean() / (1 - bot[col]).mean()),
+        "bottom10_non_event_ratio": float(
+            (1 - bot[stat]).mean() / (1 - bot[col]).mean()
+        ),
         "brier": float(((p - y) ** 2).mean()),
         "logloss": float(-np.mean(y * np.log(p + 1e-9) + (1 - y) * np.log(1 - p + 1e-9))),
-        "gate_roi": float(profit.mean()),
     }
 
 
@@ -253,8 +247,11 @@ def main() -> None:
     for version, m in metrics.items():
         print(f"\n=== {version} ===")
         for key in sorted(m):
-            print(f"  {key:<28} {m[key]:+.4f}" if "roi" in key or "ratio" in key
-                  else f"  {key:<28} {m[key]:.4f}")
+            print(
+                f"  {key:<28} {m[key]:+.4f}"
+                if "ratio" in key
+                else f"  {key:<28} {m[key]:.4f}"
+            )
 
 
 if __name__ == "__main__":
