@@ -2417,3 +2417,56 @@ ALTER TABLE ONLY games
 ALTER TABLE ONLY games
     ADD CONSTRAINT games_venue_id_fkey FOREIGN KEY (venue_id) REFERENCES venues(venue_id);
 
+
+CREATE OR REPLACE VIEW betting_game_results_v1 AS
+SELECT
+    g.game_pk,
+    g.game_date,
+    g.abstract_game_state,
+    g.home_team_id,
+    g.away_team_id,
+    scores.home_score,
+    scores.away_score
+FROM games AS g
+LEFT JOIN (
+    SELECT
+        game_pk,
+        SUM(runs) FILTER (WHERE team_type = 'home')::integer AS home_score,
+        SUM(runs) FILTER (WHERE team_type = 'away')::integer AS away_score
+    FROM linescore
+    GROUP BY game_pk
+) AS scores USING (game_pk);
+
+COMMENT ON VIEW betting_game_results_v1 IS
+    'Read-only v1 betting result contract. Consumers must settle only rows whose abstract_game_state is Final and whose scores are non-null.';
+
+CREATE OR REPLACE VIEW betting_player_results_v1 AS
+SELECT
+    b.game_pk,
+    g.game_date,
+    g.abstract_game_state,
+    b.player_id,
+    b.player_name,
+    CASE
+        WHEN b.gamesplayed = 0 THEN FALSE
+        WHEN b.gamesplayed > 0 THEN TRUE
+        ELSE NULL
+    END AS appeared,
+    b.hits,
+    b.doubles,
+    b.triples,
+    b.homeruns AS home_runs,
+    b.totalbases AS total_bases,
+    b.rbi,
+    b.runs,
+    b.baseonballs AS walks,
+    b.stolenbases AS stolen_bases,
+    b.strikeouts
+FROM batting AS b
+JOIN games AS g USING (game_pk);
+
+COMMENT ON VIEW betting_player_results_v1 IS
+    'Read-only v1 betting player result contract. Missing rows and null appeared values are unknown and must remain pending even for Final games.';
+
+COMMENT ON COLUMN betting_player_results_v1.appeared IS
+    'Derived from batting.gamesplayed. False is emitted only when the source explicitly stores gamesplayed=0; null means appearance is unknown and must not void a bet.';

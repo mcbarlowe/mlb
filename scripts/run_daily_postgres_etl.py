@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Download the previous day's games and ingest them into PostgreSQL.
+"""Download game feeds and ingest them into PostgreSQL.
 
 This is the main daily data pipeline:
 1. Download missing schedules and live-feed JSON files
 2. Backfill PostgreSQL from raw feeds (with stale-progress reset)
-3. Settle paper-trade moneyline bets
-4. Resolve player prop bets and report ROI/profit
 """
 
 from __future__ import annotations
@@ -37,6 +35,7 @@ def resolve_target_date(date_arg: str | None) -> date:
         return datetime.now(tz=UTC).date() - timedelta(days=1)
     return datetime.strptime(date_arg, "%Y-%m-%d").replace(tzinfo=UTC).date()
 
+
 def completed_game_pks(pipeline_summary: dict) -> list[int]:
     pks: list[int] = []
     for item in pipeline_summary.get("completed", []):
@@ -51,14 +50,34 @@ def completed_game_pks(pipeline_summary: dict) -> list[int]:
     return pks
 
 
-def main() -> None:
-    from src.betting.paper_settlement import summarize_paper_trade_rows
-    from src.betting.paper_trade_store import (
-        ensure_paper_trades_table,
-        load_paper_trade_rows,
-        update_paper_trade_settlement_rows,
+def pipeline_failure_counts(pipeline_summary: dict) -> dict[str, int]:
+    completed_errors = sum(
+        isinstance(item, dict) and bool(item.get("error"))
+        for item in pipeline_summary.get("completed", [])
     )
-    from src.database import PostgresConfig, PostgresHandler
+    fetch_errors = sum(
+        isinstance(item, dict) and bool(item.get("error"))
+        for item in pipeline_summary.get("other", [])
+    )
+    unresolved = len(pipeline_summary.get("live", [])) + len(
+        pipeline_summary.get("scheduled", [])
+    )
+    blocking_states = sum(
+        isinstance(item, dict)
+        and item.get("state") not in {"postponed", "cancelled"}
+        and not item.get("error")
+        for item in pipeline_summary.get("other", [])
+    )
+    return {
+        "completed_errors": completed_errors,
+        "fetch_errors": fetch_errors,
+        "unresolved": unresolved,
+        "blocking_states": blocking_states,
+    }
+
+
+def main() -> int:
+    from src.database import PostgresConfig
     from src.etl.daily_pipeline import run_daily_pipeline
     from src.etl.postgres_backfill import run_postgres_backfill
 
@@ -71,6 +90,7 @@ def main() -> None:
         skip_existing=False,
         poll_live=False,
     )
+    failures = pipeline_failure_counts(pipeline_summary)
 
     db_config = PostgresConfig.from_env()
     completed_pks = completed_game_pks(pipeline_summary)
@@ -85,6 +105,10 @@ def main() -> None:
     print(f"- games scheduled: {pipeline_summary['total_games']}")
     print(f"- games skipped existing: {len(pipeline_summary.get('skipped', []))}")
     print(f"- games processed: {len(pipeline_summary.get('completed', []))}")
+    print(f"- completed game errors: {failures['completed_errors']}")
+    print(f"- fetch errors: {failures['fetch_errors']}")
+    print(f"- unresolved live/scheduled games: {failures['unresolved']}")
+    print(f"- blocking game states: {failures['blocking_states']}")
 
     print("\nDatabase backfill summary")
     print(f"- target: {db_config.describe()}")
@@ -93,50 +117,18 @@ def main() -> None:
     print(f"- skipped already complete: {backfill_summary.skipped_completed}")
     print(f"- failed games: {backfill_summary.failed_games}")
 
-    # Settle moneyline bets
-    print("\n[Phase 3] Settling paper-trade moneyline bets...")
-    with PostgresHandler(db_config) as db:
-        ensure_paper_trades_table(db)
+    if any(failures.values()) or backfill_summary.failed_games > 0:
+        print("\nDaily ETL failed")
+        for name, count in failures.items():
+            if count:
+                print(f"- {name.replace('_', ' ')}: {count}")
+        if backfill_summary.failed_games > 0:
+            print(f"- backfill failed games: {backfill_summary.failed_games}")
+        return 1
 
-    rows = load_paper_trade_rows()
-    sys.path.insert(0, str(project_root / "scripts"))
-    from settle_paper_trades import _settle_rows
-
-    settled_rows, updated, _, _ = _settle_rows(
-        rows, db_config=db_config
-    )
-    update_paper_trade_settlement_rows(settled_rows, db_config=db_config)
-
-    if updated > 0:
-        rows_fresh = load_paper_trade_rows()
-        summary = summarize_paper_trade_rows(rows_fresh)
-        print(f"  Updated: {updated} trades | Win Rate: {summary.win_rate:.1%} | Profit: {summary.profit_units:+.2f}u")
-    else:
-        print("  Updated: 0 trades (no new finals)")
-
-    # Settle player prop bets
-    print("[Phase 4] Settling player prop bets...")
-    sys.path.insert(0, str(project_root / "scripts"))
-    from settle_prop_alerts import load_prop_bet_rows, settle_open_prop_bets
-
-    from src.betting.prop_settlement import summarize_prop_bet_rows
-
-    newly = settle_open_prop_bets(db_config)
-    prop_summary = summarize_prop_bet_rows(load_prop_bet_rows(db_config))
-    if prop_summary.settled_rows:
-        print(
-            f"  Settled: {len(newly)} new | "
-            f"Record {prop_summary.won}-{prop_summary.lost} | "
-            f"Win Rate: {prop_summary.win_rate:.1%} | "
-            f"Profit: {prop_summary.profit_units:+.2f}u | "
-            f"ROI: {prop_summary.roi:+.2%} | pending {prop_summary.open_rows}"
-        )
-    else:
-        print(
-            f"  Settled: 0 | pending {prop_summary.open_rows} | "
-            f"void {prop_summary.void_rows}"
-        )
+    print("\nDaily ETL completed successfully")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

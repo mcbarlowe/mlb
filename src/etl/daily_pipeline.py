@@ -656,9 +656,14 @@ class DailyPipeline:
                     pbar.update(1)
 
         # Poll live games if requested
-        live_results = {}
-        if poll_live and live_games:
-            live_results = await self.poll_live_games(live_games, season, stop_event)
+        live_results = (
+            await self.poll_live_games(live_games, season, stop_event)
+            if poll_live and live_games
+            else {
+                game_pk: {"game_pk": game_pk, "state": GameState.LIVE.value}
+                for game_pk in live_games
+            }
+        )
 
         print(f"\n{'='*60}")
         print("Pipeline Complete")
