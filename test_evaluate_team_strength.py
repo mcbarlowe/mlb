@@ -9,7 +9,7 @@ from scripts.evaluate_team_strength import (
     evaluate_rolling_seasons,
     paired_block_improvement_interval,
 )
-from src.sim.team_strength import FEATURE_NAMES
+from mlb.sim.team_strength import FEATURE_NAMES
 
 
 def test_logged_training_window_must_match_terminal_rolling_fold() -> None:

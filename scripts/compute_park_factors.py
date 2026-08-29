@@ -29,7 +29,7 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.database import PostgresConfig
+from mlb.database import PostgresConfig
 
 FIRST_SEASON = 2021
 TARGET_SEASONS = (2024, 2025, 2026)

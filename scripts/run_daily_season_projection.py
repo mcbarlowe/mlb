@@ -16,10 +16,10 @@ from zoneinfo import ZoneInfo
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.database import PostgresConfig, PostgresHandler
-from src.endpoints.game_feed import GameFeed
-from src.etl.postgres_backfill import run_postgres_backfill
-from src.live.publisher import POST_PROVIDER_CHOICES, build_publisher
+from mlb.database import PostgresConfig, PostgresHandler
+from mlb.endpoints.game_feed import GameFeed
+from mlb.etl.postgres_backfill import run_postgres_backfill
+from mlb.live.publisher import POST_PROVIDER_CHOICES, build_publisher
 
 EASTERN = ZoneInfo("America/New_York")
 DEFAULT_RAW_DATA_PATH = Path("data/raw/livefeeds")

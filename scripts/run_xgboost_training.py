@@ -13,16 +13,16 @@ import mlflow
 import polars as pl
 from mlflow.exceptions import MlflowException
 
-from src.ml.catboost_model import PitchXGBoostModel
-from src.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
-from src.ml.mlflow_utils import (
+from mlb.ml.catboost_model import PitchXGBoostModel
+from mlb.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
+from mlb.ml.mlflow_utils import (
     DEFAULT_MLFLOW_EXPERIMENT,
     build_metric_dict,
     build_param_dict,
     configure_mlflow,
     log_path_if_exists,
 )
-from src.ml.season_splits import default_data_source_train_seasons
+from mlb.ml.season_splits import default_data_source_train_seasons
 
 DEFAULT_VAL_SEASON = "2024"
 DEFAULT_TEST_SEASON = "2025"

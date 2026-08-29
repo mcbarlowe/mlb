@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.sim.team_priors import TeamSeasonResult, team_prior_offsets_from_results
+from mlb.sim.team_priors import TeamSeasonResult, team_prior_offsets_from_results
 
 
 def test_team_prior_offsets_use_prior_seasons_only_and_order_teams():

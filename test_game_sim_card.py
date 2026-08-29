@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.live.game_sim_card import (
+from mlb.live.game_sim_card import (
     build_game_sim_card_html,
     card_data_from_results,
 )
-from src.sim.game import GameResult
+from mlb.sim.game import GameResult
 
 
 def _results():

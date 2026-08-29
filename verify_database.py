@@ -1,6 +1,6 @@
 """Quick verification of the configured PostgreSQL schema."""
 
-from src.database import PostgresConfig, PostgresHandler
+from mlb.database import PostgresConfig, PostgresHandler
 
 db_config = PostgresConfig.from_env()
 

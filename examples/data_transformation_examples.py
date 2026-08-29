@@ -7,7 +7,7 @@ to convert API responses into tabular formats.
 
 from pathlib import Path
 
-from src.data import (
+from mlb.data import (
     BoxscoreData,
     GameFeedData,
     LinescoreData,
@@ -15,9 +15,9 @@ from src.data import (
     ReferenceData,
     TeamData,
 )
-from src.endpoints.game_feed import GameFeed
-from src.endpoints.pitch_types import PitchTypes
-from src.endpoints.positions import Positions
+from mlb.endpoints.game_feed import GameFeed
+from mlb.endpoints.pitch_types import PitchTypes
+from mlb.endpoints.positions import Positions
 
 
 def example_game_feed_transform():

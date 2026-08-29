@@ -17,8 +17,8 @@ sys.path.insert(0, str(project_root))
 
 import mlflow
 
-from src.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT, configure_mlflow
-from src.outcome.mlflow_registry import (
+from mlb.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT, configure_mlflow
+from mlb.outcome.mlflow_registry import (
     log_outcome_release_models,
     resolve_sim_inputs_run_id,
 )

@@ -24,7 +24,7 @@ import polars as pl
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.sim.base_out import DEFAULT_TABLE_PATH, build_transition_frame
+from mlb.sim.base_out import DEFAULT_TABLE_PATH, build_transition_frame
 
 DEFAULT_SEASONS = list(range(2021, 2026))
 LIVEFEED_ROOT = Path("data/raw/livefeeds")
@@ -45,7 +45,7 @@ AB_SCHEMA = {
 
 def extract_at_bat_rows(feed_path: Path) -> list[dict]:
     """At-bat state rows for one game feed; empty for non-regular games."""
-    from src.data.base_state import compute_at_bat_states
+    from mlb.data.base_state import compute_at_bat_states
 
     feed = json.loads(feed_path.read_text())
     game_data = feed.get("gameData", {})

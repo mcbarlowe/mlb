@@ -14,14 +14,14 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.data_contracts.moneyline_predictions import (
+from mlb.data_contracts.moneyline_predictions import (
     MoneylineGamePrediction,
     MoneylinePredictionBatch,
     write_prediction_batch,
 )
-from src.ml.mlflow_utils import DEFAULT_MLFLOW_TRACKING_URI
-from src.sim.slate import SlateGame, active_roster_ids, fetch_slate_games
-from src.sim.team_strength import (
+from mlb.ml.mlflow_utils import DEFAULT_MLFLOW_TRACKING_URI
+from mlb.sim.slate import SlateGame, active_roster_ids, fetch_slate_games
+from mlb.sim.team_strength import (
     DEFAULT_REGISTERED_STRENGTH_MODEL,
     TeamStrengthPredictor,
     build_live_strength_predictor,

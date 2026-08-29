@@ -28,19 +28,19 @@ import torch
 from scipy import stats
 from tqdm import tqdm
 
-from src.ml.features import (
+from mlb.ml.features import (
     IDX_TO_PITCH_TYPE,
     PITCH_TYPE_CODES,
     PitchFeatureEngine,
 )
-from src.ml.model import create_model
-from src.ml.pitch_predictor import (
+from mlb.ml.model import create_model
+from mlb.ml.pitch_predictor import (
     PITCH_TYPE_FULL_NAMES,
     GameContext,
     PitchPrediction,
     fetch_mlb_headshot,
 )
-from src.ml.pitch_type_location_model import (
+from mlb.ml.pitch_type_location_model import (
     PitchTypeConditionedMDN,
     PitchTypeThenLocationPredictor,
 )

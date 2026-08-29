@@ -10,18 +10,18 @@ from zoneinfo import ZoneInfo
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.live.publisher import (
+from mlb.live.publisher import (
     POST_PROVIDER_CHOICES,
     PredictionPost,
     ResultPost,
     build_publisher,
 )
-from src.live.slate_sim_card import (
+from mlb.live.slate_sim_card import (
     SlateSimBoardData,
     SlateSimRow,
     render_slate_sim_card,
 )
-from src.sim.slate import (
+from mlb.sim.slate import (
     DailySlateState,
     SlateGame,
     SlatePrediction,
@@ -36,7 +36,7 @@ from src.sim.slate import (
     simulate_slate_game,
     snapshot_state,
 )
-from src.sim.team_strength import (
+from mlb.sim.team_strength import (
     DEFAULT_REGISTERED_STRENGTH_MODEL,
     TeamStrengthPredictor,
     build_live_strength_predictor,

@@ -21,10 +21,10 @@ import json
 import numpy as np
 import torch
 
-from src.ml.cross_validation import TimeSeriesCrossValidator
-from src.ml.features import PITCH_TYPE_CODES
-from src.ml.model import create_model
-from src.ml.pitch_type_location_model import (
+from mlb.ml.cross_validation import TimeSeriesCrossValidator
+from mlb.ml.features import PITCH_TYPE_CODES
+from mlb.ml.model import create_model
+from mlb.ml.pitch_type_location_model import (
     PitchTypeConditionedMDN,
     PitchTypeThenLocationPredictor,
 )

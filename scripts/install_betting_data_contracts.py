@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.data_contracts.result_views import install_result_views
+from mlb.data_contracts.result_views import install_result_views
 
 
 def main() -> None:

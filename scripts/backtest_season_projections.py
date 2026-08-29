@@ -15,9 +15,9 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.sim.market_priors import load_market_prior_offsets
-from src.sim.projection_charts import write_projection_graphics
-from src.sim.season import (
+from mlb.sim.market_priors import load_market_prior_offsets
+from mlb.sim.projection_charts import write_projection_graphics
+from mlb.sim.season import (
     HomeWinPredictor,
     SeasonEvaluation,
     SeasonProjection,
@@ -33,8 +33,8 @@ from src.sim.season import (
     schedule_strength_offsets_from_games,
     simulate_season,
 )
-from src.sim.team_priors import load_team_prior_offsets
-from src.sim.team_strength import (
+from mlb.sim.team_priors import load_team_prior_offsets
+from mlb.sim.team_strength import (
     load_completed_games,
     train_strength_model,
 )
@@ -501,7 +501,7 @@ def _load_roster_offsets(
 ) -> dict[int, float]:
     if path is None:
         return {}
-    from src.sim.roster_priors import load_roster_prior_offsets
+    from mlb.sim.roster_priors import load_roster_prior_offsets
 
     return load_roster_prior_offsets(
         path,

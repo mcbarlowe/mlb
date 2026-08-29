@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.live.slate_sim_card import (
+from mlb.live.slate_sim_card import (
     SlateSimBoardData,
     SlateSimRow,
     board_columns,

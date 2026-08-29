@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from src.sim.projection_charts import write_projection_graphics
-from src.sim.season import SeasonProjection, TeamInfo, TeamProjection
+from mlb.sim.projection_charts import write_projection_graphics
+from mlb.sim.season import SeasonProjection, TeamInfo, TeamProjection
 
 
 def _team(team_id: int, abbreviation: str) -> TeamInfo:

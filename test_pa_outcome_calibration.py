@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import random
 
-from src.sim.calibration import (
+from mlb.sim.calibration import (
     PAOutcomeCalibration,
     apply_multipliers,
 )
-from src.sim.count_machine import PA_OUTCOMES
-from src.sim.pa import (
+from mlb.sim.count_machine import PA_OUTCOMES
+from mlb.sim.pa import (
     FixedDistributionProvider,
     pa_outcome_distribution,
     simulate_plate_appearance,

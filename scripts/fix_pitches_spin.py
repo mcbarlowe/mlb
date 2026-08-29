@@ -108,7 +108,7 @@ def season_files(seasons: list[int] | None) -> list[Path]:
 def main() -> None:
     import psycopg
 
-    from src.database import PostgresConfig
+    from mlb.database import PostgresConfig
 
     parser = argparse.ArgumentParser(description="Repair pitches spin columns.")
     parser.add_argument("--seasons", type=int, nargs="+", default=None)

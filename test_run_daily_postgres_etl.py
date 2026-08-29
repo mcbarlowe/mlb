@@ -51,9 +51,9 @@ def _install_etl_fakes(
             failed_games=failed_games,
         )
 
-    daily_pipeline_module = import_module("src.etl.daily_pipeline")
-    database_module = import_module("src.database")
-    backfill_module = import_module("src.etl.postgres_backfill")
+    daily_pipeline_module = import_module("mlb.etl.daily_pipeline")
+    database_module = import_module("mlb.database")
+    backfill_module = import_module("mlb.etl.postgres_backfill")
     monkeypatch.setattr(
         daily_pipeline_module, "run_daily_pipeline", fake_run_daily_pipeline
     )

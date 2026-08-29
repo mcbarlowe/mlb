@@ -27,7 +27,7 @@ from matplotlib import patches
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.ml.model import create_model
+from mlb.ml.model import create_model
 
 
 def load_model(model_dir: str, device: str = "cpu"):

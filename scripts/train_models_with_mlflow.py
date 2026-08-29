@@ -12,14 +12,14 @@ sys.path.insert(0, str(project_root))
 import mlflow
 
 from scripts import run_full_training, train_pitch_type_location_model
-from src.ml.mlflow_utils import (
+from mlb.ml.mlflow_utils import (
     DEFAULT_MLFLOW_EXPERIMENT,
     build_metric_dict,
     build_param_dict,
     configure_mlflow,
     log_path_if_exists,
 )
-from src.ml.season_splits import (
+from mlb.ml.season_splits import (
     DEFAULT_TEST_SEASON,
     DEFAULT_VAL_SEASON,
     default_data_source_train_seasons,

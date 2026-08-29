@@ -17,7 +17,7 @@ sys.path.insert(0, str(project_root))
 
 import mlflow
 
-from src.ml.mlflow_registry import (
+from mlb.ml.mlflow_registry import (
     PITCH_CHAMPION_ALIAS,
     PITCH_LOCATION_SPEC,
     PITCH_TYPE_SPEC,
@@ -25,8 +25,8 @@ from src.ml.mlflow_registry import (
     load_pitch_type_release,
     log_registered_pitch_model,
 )
-from src.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT, configure_mlflow
-from src.ml.run_dirs import (
+from mlb.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT, configure_mlflow
+from mlb.ml.run_dirs import (
     resolve_location_run_dir,
     resolve_pitch_type_run_dir,
 )

@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from src.data_contracts.prop_predictions import (
+from mlb.data_contracts.prop_predictions import (
     MODEL_NAME,
     MODEL_VERSION,
     PlayerLines,

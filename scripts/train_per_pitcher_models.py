@@ -16,9 +16,9 @@ from pathlib import Path
 
 import polars as pl
 
-from src.ml.features import PitchFeatureEngine
-from src.ml.per_pitcher_trainer import PerPitcherTrainer
-from src.ml.season_splits import default_data_source_train_seasons
+from mlb.ml.features import PitchFeatureEngine
+from mlb.ml.per_pitcher_trainer import PerPitcherTrainer
+from mlb.ml.season_splits import default_data_source_train_seasons
 
 
 def load_season_data(feature_engine: PitchFeatureEngine, season: str) -> pl.DataFrame:

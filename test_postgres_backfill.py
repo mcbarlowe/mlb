@@ -2,9 +2,9 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from src.database import PostgresConfig, PostgresHandler
-from src.etl import postgres_backfill
-from src.etl.postgres_backfill import (
+from mlb.database import PostgresConfig, PostgresHandler
+from mlb.etl import postgres_backfill
+from mlb.etl.postgres_backfill import (
     BACKFILL_PROGRESS_TABLE,
     BULK_BACKFILL_PROGRESS_TABLE,
     BackfillSummary,

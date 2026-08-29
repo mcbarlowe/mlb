@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.ml.mlflow_utils import (
+from mlb.ml.mlflow_utils import (
     DEFAULT_MLFLOW_TRACKING_URI,
     build_metric_dict,
     build_param_dict,

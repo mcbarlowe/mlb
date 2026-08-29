@@ -16,8 +16,8 @@ import torch
 from catboost import CatBoostClassifier, Pool
 from matplotlib.gridspec import GridSpec
 
-from src.ml.features import IDX_TO_PITCH_TYPE, PitchFeatureEngine
-from src.ml.mdn_location_model import BivariateMDN, get_location_density
+from mlb.ml.features import IDX_TO_PITCH_TYPE, PitchFeatureEngine
+from mlb.ml.mdn_location_model import BivariateMDN, get_location_density
 
 # Mapping from pitch type codes to full names
 PITCH_TYPE_NAMES = {

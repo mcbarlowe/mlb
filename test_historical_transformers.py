@@ -1,10 +1,10 @@
 import pandas as pd
 
-from src.data.game_data import GameData
-from src.data.game_feed_data import GameFeedData
-from src.data.player_data import PlayerData
-from src.data.team_data import TeamData
-from src.data.venue_data import VenueData
+from mlb.data.game_data import GameData
+from mlb.data.game_feed_data import GameFeedData
+from mlb.data.player_data import PlayerData
+from mlb.data.team_data import TeamData
+from mlb.data.venue_data import VenueData
 
 
 def test_game_feed_data_handles_missing_result_keys_and_empty_pitch_events():

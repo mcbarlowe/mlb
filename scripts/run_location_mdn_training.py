@@ -24,13 +24,13 @@ import polars as pl
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.ml.features import PitchFeatureEngine
-from src.ml.mdn_location_model import (
+from mlb.ml.features import PitchFeatureEngine
+from mlb.ml.mdn_location_model import (
     BivariateMDN,
     MDNLocationTrainer,
     plot_multiple_densities,
 )
-from src.ml.season_splits import default_data_source_train_seasons
+from mlb.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42):

@@ -3,13 +3,13 @@ from __future__ import annotations
 import polars as pl
 import torch
 
-from src.ml.dataset import PitchSequenceIterableDataset, collate_pitch_sequences
-from src.ml.features import (
+from mlb.ml.dataset import PitchSequenceIterableDataset, collate_pitch_sequences
+from mlb.ml.features import (
     PitchFeatureEngine,
     compute_class_weights,
     compute_class_weights_from_counts,
 )
-from src.ml.pitch_type_location_model import PitchTypeLocationBatchIterableDataset
+from mlb.ml.pitch_type_location_model import PitchTypeLocationBatchIterableDataset
 
 
 class IdentityFeatureEngine:

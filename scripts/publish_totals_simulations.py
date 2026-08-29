@@ -12,12 +12,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.database import PostgresConfig
-from src.ml.mlflow_utils import DEFAULT_MLFLOW_TRACKING_URI
-from src.sim.contact_environment import ContactEnvironment, GameWeather, parse_weather
-from src.sim.db_games import GameDataStore
-from src.sim.slate import build_day_ahead_simulator
-from src.sim.totals_artifact import (
+from mlb.database import PostgresConfig
+from mlb.ml.mlflow_utils import DEFAULT_MLFLOW_TRACKING_URI
+from mlb.sim.contact_environment import ContactEnvironment, GameWeather, parse_weather
+from mlb.sim.db_games import GameDataStore
+from mlb.sim.slate import build_day_ahead_simulator
+from mlb.sim.totals_artifact import (
     TotalsSimulationArtifact,
     game_totals_from_simulations,
     write_totals_artifact,

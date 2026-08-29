@@ -26,8 +26,8 @@ import psycopg
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.data_contracts.prop_predictions import STAT_COLUMNS, STAT_FNS
-from src.database import PostgresConfig
+from mlb.data_contracts.prop_predictions import STAT_COLUMNS, STAT_FNS
+from mlb.database import PostgresConfig
 
 MARKET_POINTS: dict[str, tuple[float, ...]] = {
     "batter_home_runs": (0.5, 1.5),

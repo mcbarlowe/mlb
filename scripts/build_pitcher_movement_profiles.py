@@ -26,9 +26,9 @@ sys.path.insert(0, str(project_root))
 
 import polars as pl
 
-from src.database import PostgresHandler
-from src.ml.features import PITCH_TYPE_CODES
-from src.ml.movement_profiles import (
+from mlb.database import PostgresHandler
+from mlb.ml.features import PITCH_TYPE_CODES
+from mlb.ml.movement_profiles import (
     DEFAULT_WINDOW_GAMES,
     compute_trailing_profiles,
     league_default_profiles,

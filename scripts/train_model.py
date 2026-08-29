@@ -24,10 +24,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.ml.cross_validation import TimeSeriesCrossValidator, run_cross_validation
-from src.ml.evaluate import evaluate_model, plot_confusion_matrix, plot_mdn_predictions
-from src.ml.model import create_model
-from src.ml.train import PitchPredictionTrainer
+from mlb.ml.cross_validation import TimeSeriesCrossValidator, run_cross_validation
+from mlb.ml.evaluate import evaluate_model, plot_confusion_matrix, plot_mdn_predictions
+from mlb.ml.model import create_model
+from mlb.ml.train import PitchPredictionTrainer
 
 
 def set_seed(seed: int = 42) -> None:

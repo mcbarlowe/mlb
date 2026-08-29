@@ -6,20 +6,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.outcome.mlflow_artifacts import (
+from mlb.outcome.mlflow_artifacts import (
     CachedOutcomeArtifacts,
     OutcomeProductionSelection,
     resolve_outcome_artifact_dirs,
     resolve_production_outcome_selection,
 )
-from src.outcome.mlflow_registry import (
+from mlb.outcome.mlflow_registry import (
     OUTCOME_CONTRACT_VERSION,
     OUTCOME_MODEL_COLLECTION,
     OUTCOME_RELEASE_TAG,
     OUTCOME_STAGE_SPECS,
     SIM_INPUTS_RUN_TAG,
 )
-from src.sim.artifacts import SIM_INPUT_FILES, ensure_sim_artifacts
+from mlb.sim.artifacts import SIM_INPUT_FILES, ensure_sim_artifacts
 
 
 class _StubClient:
@@ -56,7 +56,7 @@ class _MismatchedStubClient(_StubClient):
 
 
 def test_resolve_production_outcome_selection(monkeypatch):
-    monkeypatch.setattr("src.outcome.mlflow_artifacts.MlflowClient", _StubClient)
+    monkeypatch.setattr("mlb.outcome.mlflow_artifacts.MlflowClient", _StubClient)
     selection = resolve_production_outcome_selection("postgresql://shared")
     assert selection.release_id == "release-1234567890abcdef"
     assert selection.sim_inputs_run_id == "sim-inputs-run"
@@ -71,7 +71,7 @@ def test_resolve_production_outcome_selection_rejects_mismatched_release(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "src.outcome.mlflow_artifacts.MlflowClient",
+        "mlb.outcome.mlflow_artifacts.MlflowClient",
         _MismatchedStubClient,
     )
     with pytest.raises(ValueError, match="one paired release"):
@@ -95,7 +95,7 @@ def test_resolve_outcome_artifact_dirs_prefers_mlflow_cache(
     (cached.run_dir).mkdir(parents=True)
     (cached.profiles_dir).mkdir(parents=True)
     monkeypatch.setattr(
-        "src.outcome.mlflow_artifacts.cache_production_outcome_artifacts",
+        "mlb.outcome.mlflow_artifacts.cache_production_outcome_artifacts",
         lambda tracking_uri, cache_root, selection=None: cached,
     )
     resolved = resolve_outcome_artifact_dirs(

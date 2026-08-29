@@ -15,7 +15,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.data_contracts.prop_predictions import (
+from mlb.data_contracts.prop_predictions import (
     CONTRACT_VERSION,
     build_prop_prediction_artifact,
     resolve_adjustments,

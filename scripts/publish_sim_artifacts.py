@@ -19,12 +19,12 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.ml.mlflow_utils import (
+from mlb.ml.mlflow_utils import (
     DEFAULT_MLFLOW_EXPERIMENT,
     configure_mlflow,
     resolve_mlflow_tracking_uri,
 )
-from src.sim.artifacts import SIM_ARTIFACT_KIND, SIM_INPUT_FILES
+from mlb.sim.artifacts import SIM_ARTIFACT_KIND, SIM_INPUT_FILES
 
 SIM_DIR = Path("models/sim")
 

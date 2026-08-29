@@ -4,8 +4,8 @@ from datetime import date
 from pathlib import Path
 
 import scripts.run_daily_sim_slate as daily_sim
-from src.live.publisher import PredictionPost, ResultPost
-from src.sim.slate import DailySlateState, save_daily_slate_state
+from mlb.live.publisher import PredictionPost, ResultPost
+from mlb.sim.slate import DailySlateState, save_daily_slate_state
 
 
 class _StubPublisher:

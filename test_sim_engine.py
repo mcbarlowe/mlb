@@ -7,10 +7,10 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from src.data.base_state import compute_at_bat_states
-from src.sim.base_out import BaseOutEngine, build_transition_frame, runners_bitmap
-from src.sim.count_machine import apply_pitch_result
-from src.sim.pa import FixedDistributionProvider, simulate_plate_appearance
+from mlb.data.base_state import compute_at_bat_states
+from mlb.sim.base_out import BaseOutEngine, build_transition_frame, runners_bitmap
+from mlb.sim.count_machine import apply_pitch_result
+from mlb.sim.pa import FixedDistributionProvider, simulate_plate_appearance
 
 # --- count machine -----------------------------------------------------------
 

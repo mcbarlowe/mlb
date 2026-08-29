@@ -7,7 +7,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.sim.team_strength import (
+from mlb.sim.team_strength import (
     FEATURE_NAMES,
     load_completed_games,
     train_strength_model,

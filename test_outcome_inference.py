@@ -5,8 +5,8 @@ import json
 import numpy as np
 import polars as pl
 
-from src.outcome.dataset import FEATURE_COLUMNS
-from src.outcome.inference import (
+from mlb.outcome.dataset import FEATURE_COLUMNS
+from mlb.outcome.inference import (
     OutcomeGameState,
     PitchOutcomePredictor,
     build_feature_frame,

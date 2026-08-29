@@ -27,19 +27,19 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from src.ml.cross_validation import TimeSeriesCrossValidator
-from src.ml.evaluate import (
+from mlb.ml.cross_validation import TimeSeriesCrossValidator
+from mlb.ml.evaluate import (
     evaluate_model,
     plot_location_predictions,
     plot_mdn_predictions,
 )
-from src.ml.features import PitchFeatureEngine
-from src.ml.model import (
+from mlb.ml.features import PitchFeatureEngine
+from mlb.ml.model import (
     HierarchicalMDN,
     PitchPredictor,
     PitchPredictorWithAttention,
 )
-from src.ml.train import PitchPredictionTrainer
+from mlb.ml.train import PitchPredictionTrainer
 
 
 def set_seed(seed: int = 42) -> None:

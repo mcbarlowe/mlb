@@ -4,13 +4,13 @@ import math
 
 import pytest
 
-from src.sim.roster_priors import (
+from mlb.sim.roster_priors import (
     RosterPrior,
     load_roster_prior_offsets,
     load_roster_priors_csv,
     roster_prior_offsets_from_rows,
 )
-from src.sim.season import TeamInfo
+from mlb.sim.season import TeamInfo
 
 
 def _team(team_id: int, abbreviation: str, team_name: str) -> TeamInfo:

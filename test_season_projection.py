@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from src.sim.season import (
+from mlb.sim.season import (
     SeasonProjection,
     SeasonScheduleGame,
     TeamInfo,

@@ -605,7 +605,7 @@ src/ml/
 ### Loading and Running Inference
 
 ```python
-from src.ml.pitch_predictor import PitchPredictor
+from mlb.ml.pitch_predictor import PitchPredictor
 import torch
 
 # Load the LSTM+Attention model
@@ -628,7 +628,7 @@ print(f"Strike zone probability: {predictor.get_strike_zone_probability(predicti
 ### Generating Pitch Cards
 
 ```python
-from src.ml.pitch_predictor import PitchPredictor, GameContext, create_pitch_card_from_row
+from mlb.ml.pitch_predictor import PitchPredictor, GameContext, create_pitch_card_from_row
 
 # Load model
 predictor = PitchPredictor.load_lstm("models/attention_full/run_20260119_124719")

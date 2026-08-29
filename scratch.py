@@ -1,6 +1,6 @@
 import json
 
-from src.endpoints.schedule import Schedule
+from mlb.endpoints.schedule import Schedule
 
 schedule = Schedule()
 

@@ -29,7 +29,7 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.database import PostgresConfig
+from mlb.database import PostgresConfig
 
 STATS = ("hr1", "h1")
 TESTS = (2024, 2025)

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import scripts.publish_totals_simulations as publisher
-from src.sim.totals_artifact import (
+from mlb.sim.totals_artifact import (
     ARTIFACT_TYPE,
     CONTRACT_VERSION,
     TotalsSimulationArtifact,

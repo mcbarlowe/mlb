@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from src.sim.calibration import (
+from mlb.sim.calibration import (
     SimCalibration,
     apply_multipliers,
     derive_multipliers,
 )
-from src.sim.pa import MatchupOutcomeProvider
+from mlb.sim.pa import MatchupOutcomeProvider
 
 
 def test_apply_multipliers_scales_and_renormalizes():
@@ -87,7 +87,7 @@ def test_provider_applies_calibration_multipliers():
 def test_fit_win_calibration_shrinks_overconfident_spread():
     import random
 
-    from src.sim.calibration import WinCalibration, fit_win_calibration
+    from mlb.sim.calibration import WinCalibration, fit_win_calibration
 
     rng = random.Random(0)
     # True p is 0.5 + 0.5*(raw - 0.5): raw spread is twice as wide as truth.
@@ -118,7 +118,7 @@ def test_fit_win_calibration_shrinks_overconfident_spread():
 
 
 def test_win_calibration_apply_is_monotone_and_bounded():
-    from src.sim.calibration import WinCalibration
+    from mlb.sim.calibration import WinCalibration
 
     calibration = WinCalibration(intercept=0.1, slope=0.5)
     values = [calibration.apply(p) for p in (0.01, 0.3, 0.5, 0.7, 0.99)]
@@ -127,7 +127,7 @@ def test_win_calibration_apply_is_monotone_and_bounded():
 
 
 def test_stretch_conditioned_lookups_and_fallbacks():
-    from src.sim.calibration import SimCalibration
+    from mlb.sim.calibration import SimCalibration
 
     calibration = SimCalibration(
         result={"top": {"ball": 1.1}},

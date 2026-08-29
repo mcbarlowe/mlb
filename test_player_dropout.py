@@ -3,7 +3,7 @@
 import polars as pl
 import torch
 
-from src.ml.dataset import PitchSequenceDataset, PlayerDropoutSpec
+from mlb.ml.dataset import PitchSequenceDataset, PlayerDropoutSpec
 
 FEATURE_COLUMNS = [
     "pitcher_idx",

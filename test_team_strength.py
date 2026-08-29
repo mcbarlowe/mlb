@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from src.sim.team_strength import (
+from mlb.sim.team_strength import (
     CompletedGame,
     StarterLine,
     StrengthFeatureBuilder,

@@ -4,14 +4,14 @@ from pathlib import Path
 
 import polars as pl
 
-from src.sim.bullpen import (
+from mlb.sim.bullpen import (
     build_team_bullpen_hands,
     bullpen_arm_id,
     bullpen_for_team,
     relabel_reliever_rows,
     save_team_bullpens,
 )
-from src.sim.game import BULLPEN_ARM
+from mlb.sim.game import BULLPEN_ARM
 
 
 def _raw() -> pl.DataFrame:
@@ -48,7 +48,7 @@ def test_bullpen_for_team_round_trip(tmp_path: Path):
     path = tmp_path / "team_bullpens.json"
     save_team_bullpens({108: "L"}, path)
 
-    import src.sim.bullpen as bullpen_module
+    import mlb.sim.bullpen as bullpen_module
 
     bullpen_module._TEAM_BULLPENS_CACHE = None
     arm = bullpen_for_team(108, path)

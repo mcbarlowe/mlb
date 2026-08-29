@@ -6,15 +6,15 @@ from pathlib import Path
 
 import numpy as np
 
-from src.live.game_state import build_live_snapshot
-from src.live.pipeline import (
+from mlb.live.game_state import build_live_snapshot
+from mlb.live.pipeline import (
     LiveGamePredictionService,
     choose_random_game,
     eligible_games,
     seconds_until_monitoring,
 )
-from src.live.predictor import mixture_density_grid
-from src.live.publisher import DryRunPublisher, PredictionPost, ResultPost
+from mlb.live.predictor import mixture_density_grid
+from mlb.live.publisher import DryRunPublisher, PredictionPost, ResultPost
 
 
 def _pitch_event(pitch_number: int, balls: int, strikes: int, code: str) -> dict:
@@ -180,8 +180,8 @@ def test_build_live_snapshot_handles_first_pitch_of_at_bat():
 
 
 def test_pending_row_feature_engineering_uses_prior_pitches_in_ab():
-    from src.live.predictor import LiveNextPitchPredictor
-    from src.ml.features import PitchFeatureEngine
+    from mlb.live.predictor import LiveNextPitchPredictor
+    from mlb.ml.features import PitchFeatureEngine
 
     snapshot = build_live_snapshot(_live_feed(current_pitches=2, balls=1, strikes=2))
     assert snapshot is not None
@@ -204,8 +204,8 @@ def test_pending_row_feature_engineering_uses_prior_pitches_in_ab():
 
 
 def test_pending_row_feature_engineering_handles_first_pitch_without_history():
-    from src.live.predictor import LiveNextPitchPredictor
-    from src.ml.features import PitchFeatureEngine
+    from mlb.live.predictor import LiveNextPitchPredictor
+    from mlb.ml.features import PitchFeatureEngine
 
     snapshot = build_live_snapshot(_live_feed(current_pitches=0, balls=0, strikes=0))
     assert snapshot is not None
@@ -336,7 +336,7 @@ def test_dry_run_publisher_records_result_replies(tmp_path: Path):
 def test_publish_result_if_ready_survives_at_bat_rollover(tmp_path: Path):
     from typing import Any, cast
 
-    from src.live.pipeline import PendingPostedPrediction
+    from mlb.live.pipeline import PendingPostedPrediction
 
     class StubPublisher:
         def __init__(self) -> None:
@@ -465,8 +465,8 @@ def test_choose_random_game_is_seed_deterministic():
 
 
 def _synthetic_prediction():
-    from src.live.predictor import mixture_density_grid
-    from src.ml.pitch_predictor import PitchPrediction
+    from mlb.live.predictor import mixture_density_grid
+    from mlb.ml.pitch_predictor import PitchPrediction
 
     probs = np.zeros(11)
     probs[0] = 0.62  # FF
@@ -494,7 +494,7 @@ def _synthetic_prediction():
 
 
 def _synthetic_context():
-    from src.ml.pitch_predictor import GameContext
+    from mlb.ml.pitch_predictor import GameContext
 
     return GameContext(
         pitcher_name="Test Pitcher",
@@ -518,7 +518,7 @@ def _synthetic_context():
     )
 
 def test_build_post_text_uses_full_pitch_names_and_percentages():
-    from src.live.publisher import build_post_text
+    from mlb.live.publisher import build_post_text
 
     snapshot = build_live_snapshot(_live_feed(current_pitches=0, balls=0, strikes=0))
     assert snapshot is not None
@@ -528,7 +528,7 @@ def test_build_post_text_uses_full_pitch_names_and_percentages():
 
 
 def test_build_card_html_includes_team_logos(monkeypatch):
-    from src.live import card_html
+    from mlb.live import card_html
 
     context = _synthetic_context()
     context.__dict__["away_team_id"] = 144
@@ -547,7 +547,7 @@ def test_build_card_html_includes_team_logos(monkeypatch):
 
 
 def test_build_card_html_contains_key_fields():
-    from src.live.card_html import build_card_html
+    from mlb.live.card_html import build_card_html
 
     html = build_card_html(_synthetic_prediction(), _synthetic_context(), 0.74)
     assert "Test Pitcher" in html
@@ -561,7 +561,7 @@ def test_build_card_html_contains_key_fields():
 
 
 def test_build_card_html_result_variant_marks_actual():
-    from src.live.card_html import build_card_html
+    from mlb.live.card_html import build_card_html
 
     html = build_card_html(
         _synthetic_prediction(),
@@ -579,7 +579,7 @@ def test_build_card_html_result_variant_marks_actual():
 
 
 def test_panel_xy_keeps_zone_inside_panel():
-    from src.live.card_html import (
+    from mlb.live.card_html import (
         PANEL_H,
         PANEL_W,
         ZONE_BOTTOM_FT,
@@ -602,7 +602,7 @@ def test_panel_xy_keeps_zone_inside_panel():
 def test_html_renderer_end_to_end(tmp_path: Path):
     import pytest
 
-    from src.live.card_html import HtmlCardRenderer, render_card_png
+    from mlb.live.card_html import HtmlCardRenderer, render_card_png
 
     renderer = HtmlCardRenderer()
     try:
@@ -634,7 +634,7 @@ def test_bluesky_publisher_sends_explicit_aspect_ratio(tmp_path: Path):
 
     from PIL import Image as PILImage
 
-    from src.live.publisher import BlueskyPublisher
+    from mlb.live.publisher import BlueskyPublisher
 
     class StubClient:
         def __init__(self) -> None:
@@ -665,7 +665,7 @@ def test_x_publisher_uses_media_upload_and_reply_flow(tmp_path: Path):
 
     from PIL import Image as PILImage
 
-    from src.live.publisher import XPublisher
+    from mlb.live.publisher import XPublisher
 
     class StubResponse:
         def __init__(self, payload: dict, status_code: int = 200) -> None:
@@ -745,7 +745,7 @@ def test_x_publisher_publish_images_truncates_text_and_enforces_limit(
     import pytest
     from PIL import Image as PILImage
 
-    from src.live.publisher import X_MAX_POST_CHARS, XPublisher
+    from mlb.live.publisher import X_MAX_POST_CHARS, XPublisher
 
     class StubResponse:
         def __init__(self, payload: dict, status_code: int = 200) -> None:
@@ -820,7 +820,7 @@ def test_x_publisher_refreshes_after_401(tmp_path: Path):
 
     from PIL import Image as PILImage
 
-    from src.live.publisher import XPublisher
+    from mlb.live.publisher import XPublisher
 
     class StubResponse:
         def __init__(self, payload: dict, status_code: int = 200) -> None:
@@ -903,7 +903,7 @@ def test_x_publisher_oauth1_signs_requests(tmp_path: Path):
 
     from PIL import Image as PILImage
 
-    from src.live.publisher import XPublisher
+    from mlb.live.publisher import XPublisher
 
     class StubResponse:
         def __init__(self, payload: dict, status_code: int = 200) -> None:
@@ -965,7 +965,7 @@ def test_x_publisher_oauth1_signs_requests(tmp_path: Path):
     assert "oauth_token=" in auth_header
 
 def test_x_env_alias_prefers_oauth2_user_token(monkeypatch):
-    from src.live import publisher as publisher_module
+    from mlb.live import publisher as publisher_module
 
     monkeypatch.delenv("X_API_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("X_API_OAUTH2_ACCESS_TOKEN", raising=False)
@@ -981,7 +981,7 @@ def test_x_env_alias_prefers_oauth2_user_token(monkeypatch):
 def test_multi_publisher_round_trips_reply_targets(tmp_path: Path):
     import json
 
-    from src.live.publisher import MultiPublisher
+    from mlb.live.publisher import MultiPublisher
 
     class StubPublisher:
         def __init__(self, name: str) -> None:
@@ -1027,7 +1027,7 @@ def test_multi_publisher_returns_partial_mapping_when_one_provider_fails(
 ):
     import json
 
-    from src.live.publisher import MultiPublisher
+    from mlb.live.publisher import MultiPublisher
 
     class StubPublisher:
         def __init__(self, name: str) -> None:
@@ -1075,7 +1075,7 @@ def test_html_renderer_works_inside_asyncio_loop(tmp_path: Path):
 
     import pytest
 
-    from src.live.card_html import HtmlCardRenderer, render_card_png
+    from mlb.live.card_html import HtmlCardRenderer, render_card_png
 
     probe = HtmlCardRenderer()
     try:

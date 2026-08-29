@@ -32,12 +32,12 @@ import torch
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.ml.features import PITCH_TYPE_CODES
-from src.ml.pitch_predictor import PitchPredictor
-from src.ml.postgres_data import load_pitches_from_postgres
-from src.ml.run_dirs import resolve_pitch_type_run_dir
-from src.sim.artifacts import ensure_sim_artifacts
-from src.sim.pitch_mix import PitchMixProfiles
+from mlb.ml.features import PITCH_TYPE_CODES
+from mlb.ml.pitch_predictor import PitchPredictor
+from mlb.ml.postgres_data import load_pitches_from_postgres
+from mlb.ml.run_dirs import resolve_pitch_type_run_dir
+from mlb.sim.artifacts import ensure_sim_artifacts
+from mlb.sim.pitch_mix import PitchMixProfiles
 
 DEFAULT_MODEL_DIR = "auto"
 EPS = 1e-9

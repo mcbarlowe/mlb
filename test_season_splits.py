@@ -1,4 +1,4 @@
-from src.ml.season_splits import (
+from mlb.ml.season_splits import (
     default_data_source_train_seasons,
     default_train_seasons,
     discover_available_seasons,
@@ -51,7 +51,7 @@ def test_discover_available_seasons_reads_local_parquet_tree(tmp_path):
 
 def test_default_data_source_train_seasons_uses_postgres_discovery(monkeypatch):
     monkeypatch.setattr(
-        "src.ml.season_splits.discover_postgres_seasons",
+        "mlb.ml.season_splits.discover_postgres_seasons",
         lambda: ["2009", "2010", "2020", "2024", "2025"],
     )
 

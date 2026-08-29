@@ -77,9 +77,9 @@ def pipeline_failure_counts(pipeline_summary: dict) -> dict[str, int]:
 
 
 def main() -> int:
-    from src.database import PostgresConfig
-    from src.etl.daily_pipeline import run_daily_pipeline
-    from src.etl.postgres_backfill import run_postgres_backfill
+    from mlb.database import PostgresConfig
+    from mlb.etl.daily_pipeline import run_daily_pipeline
+    from mlb.etl.postgres_backfill import run_postgres_backfill
 
     args = parse_args()
     target_date = resolve_target_date(args.date)

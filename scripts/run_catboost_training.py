@@ -28,10 +28,10 @@ sys.path.insert(0, str(project_root))
 import numpy as np
 import polars as pl
 
-from src.ml.catboost_model import PitchCatBoostModel
-from src.ml.evaluate import plot_confusion_matrix, plot_location_predictions
-from src.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
-from src.ml.season_splits import default_data_source_train_seasons
+from mlb.ml.catboost_model import PitchCatBoostModel
+from mlb.ml.evaluate import plot_confusion_matrix, plot_location_predictions
+from mlb.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
+from mlb.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42) -> None:

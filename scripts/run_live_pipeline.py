@@ -31,15 +31,15 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.live.pipeline import (
+from mlb.live.pipeline import (
     LiveGamePredictionService,
     run_live_day,
     run_live_game,
     run_random_live_game,
 )
-from src.live.predictor import LiveNextPitchPredictor
-from src.live.publisher import POST_PROVIDER_CHOICES, build_publisher
-from src.ml.mlflow_utils import resolve_mlflow_tracking_uri
+from mlb.live.predictor import LiveNextPitchPredictor
+from mlb.live.publisher import POST_PROVIDER_CHOICES, build_publisher
+from mlb.ml.mlflow_utils import resolve_mlflow_tracking_uri
 
 
 def parse_args() -> argparse.Namespace:
@@ -173,7 +173,7 @@ def main() -> None:
         )
     else:
         # Debug overrides: serve explicit local run directories.
-        from src.ml.mlflow_artifacts import (
+        from mlb.ml.mlflow_artifacts import (
             load_champion_location_model,
             load_champion_pitch_type_predictor,
         )
@@ -213,8 +213,8 @@ def main() -> None:
         )
     outcome_predictor = None
     if args.outcome_run_dir.lower() != "none":
-        from src.outcome.inference import PitchOutcomePredictor
-        from src.outcome.mlflow_artifacts import resolve_outcome_artifact_dirs
+        from mlb.outcome.inference import PitchOutcomePredictor
+        from mlb.outcome.mlflow_artifacts import resolve_outcome_artifact_dirs
 
         resolved = resolve_outcome_artifact_dirs(
             args.outcome_run_dir,

@@ -7,8 +7,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from src.sim.base_out import BaseOutEngine
-from src.sim.game import (
+from mlb.sim.base_out import BaseOutEngine
+from mlb.sim.game import (
     Batter,
     GameConfig,
     GameSimulator,
@@ -16,9 +16,9 @@ from src.sim.game import (
     Pitcher,
     summarize,
 )
-from src.sim.matchup import effective_bat_side
-from src.sim.pa import FixedDistributionProvider, MatchupOutcomeProvider
-from src.sim.pitch_mix import PitchMixProfiles, build_pitch_mix_tables
+from mlb.sim.matchup import effective_bat_side
+from mlb.sim.pa import FixedDistributionProvider, MatchupOutcomeProvider
+from mlb.sim.pitch_mix import PitchMixProfiles, build_pitch_mix_tables
 
 # --- pitch mix ----------------------------------------------------------------
 
@@ -296,7 +296,7 @@ def test_lineup_requires_nine_batters():
 
 
 def test_lineup_from_feed_extracts_nine_with_handedness():
-    from src.sim.lineups import lineup_from_feed
+    from mlb.sim.lineups import lineup_from_feed
 
     feed = json.loads(Path("example_json_files/example_live_feed.json").read_text())
     away = lineup_from_feed(feed, "away")
@@ -311,7 +311,7 @@ def test_lineup_from_feed_extracts_nine_with_handedness():
 
 
 def test_lineup_from_feed_rejects_incomplete_original_lineup() -> None:
-    from src.sim.lineups import lineup_from_feed
+    from mlb.sim.lineups import lineup_from_feed
 
     feed = json.loads(Path("example_json_files/example_live_feed.json").read_text())
     players = feed["liveData"]["boxscore"]["teams"]["away"]["players"]

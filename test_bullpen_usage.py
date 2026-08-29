@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.sim.game import Pitcher, _PitchingStaff
+from mlb.sim.game import Pitcher, _PitchingStaff
 
 STARTER = Pitcher(1, "R")
 AGG = Pitcher(-99, "R")

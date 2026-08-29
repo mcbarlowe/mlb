@@ -11,7 +11,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.ml.cross_validation import TimeSeriesCrossValidator
+from mlb.ml.cross_validation import TimeSeriesCrossValidator
 
 # Model directory to save feature_engine to
 model_dir = Path("models/attention_full/run_20260119_124719")

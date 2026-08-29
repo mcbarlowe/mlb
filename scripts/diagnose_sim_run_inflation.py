@@ -26,11 +26,11 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.sim.base_out import AB_EVENT_TO_PA_OUTCOME, BaseOutEngine
-from src.sim.game import Batter, Pitcher
-from src.sim.matchup import MatchupProviderFactory
-from src.sim.pa import simulate_plate_appearance
-from src.sim.slate import build_day_ahead_simulator
+from mlb.sim.base_out import AB_EVENT_TO_PA_OUTCOME, BaseOutEngine
+from mlb.sim.game import Batter, Pitcher
+from mlb.sim.matchup import MatchupProviderFactory
+from mlb.sim.pa import simulate_plate_appearance
+from mlb.sim.slate import build_day_ahead_simulator
 
 PA_CLASSES = (
     "out", "strikeout", "walk", "hit_by_pitch",
@@ -40,7 +40,7 @@ PA_CLASSES = (
 
 def league_pa_distribution(season: int) -> tuple[dict[str, float], float]:
     """League per-PA outcome frequencies and actual runs/team-game."""
-    from src.database.postgres_handler import PostgresHandler
+    from mlb.database.postgres_handler import PostgresHandler
 
     handler = PostgresHandler()
     with handler.connection.cursor() as cur:
@@ -77,7 +77,7 @@ def league_pa_distribution(season: int) -> tuple[dict[str, float], float]:
 
 def sample_matchups(season: int, n: int, rng: random.Random) -> list[tuple]:
     """Frequency-weighted sample of (pitcher_id, batter_id, throw, bat)."""
-    from src.database.postgres_handler import PostgresHandler
+    from mlb.database.postgres_handler import PostgresHandler
 
     handler = PostgresHandler()
     with handler.connection.cursor() as cur:

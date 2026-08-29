@@ -159,7 +159,7 @@ def main() -> None:
                 "description": spec["description"],
                 "params": spec["params"],
                 "artifacts": spec["artifacts"],
-                "implementation": "src/data_contracts/prop_predictions.py",
+                "implementation": "mlb/data_contracts/prop_predictions.py",
                 "calibration": (
                     "scripts/calibrate_prop_estimator.py (held-out 2024+2025 starts)"
                 ),

@@ -27,8 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from build_prop_aging_curves import MARKET_POINTS
 
-from src.data_contracts.prop_predictions import STAT_COLUMNS, STAT_FNS
-from src.database import PostgresConfig
+from mlb.data_contracts.prop_predictions import STAT_COLUMNS, STAT_FNS
+from mlb.database import PostgresConfig
 
 START_PA = 3
 K_PARK = 2000.0

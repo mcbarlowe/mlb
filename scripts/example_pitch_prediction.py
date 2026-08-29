@@ -23,8 +23,8 @@ import numpy as np
 import polars as pl
 import torch
 
-from src.ml.features import PitchFeatureEngine
-from src.ml.pitch_predictor import (
+from mlb.ml.features import PitchFeatureEngine
+from mlb.ml.pitch_predictor import (
     GameContext,
     PitchPredictor,
     create_pitch_card_from_row,

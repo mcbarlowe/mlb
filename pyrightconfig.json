@@ -2,10 +2,10 @@
   "venvPath": ".",
   "venv": ".venv",
   "include": [
-    "src/database",
-    "src/etl/get_live_feeds.py",
-    "src/etl/load_to_database.py",
-    "src/etl/postgres_backfill.py",
+    "mlb/database",
+    "mlb/etl/get_live_feeds.py",
+    "mlb/etl/load_to_database.py",
+    "mlb/etl/postgres_backfill.py",
     "scripts/backfill_postgres.py",
     "examples/database_examples.py",
     "test_game_dimensions.py",
@@ -22,14 +22,14 @@
     "models",
     "notebooks",
     "output",
-    "src/data/boxscore_data.py",
-    "src/data/game_feed_data.py",
-    "src/data/linescore_data.py",
-    "src/data/reference_data.py",
-    "src/endpoints/base_api.py",
-    "src/endpoints/game_feed.py",
-    "src/endpoints/live_feed.py",
-    "src/endpoints/venues.py"
+    "mlb/data/boxscore_data.py",
+    "mlb/data/game_feed_data.py",
+    "mlb/data/linescore_data.py",
+    "mlb/data/reference_data.py",
+    "mlb/endpoints/base_api.py",
+    "mlb/endpoints/game_feed.py",
+    "mlb/endpoints/live_feed.py",
+    "mlb/endpoints/venues.py"
   ],
   "executionEnvironments": [
     {

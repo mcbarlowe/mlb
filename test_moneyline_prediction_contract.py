@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 
 from scripts.publish_moneyline_predictions import build_prediction_batch
-from src.data_contracts.moneyline_predictions import (
+from mlb.data_contracts.moneyline_predictions import (
     MoneylineGamePrediction,
     MoneylinePredictionBatch,
     read_prediction_batch,
     write_prediction_batch,
 )
-from src.sim.slate import ProbablePitcher, SlateGame
+from mlb.sim.slate import ProbablePitcher, SlateGame
 
 PREDICTED_AT = datetime(2026, 8, 27, 14, 0, tzinfo=UTC)
 

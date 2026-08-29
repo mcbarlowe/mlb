@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from scripts.fix_pitches_spin import extract_game_spin
-from src.data.game_feed_data import GameFeedData
+from mlb.data.game_feed_data import GameFeedData
 
 EXAMPLE_FEED = Path("example_json_files/example_live_feed.json")
 

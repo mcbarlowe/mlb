@@ -23,7 +23,7 @@ import polars as pl
 import torch
 from tqdm import tqdm
 
-from src.ml.pitch_predictor import GameContext, PitchPredictor
+from mlb.ml.pitch_predictor import GameContext, PitchPredictor
 
 
 def load_sample_at_bats(

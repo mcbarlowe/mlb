@@ -9,10 +9,10 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from src.data.game_data import GameData
-from src.data.team_data import TeamData
-from src.data.venue_data import VenueData
-from src.database import PostgresConfig, PostgresHandler
+from mlb.data.game_data import GameData
+from mlb.data.team_data import TeamData
+from mlb.data.venue_data import VenueData
+from mlb.database import PostgresConfig, PostgresHandler
 
 SAMPLE_FILE = Path("example_json_files/example_live_feed.json")
 TEST_SCHEMA = "mlb_test_dimensions"

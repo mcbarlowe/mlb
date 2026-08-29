@@ -15,8 +15,8 @@ import polars as pl
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.outcome.dataset import build_training_frame, load_pitches
-from src.outcome.profiles import build_profile_stores, save_profile_stores
+from mlb.outcome.dataset import build_training_frame, load_pitches
+from mlb.outcome.profiles import build_profile_stores, save_profile_stores
 
 
 def main() -> None:
@@ -39,7 +39,7 @@ def main() -> None:
 
     # Synthetic per-team bullpen arms: reliever rows relabeled to -team_id
     # flow through the same profile builder (drop its duplicate league row).
-    from src.sim.bullpen import relabel_reliever_rows
+    from mlb.sim.bullpen import relabel_reliever_rows
 
     arm_frame = build_training_frame(relabel_reliever_rows(raw))
     arm_profiles, _ = build_profile_stores(arm_frame)

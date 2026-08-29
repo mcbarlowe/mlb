@@ -14,9 +14,9 @@ from mlflow import MlflowClient
 from mlflow.sklearn import log_model as log_sklearn_model
 from sklearn.linear_model import LogisticRegression
 
-import src.sim.team_strength as team_strength_module
+import mlb.sim.team_strength as team_strength_module
 from scripts.evaluate_team_strength import log_model_version, score
-from src.sim.team_strength import (
+from mlb.sim.team_strength import (
     DEFAULT_STRENGTH_CONFIG,
     FEATURE_NAMES,
     LEGACY_FEATURE_NAMES,

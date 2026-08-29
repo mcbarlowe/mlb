@@ -13,7 +13,7 @@ from scripts.backtest_season_projections import (
     _market_tuning_season_count,
     _season_summary_rows,
 )
-from src.sim.season import SeasonEvaluation, SeasonProjection, TeamProjection
+from mlb.sim.season import SeasonEvaluation, SeasonProjection, TeamProjection
 
 
 def test_probability_calibration_shrinks_overconfident_playoff_probs():

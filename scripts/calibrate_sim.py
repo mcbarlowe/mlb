@@ -31,19 +31,19 @@ import polars as pl
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.outcome.dataset import build_training_frame, load_pitches
-from src.outcome.inference import PitchOutcomePredictor
-from src.sim.calibration import (
+from mlb.outcome.dataset import build_training_frame, load_pitches
+from mlb.outcome.inference import PitchOutcomePredictor
+from mlb.sim.calibration import (
     DEFAULT_CALIBRATION_PATH,
     SimCalibration,
     derive_multipliers,
     stretch_key,
 )
-from src.sim.count_machine import apply_pitch_result
-from src.sim.lineups import lineup_from_feed
-from src.sim.matchup import MatchupProviderFactory
-from src.sim.pa import EVENT_CLASSES, RESULT_CLASSES
-from src.sim.pitch_mix import COUNTS, PitchMixProfiles
+from mlb.sim.count_machine import apply_pitch_result
+from mlb.sim.lineups import lineup_from_feed
+from mlb.sim.matchup import MatchupProviderFactory
+from mlb.sim.pa import EVENT_CLASSES, RESULT_CLASSES
+from mlb.sim.pitch_mix import COUNTS, PitchMixProfiles
 
 LIVEFEED_ROOT = Path("data/raw/livefeeds")
 SIDES = {"top": True, "bottom": False}
@@ -160,7 +160,7 @@ def simulate_rates(
     PAs run inside a rolling base-out context so the windup/stretch state
     frequencies match the game loop's.
     """
-    from src.sim.base_out import BaseOutEngine
+    from mlb.sim.base_out import BaseOutEngine
 
     rng = random.Random(seed)
     engine = BaseOutEngine.load(seed=seed)
@@ -283,8 +283,8 @@ def main() -> None:
     ) = actual_rates(args.seasons)
     print(f"...done in {time.perf_counter() - start:.0f}s")
 
-    from src.sim.artifacts import ensure_sim_artifacts
-    from src.sim.slate import resolve_outcome_model_dirs
+    from mlb.sim.artifacts import ensure_sim_artifacts
+    from mlb.sim.slate import resolve_outcome_model_dirs
 
     ensure_sim_artifacts()
     run_dir, profiles_dir = resolve_outcome_model_dirs("auto", tracking_uri=None)

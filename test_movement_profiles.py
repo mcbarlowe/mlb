@@ -4,7 +4,7 @@ import json
 
 import polars as pl
 
-from src.ml.movement_profiles import (
+from mlb.ml.movement_profiles import (
     attach_movement_profiles,
     compute_trailing_profiles,
     league_default_profiles,
@@ -182,7 +182,7 @@ def test_feature_engine_contract_and_save_load_roundtrip(tmp_path):
         json.dumps(league_default_profiles(trailing))
     )
 
-    from src.ml.features import PitchFeatureEngine
+    from mlb.ml.features import PitchFeatureEngine
 
     plain = PitchFeatureEngine()
     enabled = PitchFeatureEngine(movement_profiles_dir=tmp_path)

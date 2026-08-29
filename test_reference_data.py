@@ -1,7 +1,7 @@
 from dataclasses import replace
 
-from src.data.reference_data import ReferenceData
-from src.database import PostgresConfig, PostgresHandler
+from mlb.data.reference_data import ReferenceData
+from mlb.database import PostgresConfig, PostgresHandler
 
 TEST_SCHEMA = "mlb_test_reference_data"
 

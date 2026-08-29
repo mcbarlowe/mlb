@@ -25,17 +25,17 @@ import polars as pl
 import torch
 from torch.utils.data import DataLoader
 
-from src.ml.evaluate import compute_mdn_coverage, compute_mdn_nll
-from src.ml.features import IDX_TO_PITCH_TYPE, PITCH_TYPE_CODES, PitchFeatureEngine
-from src.ml.mdn_location_model import BivariateMDN, MDNLocationTrainer
-from src.ml.pitch_type_location_model import (
+from mlb.ml.evaluate import compute_mdn_coverage, compute_mdn_nll
+from mlb.ml.features import IDX_TO_PITCH_TYPE, PITCH_TYPE_CODES, PitchFeatureEngine
+from mlb.ml.mdn_location_model import BivariateMDN, MDNLocationTrainer
+from mlb.ml.pitch_type_location_model import (
     PitchTypeConditionedMDN,
     PitchTypeLocationBatchIterableDataset,
     PitchTypeLocationDataset,
     PitchTypeLocationTrainer,
     compare_to_baseline,
 )
-from src.ml.season_splits import default_data_source_train_seasons
+from mlb.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42):
@@ -86,7 +86,7 @@ def get_feature_columns(df: pl.DataFrame) -> list[str]:
     # Movement profile features ride along when the feature engine attached
     # them (opt-in via --movement-profiles-dir); the presence filter below
     # keeps this a no-op otherwise.
-    from src.ml.movement_profiles import movement_profile_columns
+    from mlb.ml.movement_profiles import movement_profile_columns
 
     feature_cols.extend(movement_profile_columns())
 

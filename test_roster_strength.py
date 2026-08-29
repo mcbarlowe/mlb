@@ -5,13 +5,13 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
-import src.sim.team_strength as team_strength_module
-from src.sim.roster_strength import (
+import mlb.sim.team_strength as team_strength_module
+from mlb.sim.roster_strength import (
     BatterGameLine,
     RelieverGameLine,
     RosterFeatureBuilder,
 )
-from src.sim.team_strength import load_completed_games
+from mlb.sim.team_strength import load_completed_games
 
 
 def batter(

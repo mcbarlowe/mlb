@@ -17,19 +17,19 @@ sys.path.insert(0, str(project_root))
 
 import mlflow
 
-from src.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT, configure_mlflow
-from src.outcome.dataset import (
+from mlb.ml.mlflow_utils import DEFAULT_MLFLOW_EXPERIMENT, configure_mlflow
+from mlb.outcome.dataset import (
     build_training_frame,
     load_pitches,
     stage_a_frame,
     stage_b_frame,
 )
-from src.outcome.mlflow_registry import (
+from mlb.outcome.mlflow_registry import (
     OutcomeReleaseRegistration,
     log_outcome_release_models,
     resolve_sim_inputs_run_id,
 )
-from src.outcome.models import (
+from mlb.outcome.models import (
     conditional_baseline_log_loss,
     evaluate_model,
     save_model,

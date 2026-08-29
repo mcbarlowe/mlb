@@ -27,21 +27,21 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.ml.mlflow_utils import (
+from mlb.ml.mlflow_utils import (
     DEFAULT_MLFLOW_EXPERIMENT,
     configure_mlflow,
     resolve_mlflow_tracking_uri,
 )
-from src.sim.game import GameSimulator, summarize
-from src.sim.lineups import actual_final, describe_game, lineup_from_feed
-from src.sim.slate import (
+from mlb.sim.game import GameSimulator, summarize
+from mlb.sim.lineups import actual_final, describe_game, lineup_from_feed
+from mlb.sim.slate import (
     active_roster_ids,
     build_day_ahead_simulator,
     fetch_slate_games,
     render_prediction_card,
     simulate_slate_game,
 )
-from src.sim.team_strength import build_live_strength_predictor
+from mlb.sim.team_strength import build_live_strength_predictor
 
 LIVEFEED_ROOT = Path("data/raw/livefeeds")
 
@@ -90,7 +90,7 @@ def build_simulator(
 
 
 def run_single(args: argparse.Namespace) -> None:
-    from src.sim.calibration import load_win_calibration
+    from mlb.sim.calibration import load_win_calibration
 
     feed = load_feed(args.game_pk, args.season)
     season = int(feed["gameData"]["game"]["season"])
@@ -164,7 +164,7 @@ def run_single(args: argparse.Namespace) -> None:
 def render_card(
     args: argparse.Namespace, feed: dict, results, home_win_probability: float
 ) -> Path:
-    from src.live.game_sim_card import card_data_from_results, render_game_sim_card
+    from mlb.live.game_sim_card import card_data_from_results, render_game_sim_card
 
     game_data = feed["gameData"]
     teams = game_data["teams"]
@@ -239,7 +239,7 @@ def collect_validation_rows(args: argparse.Namespace, simulator) -> list[dict]:
 
 def run_fit_win_calibration(args: argparse.Namespace) -> None:
     """Fit Platt scaling of p(home) on simulated val-season games."""
-    from src.sim.calibration import fit_win_calibration
+    from mlb.sim.calibration import fit_win_calibration
 
     if args.season == 2025:
         raise SystemExit(
@@ -279,7 +279,7 @@ def collect_validation_rows_db(
 ) -> list[dict]:
     """DB-sourced validation rows (no archived feeds). The game sample is
     seed-deterministic so aggregate vs individual bullpen is a paired A/B."""
-    from src.sim.db_games import GameDataStore
+    from mlb.sim.db_games import GameDataStore
 
     store = GameDataStore.load(args.season)
     game_pks = store.final_game_pks(seed=args.seed, limit=args.games)
@@ -311,7 +311,7 @@ def collect_validation_rows_db(
 
 
 def run_validation(args: argparse.Namespace) -> None:
-    from src.sim.calibration import load_win_calibration
+    from mlb.sim.calibration import load_win_calibration
 
     simulator, run_dir = build_simulator(args, args.season)
     if getattr(args, "db", False):
@@ -475,7 +475,7 @@ def run_slate(args: argparse.Namespace) -> None:
             print(f"             card: {card_path}")
 
             if args.post:
-                from src.live.publisher import PredictionPost, build_publisher
+                from mlb.live.publisher import PredictionPost, build_publisher
 
                 p_home = stats["home_win_probability"]
                 favorite, p_fav = (

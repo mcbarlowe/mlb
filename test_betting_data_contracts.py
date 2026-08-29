@@ -1,10 +1,10 @@
 import re
 from pathlib import Path
 
-from src.data_contracts.result_views import RESULT_VIEW_SQL
+from mlb.data_contracts.result_views import RESULT_VIEW_SQL
 
 SCHEMA_SQL = (
-    Path(__file__).parent / "src" / "database" / "schema.sql"
+    Path(__file__).parent / "mlb" / "database" / "schema.sql"
 ).read_text()
 
 

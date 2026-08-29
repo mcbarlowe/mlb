@@ -16,15 +16,15 @@ import pandas as pd
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.ml.mlflow_utils import (
+from mlb.ml.mlflow_utils import (
     DEFAULT_MLFLOW_EXPERIMENT,
     build_param_dict,
     configure_mlflow,
 )
-from src.sim.team_strength import (
+from mlb.sim.team_strength import (
     DEFAULT_REGISTERED_STRENGTH_MODEL as DEFAULT_REGISTERED_MODEL,
 )
-from src.sim.team_strength import (
+from mlb.sim.team_strength import (
     FEATURE_NAMES,
     LEGACY_FEATURE_NAMES,
     WIN_PROBABILITY_MODEL_COLLECTION,
@@ -34,10 +34,10 @@ from src.sim.team_strength import (
     load_completed_games,
     train_strength_model,
 )
-from src.sim.team_strength import (
+from mlb.sim.team_strength import (
     STRENGTH_MODEL_CONTRACT_VERSION as MODEL_CONTRACT_VERSION,
 )
-from src.sim.team_strength import (
+from mlb.sim.team_strength import (
     STRENGTH_MODEL_FAMILY as MODEL_FAMILY,
 )
 

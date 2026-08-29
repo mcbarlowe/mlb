@@ -6,8 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from src.sim.game import Batter, GameResult, GameSimulator
-from src.sim.slate import (
+from mlb.sim.game import Batter, GameResult, GameSimulator
+from mlb.sim.slate import (
     DailySlateState,
     ProbablePitcher,
     SlateGame,
@@ -24,7 +24,7 @@ from src.sim.slate import (
     snapshot_state,
     starter_changes,
 )
-from src.sim.team_strength import (
+from mlb.sim.team_strength import (
     FEATURE_NAMES,
     LEGACY_FEATURE_NAMES,
     TeamStrengthPredictor,
@@ -117,13 +117,13 @@ def test_slate_uses_team_strength_for_published_win_probability(monkeypatch):
         "home": SimpleNamespace(starter=SimpleNamespace(player_id=22)),
     }
     monkeypatch.setattr(
-        "src.sim.slate.build_projected_lineups",
+        "mlb.sim.slate.build_projected_lineups",
         lambda game, season, announced_lineups=None: (
             lineups,
             {"away": "Away Arm", "home": "Home Arm"},
         ),
     )
-    monkeypatch.setattr("src.sim.slate._announced_batters", lambda _game_pk: {})
+    monkeypatch.setattr("mlb.sim.slate._announced_batters", lambda _game_pk: {})
 
     class Simulator:
         def simulate_many(self, _away, _home, _n_sims):
@@ -157,16 +157,16 @@ def test_slate_uses_team_strength_for_published_win_probability(monkeypatch):
 def test_confirmed_lineup_overrides_projection_per_side(monkeypatch):
     announced = [Batter(player_id, "R") for player_id in range(1, 10)]
     monkeypatch.setattr(
-        "src.sim.slate._announced_batters",
+        "mlb.sim.slate._announced_batters",
         lambda _game_pk: {"away": announced},
     )
     monkeypatch.setattr(
-        "src.sim.slate._projected_batters",
+        "mlb.sim.slate._projected_batters",
         lambda team_id, slate_date, season: [
             Batter(team_id * 100 + index, "R") for index in range(9)
         ],
     )
-    monkeypatch.setattr("src.sim.slate._pitch_hand", lambda _player_id: "R")
+    monkeypatch.setattr("mlb.sim.slate._pitch_hand", lambda _player_id: "R")
 
     lineups, _ = build_projected_lineups(_game(), season=2026)
 
@@ -182,7 +182,7 @@ def test_active_roster_ids_separates_batters_pitchers_and_two_way_players(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "src.sim.slate._fetch_json",
+        "mlb.sim.slate._fetch_json",
         lambda _url, _params: {
             "roster": [
                 {
@@ -219,20 +219,20 @@ def test_slate_passes_live_roster_context_to_v2_predictor(monkeypatch):
         ),
     }
     monkeypatch.setattr(
-        "src.sim.slate.build_projected_lineups",
+        "mlb.sim.slate.build_projected_lineups",
         lambda game, season, announced_lineups=None: (
             lineups,
             {"away": "Away Arm", "home": "Home Arm"},
         ),
     )
     monkeypatch.setattr(
-        "src.sim.slate._announced_batters",
+        "mlb.sim.slate._announced_batters",
         lambda _game_pk: {
             "away": [SimpleNamespace(player_id=102)],
         },
     )
     monkeypatch.setattr(
-        "src.sim.slate.active_roster_ids",
+        "mlb.sim.slate.active_roster_ids",
         lambda team_id, slate_date: (
             ((101, 103), (11, 31, 32)) if team_id == 110 else ((201, 203), (22, 41, 42))
         ),

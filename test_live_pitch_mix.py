@@ -2,11 +2,11 @@
 
 import numpy as np
 
-from src.live.pitch_mix import (
+from mlb.live.pitch_mix import (
     blend_with_empirical_mix,
     counts_to_vector,
 )
-from src.ml.features import PITCH_TYPE_CODES, PITCH_TYPE_TO_IDX
+from mlb.ml.features import PITCH_TYPE_CODES, PITCH_TYPE_TO_IDX
 
 
 def test_counts_to_vector_maps_codes_and_folds_unknown_into_other():

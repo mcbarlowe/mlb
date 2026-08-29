@@ -25,13 +25,13 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.sim.base_out import AB_EVENT_TO_PA_OUTCOME, BaseOutEngine
-from src.sim.calibration import PAOutcomeCalibration, apply_multipliers
-from src.sim.count_machine import PA_OUTCOMES
-from src.sim.game import Batter, Pitcher
-from src.sim.matchup import MatchupProviderFactory
-from src.sim.pa import pa_outcome_distribution
-from src.sim.slate import build_day_ahead_simulator
+from mlb.sim.base_out import AB_EVENT_TO_PA_OUTCOME, BaseOutEngine
+from mlb.sim.calibration import PAOutcomeCalibration, apply_multipliers
+from mlb.sim.count_machine import PA_OUTCOMES
+from mlb.sim.game import Batter, Pitcher
+from mlb.sim.matchup import MatchupProviderFactory
+from mlb.sim.pa import pa_outcome_distribution
+from mlb.sim.slate import build_day_ahead_simulator
 
 SIDES = {True: "top", False: "bottom"}
 
@@ -40,7 +40,7 @@ def league_pa_by_side(
     seasons: Sequence[int],
 ) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
     """League PA-outcome distribution split by batting side, plus runs/team-game."""
-    from src.database.postgres_handler import PostgresHandler
+    from mlb.database.postgres_handler import PostgresHandler
 
     handler = PostgresHandler()
     dists: dict[str, dict[str, float]] = {}
@@ -80,7 +80,7 @@ def league_pa_by_side(
 
 
 def sample_matchups(seasons: Sequence[int], n: int, rng: random.Random) -> list[tuple]:
-    from src.database.postgres_handler import PostgresHandler
+    from mlb.database.postgres_handler import PostgresHandler
 
     handler = PostgresHandler()
     with handler.connection.cursor() as cur:

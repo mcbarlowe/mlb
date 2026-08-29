@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import polars as pl
 
-from src.outcome.dataset import (
+from mlb.outcome.dataset import (
     add_state_features,
     build_training_frame,
     stage_a_frame,
     stage_b_frame,
 )
-from src.outcome.labels import (
+from mlb.outcome.labels import (
     canonicalize_pitch_type,
     map_event_type,
     map_pitch_call,
 )
-from src.outcome.models import conditional_baseline_log_loss
+from mlb.outcome.models import conditional_baseline_log_loss
 
 
 def _raw_frame(rows: list[dict]) -> pl.DataFrame:

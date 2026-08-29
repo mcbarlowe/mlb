@@ -20,8 +20,8 @@ import polars as pl
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.outcome.dataset import load_pitches
-from src.sim.pitch_mix import (
+from mlb.outcome.dataset import load_pitches
+from mlb.sim.pitch_mix import (
     LOCATION_TABLE_PATH,
     MIX_TABLE_PATH,
     build_pitch_mix_tables,
@@ -45,7 +45,7 @@ def main() -> None:
     raw = load_pitches(args.seasons)
     print(f"Loaded {raw.height:,} rows in {time.perf_counter() - start:.1f}s")
 
-    from src.sim.bullpen import (
+    from mlb.sim.bullpen import (
         build_team_bullpen_hands,
         relabel_reliever_rows,
         save_team_bullpens,

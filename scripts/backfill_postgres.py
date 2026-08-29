@@ -7,8 +7,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.database import PostgresConfig
-from src.etl.postgres_backfill import (
+from mlb.database import PostgresConfig
+from mlb.etl.postgres_backfill import (
     BulkBackfillSummary,
     default_seasons,
     sync_and_backfill_postgres,

@@ -31,7 +31,7 @@ Inference Example:
 
     # Load MDN for location density
     import torch
-    from src.ml.mdn_location_model import BivariateMDN, get_point_estimate
+    from mlb.ml.mdn_location_model import BivariateMDN, get_point_estimate
     checkpoint = torch.load("models/combined_xxx/mdn_location_model.pt")
     mdn = BivariateMDN(**checkpoint["config"])
     mdn.load_state_dict(checkpoint["model_state_dict"])
@@ -40,7 +40,7 @@ Inference Example:
     point = get_point_estimate(mdn, features)  # [px, pz]
 
     # Or get full density
-    from src.ml.mdn_location_model import get_location_density
+    from mlb.ml.mdn_location_model import get_location_density
     px_grid, pz_grid, density = get_location_density(mdn, features)
 """
 
@@ -58,14 +58,14 @@ import polars as pl
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.ml.catboost_model import PitchCatBoostModel, PitchXGBoostModel
-from src.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
-from src.ml.mdn_location_model import (
+from mlb.ml.catboost_model import PitchCatBoostModel, PitchXGBoostModel
+from mlb.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
+from mlb.ml.mdn_location_model import (
     BivariateMDN,
     MDNLocationTrainer,
     plot_multiple_densities,
 )
-from src.ml.season_splits import default_data_source_train_seasons
+from mlb.ml.season_splits import default_data_source_train_seasons
 
 
 def set_seed(seed: int = 42):

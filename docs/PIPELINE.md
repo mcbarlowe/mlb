@@ -75,7 +75,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 import json
 
-from src.endpoints.schedule import Schedule
+from mlb.endpoints.schedule import Schedule
 
 schedule_api = Schedule()
 for season in range(2009, datetime.now(tz=UTC).year + 1):
@@ -151,7 +151,7 @@ uv run python scripts/backfill_postgres.py /path/to/livefeeds
 ### 4. Query the Database
 
 ```python
-from src.database import PostgresConfig, PostgresHandler
+from mlb.database import PostgresConfig, PostgresHandler
 
 db_config = PostgresConfig.from_env()
 
@@ -305,7 +305,7 @@ Key columns include:
 All API endpoints inherit from `BaseAPI`:
 
 ```python
-from src.endpoints.base_api import BaseAPI
+from mlb.endpoints.base_api import BaseAPI
 
 class MyEndpoint(BaseAPI):
     def __init__(self):

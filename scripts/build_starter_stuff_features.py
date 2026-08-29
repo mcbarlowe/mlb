@@ -24,7 +24,7 @@ import psycopg
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.database import PostgresConfig
+from mlb.database import PostgresConfig
 
 RECENT = 2      # starts forming the "current form" window
 BASELINE = 6    # starts before those forming the comparison baseline

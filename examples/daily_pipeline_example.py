@@ -8,7 +8,7 @@ for fetching game data by date and handling live game polling.
 import asyncio
 from datetime import date
 
-from src.etl.daily_pipeline import (
+from mlb.etl.daily_pipeline import (
     DailyPipeline,
     GameState,
     monitor_full_day,

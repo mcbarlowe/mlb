@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.sim.market_priors import (
+from mlb.sim.market_priors import (
     MarketWinTotal,
     load_market_win_totals_csv,
     market_prior_offsets_from_win_totals,
 )
-from src.sim.season import TeamInfo
+from mlb.sim.season import TeamInfo
 
 
 def _team(team_id: int, abbreviation: str, team_name: str) -> TeamInfo:

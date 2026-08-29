@@ -24,17 +24,17 @@ import numpy as np
 import polars as pl
 import torch
 
-from src.ml.cross_validation import TimeSeriesCrossValidator
-from src.ml.evaluate import (
+from mlb.ml.cross_validation import TimeSeriesCrossValidator
+from mlb.ml.evaluate import (
     evaluate_model,
     plot_confusion_matrix,
     plot_location_predictions,
     plot_mdn_predictions,
     print_classification_report,
 )
-from src.ml.features import PITCH_TYPE_CODES, compute_class_weights
-from src.ml.model import create_model
-from src.ml.train import PitchPredictionTrainer
+from mlb.ml.features import PITCH_TYPE_CODES, compute_class_weights
+from mlb.ml.model import create_model
+from mlb.ml.train import PitchPredictionTrainer
 
 
 def set_seed(seed: int = 42) -> None:

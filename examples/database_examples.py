@@ -9,7 +9,7 @@ This module demonstrates how to:
 
 from pathlib import Path
 
-from src.data import (
+from mlb.data import (
     BoxscoreData,
     GameFeedData,
     LinescoreData,
@@ -17,10 +17,10 @@ from src.data import (
     ReferenceData,
     TeamData,
 )
-from src.database import PostgresConfig, PostgresHandler
-from src.endpoints.game_feed import GameFeed
-from src.endpoints.pitch_types import PitchTypes
-from src.endpoints.positions import Positions
+from mlb.database import PostgresConfig, PostgresHandler
+from mlb.endpoints.game_feed import GameFeed
+from mlb.endpoints.pitch_types import PitchTypes
+from mlb.endpoints.positions import Positions
 
 
 def default_db_config() -> PostgresConfig:

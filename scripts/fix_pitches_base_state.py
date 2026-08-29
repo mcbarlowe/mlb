@@ -24,7 +24,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.data.base_state import compute_at_bat_states
+from mlb.data.base_state import compute_at_bat_states
 
 LIVEFEED_ROOT = Path("data/raw/livefeeds")
 
@@ -104,7 +104,7 @@ def season_files(seasons: list[int] | None) -> list[Path]:
 def main() -> None:
     import psycopg
 
-    from src.database import PostgresConfig
+    from mlb.database import PostgresConfig
 
     parser = argparse.ArgumentParser(description="Repair pitches base/out state.")
     parser.add_argument("--seasons", type=int, nargs="+", default=None)
