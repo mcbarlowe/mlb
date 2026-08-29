@@ -1,8 +1,8 @@
 """Pre-game starter "stuff trend" features from pitch-level data.
 
-Hypothesis under test: a pitcher's physical stuff changes before his results-based statistics
-reflect it, and the market prices the results-based statistics. If true, a stuff-trend feature
-carries information the price lacks, which is the only thing that can beat a calibrated price.
+Hypothesis under test: changes in a pitcher's physical stuff can become predictive
+before results-based statistics reflect them. This producer derives a leak-free
+feature for MLB model evaluation; downstream market comparison belongs in betting.
 
 Strictly pre-game by construction. For each start, the feature compares the pitcher's recent
 form window (his previous ``RECENT`` starts) against a baseline window (the ``BASELINE`` starts

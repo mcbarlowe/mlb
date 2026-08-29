@@ -2,9 +2,10 @@
 
 A comprehensive ETL pipeline for extracting, transforming, and loading MLB baseball game data from the MLB Stats API into a local PostgreSQL analytical schema.
 
-> Pipeline, schema, model-production, and operational reference. Sportsbook
-> execution, paper ledgers, settlement, ROI, alerts, and reports are owned by
-> the sibling `betting` repository.
+> Pipeline, schema, model-production, and operational reference. All sportsbook
+> and exchange ingestion, normalized market datasets, pricing, market-vs-model
+> research, execution, ledgers, settlement, ROI, alerts, and reports are owned
+> by the sibling `betting` repository.
 
 ## Features
 
@@ -182,7 +183,7 @@ uv run python verify_database.py
 
 ### 6. Backtest Season Projections
 
-Use the season projection backtest to evaluate preseason division and playoff forecasts against final standings. The script writes model, flat-schedule baseline, improvement, calibration, summary CSVs, and optional playoff-probability graphics. Add `--market-win-totals resources/season_win_totals_2022_2025.csv` to blend pre-Opening-Day season win totals into the game simulation.
+Use the season projection backtest to evaluate preseason division and playoff forecasts against final standings. The script writes model, flat-schedule baseline, improvement, calibration, summary CSVs, and optional playoff-probability graphics. The optional `--market-win-totals` input is a caller-supplied model prior; market collection, normalization, and storage remain outside this repository.
 
 ```bash
 uv run python scripts/backtest_season_projections.py \
@@ -201,7 +202,7 @@ Daily live-season graphics:
 # Refresh pre-cutoff games, render current-season JPEGs, and dry-run the social post
 uv run python scripts/run_daily_season_projection.py
 
-# Publish the generated playoff-odds and playoff-stage graphics to X
+# Publish the generated playoff-probability and playoff-stage graphics to X
 uv run python scripts/run_daily_season_projection.py --post --post-provider x
 ```
 
@@ -210,9 +211,9 @@ The daily runner bounds data mutation to current-season regular-season games tha
 
 Optional tuning knobs:
 - `--team-prior-scale-grid`: candidate prior-season team-strength offsets.
-- `--market-win-totals`: optional CSV with `season`, `win_total`, and `team_id`, `abbreviation`, or `team_name`.
-- `--market-prior-scale-grid`: candidate preseason market win-total offsets.
-- `--market-prior-min-tune-seasons`: prior seasons with market data required before tuning nonzero market scales.
+- `--market-win-totals`: optional external model-prior CSV with `season`, `win_total`, and `team_id`, `abbreviation`, or `team_name`; this repository never fetches or stores the source market data.
+- `--market-prior-scale-grid`: candidate scales for that optional preseason prior.
+- `--market-prior-min-tune-seasons`: prior seasons with external priors required before tuning nonzero scales.
 - `--schedule-strength-scale-grid`: candidate remaining-schedule-strength offsets.
 - `--calibrate-playoff-probs`: fit anchored playoff-probability calibration on prior seasons.
 - `--graphics-out-dir`: optional directory for per-season playoff-probability and playoff-stage JPEG graphics.

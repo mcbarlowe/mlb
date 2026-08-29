@@ -269,7 +269,7 @@ def load_game_ids(
     *,
     max_match_hours: float = 12.0,
 ) -> dict[str, int]:
-    """Resolve Odds API event metadata to stable MLB game IDs, including twin bills."""
+    """Resolve caller-supplied event metadata to stable MLB game IDs, including twin bills."""
     config = PostgresConfig.from_env()
     with psycopg.connect(
         dbname=config.dbname,

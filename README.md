@@ -1,6 +1,6 @@
 # MLB Data and Models
 
-MLB owns baseball data ingestion, normalized PostgreSQL facts and market data, feature preparation, model training, model inference, and simulation. Betting execution is intentionally outside this repository.
+MLB owns official baseball data ingestion, normalized PostgreSQL facts, feature preparation, model training, model inference, and simulation. Market data and betting operations are intentionally outside this repository.
 
 ## Ownership boundary
 
@@ -8,11 +8,11 @@ MLB owns:
 
 - MLB Stats API ingestion and resumable backfills
 - the `mlb` PostgreSQL schema
-- normalized historical MLB market datasets
+- official MLB facts, derived statistics, and model/simulation artifacts
 - pitch, outcome, team-strength, prop-probability, and simulation models
 - versioned model/result contracts consumed by downstream services
 
-The sibling `betting` repository owns sportsbook and Kalshi access, price selection, Kelly staking, paper ledgers, settlement, ROI and bankroll calculations, alerts, reports, and betting LaunchAgents. MLB code must not write the `betting` schema or import the betting package.
+The sibling `betting` repository owns all sportsbook and exchange market ingestion, normalized market tables and artifacts, pricing, market-vs-model research, price selection, Kelly staking, paper ledgers, settlement, ROI and bankroll calculations, alerts, reports, and betting LaunchAgents. MLB code must not fetch or persist market data, write the `betting` schema, or import the betting package.
 
 ## Setup
 
@@ -56,6 +56,10 @@ uv run python scripts/publish_prop_predictions.py \
   --date 2026-08-28 \
   --request-json /tmp/prop-request.json \
   --output-json /tmp/prop-predictions.json
+
+uv run python scripts/publish_totals_simulations.py \
+  --season 2025 --games 500 --sims 500 \
+  --output-json /tmp/totals-simulations.json
 ```
 
 These producers do not fetch sportsbook prices, select bets, size stakes, alert, or write paper ledgers.
