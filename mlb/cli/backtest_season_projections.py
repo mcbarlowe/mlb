@@ -1624,16 +1624,26 @@ def _write_graphics(
     labeled_projections: Sequence[LabeledProjection],
     teams: dict[int, TeamInfo],
 ) -> None:
-    for labeled in labeled_projections:
-        if labeled.projection_type != "model":
-            continue
-        for path in write_projection_graphics(
-            labeled.projection,
-            teams,
-            output_dir,
-            projection_type=labeled.projection_type,
-        ):
-            print(f"Wrote {path}")
+    from mlb.live.card_html import HtmlCardRenderer
+
+    wanted = [
+        labeled
+        for labeled in labeled_projections
+        if labeled.projection_type == "model"
+    ]
+    if not wanted:
+        return
+    # One warm Chromium for every season's charts.
+    with HtmlCardRenderer() as renderer:
+        for labeled in wanted:
+            for path in write_projection_graphics(
+                labeled.projection,
+                teams,
+                output_dir,
+                projection_type=labeled.projection_type,
+                renderer=renderer,
+            ):
+                print(f"Wrote {path}")
 
 
 def _season_summary_rows(

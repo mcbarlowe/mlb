@@ -13,6 +13,7 @@ import io
 from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
+from typing import Self
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -691,6 +692,14 @@ class HtmlCardRenderer:
 
     def render(self, html: str, out_path: Path) -> Path:
         return self.render_with_size(html, out_path, width=CARD_W, height=CARD_H)
+
+    def __enter__(self) -> Self:
+        """Start the worker eagerly so a caller can hold one browser open."""
+        self._ensure_page()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
     def close(self) -> None:
         requests = self._requests

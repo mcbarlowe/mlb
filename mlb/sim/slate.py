@@ -12,7 +12,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    # Imported lazily at call time so this module never pulls playwright in.
+    from mlb.live.card_html import HtmlCardRenderer
 
 import requests
 
@@ -623,7 +627,12 @@ def simulate_slate_game(
     )
 
 
-def render_prediction_card(prediction: SlatePrediction, out_path: Path) -> Path:
+def render_prediction_card(
+    prediction: SlatePrediction,
+    out_path: Path,
+    *,
+    renderer: HtmlCardRenderer | None = None,
+) -> Path:
     from mlb.live.game_sim_card import card_data_from_results, render_game_sim_card
 
     data = card_data_from_results(
@@ -639,7 +648,7 @@ def render_prediction_card(prediction: SlatePrediction, out_path: Path) -> Path:
         home_win_probability=prediction.stats.get("home_win_probability"),
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    return render_game_sim_card(data, out_path)
+    return render_game_sim_card(data, out_path, renderer=renderer)
 
 
 def starter_changes(previous: SlateGame, current: SlateGame) -> list[StarterChange]:

@@ -274,14 +274,23 @@ def build_slate_sim_card_html(data: SlateSimBoardData) -> str:
 </div></body></html>"""
 
 
-def render_slate_sim_card(data: SlateSimBoardData, out_path: Path) -> Path:
-    renderer = HtmlCardRenderer()
-    try:
-        return renderer.render_with_size(
+def render_slate_sim_card(
+    data: SlateSimBoardData,
+    out_path: Path,
+    *,
+    renderer: HtmlCardRenderer | None = None,
+) -> Path:
+    """Render one board page; pass ``renderer`` to reuse a warm browser."""
+
+    def _render(active: HtmlCardRenderer) -> Path:
+        return active.render_with_size(
             build_slate_sim_card_html(data),
             out_path,
             width=board_width(len(data.rows)),
             height=board_height(len(data.rows)),
         )
-    finally:
-        renderer.close()
+
+    if renderer is not None:
+        return _render(renderer)
+    with HtmlCardRenderer() as owned:
+        return _render(owned)

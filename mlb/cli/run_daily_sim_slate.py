@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from mlb.live.card_html import HtmlCardRenderer
 from mlb.live.publisher import (
     POST_PROVIDER_CHOICES,
     PredictionPost,
@@ -306,27 +307,31 @@ def _render_board_pages(
     generated_at = _generated_at_label()
     paths: list[Path] = []
     note = _board_note(skipped, watching, preview_only=preview_only)
-    for page_index, page_predictions in enumerate(pages, start=1):
-        board_data = SlateSimBoardData(
-            slate_date=target_date.isoformat(),
-            generated_at=generated_at,
-            games_summary=_page_games_summary(
-                len(predictions),
-                preview_only=preview_only,
+    # One warm Chromium for every page rather than one launch per page.
+    with HtmlCardRenderer() as renderer:
+        for page_index, page_predictions in enumerate(pages, start=1):
+            board_data = SlateSimBoardData(
+                slate_date=target_date.isoformat(),
+                generated_at=generated_at,
+                games_summary=_page_games_summary(
+                    len(predictions),
+                    preview_only=preview_only,
+                    page_index=page_index,
+                    page_count=len(pages),
+                ),
+                n_sims=sims,
+                rows=_build_board_rows(page_predictions),
+                note=note if page_index == 1 else None,
+            )
+            board_path = _board_path(
+                output_dir,
+                target_date,
                 page_index=page_index,
                 page_count=len(pages),
-            ),
-            n_sims=sims,
-            rows=_build_board_rows(page_predictions),
-            note=note if page_index == 1 else None,
-        )
-        board_path = _board_path(
-            output_dir,
-            target_date,
-            page_index=page_index,
-            page_count=len(pages),
-        )
-        paths.append(render_slate_sim_card(board_data, board_path))
+            )
+            paths.append(
+                render_slate_sim_card(board_data, board_path, renderer=renderer)
+            )
     return paths
 
 
@@ -413,34 +418,40 @@ def _poll_probable_starters(
             continue
 
         print(f"Detected {len(updates)} probable-starter update(s).")
-        for game, changes in updates:
-            try:
-                prediction = simulate_slate_game(
-                    game,
-                    simulator,
-                    season=season,
-                    n_sims=sims,
-                    win_predictor=win_predictor,
-                )
-            except (ValueError, KeyError) as exc:
-                print(f"{game.label:12s} UPDATE SKIPPED ({exc})")
-                continue
+        # One warm Chromium for the whole batch of updated games.
+        with HtmlCardRenderer() as renderer:
+            for game, changes in updates:
+                try:
+                    prediction = simulate_slate_game(
+                        game,
+                        simulator,
+                        season=season,
+                        n_sims=sims,
+                        win_predictor=win_predictor,
+                    )
+                except (ValueError, KeyError) as exc:
+                    print(f"{game.label:12s} UPDATE SKIPPED ({exc})")
+                    continue
 
-            card_path = render_prediction_card(
-                prediction,
-                _updated_card_path(Path(board_path).parent, target_date, game.game_pk),
-            )
-            caption = build_update_caption(prediction, changes)
-            post_id = publisher.publish(
-                PredictionPost(text=caption, image_path=card_path)
-            )
-            reasons = "; ".join(
-                f"{game.abbrev_for(change.side)} {change.previous} -> {change.current}"
-                for change in changes
-            )
-            print(f"Updated {game.label}: {reasons}")
-            print(f"             card: {card_path}")
-            print(f"             posted: {post_id}")
+                card_path = render_prediction_card(
+                    prediction,
+                    _updated_card_path(
+                        Path(board_path).parent, target_date, game.game_pk
+                    ),
+                    renderer=renderer,
+                )
+                caption = build_update_caption(prediction, changes)
+                post_id = publisher.publish(
+                    PredictionPost(text=caption, image_path=card_path)
+                )
+                reasons = "; ".join(
+                    f"{game.abbrev_for(change.side)} {change.previous} -> "
+                    f"{change.current}"
+                    for change in changes
+                )
+                print(f"Updated {game.label}: {reasons}")
+                print(f"             card: {card_path}")
+                print(f"             posted: {post_id}")
 
         previous_by_pk = {game.game_pk: game for game in current_games}
         _save_state(

@@ -262,10 +262,19 @@ def build_game_sim_card_html(data: GameSimCardData) -> str:
 </div></body></html>"""
 
 
-def render_game_sim_card(data: GameSimCardData, out_path: Path) -> Path:
-    """Render the simulation card to an image; returns the written path."""
-    renderer = HtmlCardRenderer()
-    try:
+def render_game_sim_card(
+    data: GameSimCardData,
+    out_path: Path,
+    *,
+    renderer: HtmlCardRenderer | None = None,
+) -> Path:
+    """Render the simulation card to an image; returns the written path.
+
+    Pass ``renderer`` when rendering several cards. HtmlCardRenderer keeps one
+    headless Chromium warm behind a worker thread, so constructing one per card
+    pays the browser launch every time and defeats the point of the worker.
+    """
+    if renderer is not None:
         return renderer.render(build_game_sim_card_html(data), out_path)
-    finally:
-        renderer.close()
+    with HtmlCardRenderer() as owned:
+        return owned.render(build_game_sim_card_html(data), out_path)

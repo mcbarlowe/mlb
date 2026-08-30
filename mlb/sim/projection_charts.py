@@ -4,6 +4,11 @@ from collections.abc import Mapping, Sequence
 from html import escape
 from math import ceil
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Imported lazily at call time so this module never pulls playwright in.
+    from mlb.live.card_html import HtmlCardRenderer
 
 from mlb.sim.season import SeasonProjection, TeamInfo, TeamProjection
 
@@ -27,6 +32,7 @@ def write_projection_graphics(
     output_dir: Path,
     *,
     projection_type: str = "model",
+    renderer: HtmlCardRenderer | None = None,
 ) -> tuple[Path, Path]:
     from mlb.live.card_html import HtmlCardRenderer
 
@@ -35,33 +41,34 @@ def write_projection_graphics(
     playoff_path = output_dir / f"{file_stem}_playoff_probabilities.jpg"
     stages_path = output_dir / f"{file_stem}_playoff_stages.jpg"
 
-    renderer = HtmlCardRenderer()
-    try:
-        playoff_path = renderer.render_with_size(
-            _playoff_probabilities_html(
-                projection,
-                teams,
-                projection_type=projection_type,
+    def _render(active: HtmlCardRenderer) -> tuple[Path, Path]:
+        return (
+            active.render_with_size(
+                _playoff_probabilities_html(
+                    projection,
+                    teams,
+                    projection_type=projection_type,
+                ),
+                playoff_path,
+                width=CARD_W,
+                height=CARD_H,
             ),
-            playoff_path,
-            width=CARD_W,
-            height=CARD_H,
-        )
-        stages_path = renderer.render_with_size(
-            _playoff_stages_html(
-                projection,
-                teams,
-                projection_type=projection_type,
+            active.render_with_size(
+                _playoff_stages_html(
+                    projection,
+                    teams,
+                    projection_type=projection_type,
+                ),
+                stages_path,
+                width=CARD_W,
+                height=CARD_H,
             ),
-            stages_path,
-            width=CARD_W,
-            height=CARD_H,
         )
-    finally:
-        renderer.close()
 
-    return playoff_path, stages_path
-
+    if renderer is not None:
+        return _render(renderer)
+    with HtmlCardRenderer() as owned:
+        return _render(owned)
 
 def _playoff_probabilities_html(
     projection: SeasonProjection,
