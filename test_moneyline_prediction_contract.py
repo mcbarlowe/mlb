@@ -180,3 +180,94 @@ def test_build_batch_reuses_live_model_inference_without_betting_inputs() -> Non
     assert batch.model_name == "registered-win-model"
     assert batch.model_version == "v42"
     assert batch.games == (game_prediction(),)
+
+
+def _slate_game(game_pk: int, game_datetime: str) -> SlateGame:
+    return SlateGame(
+        game_pk=game_pk,
+        slate_date="2026-08-27",
+        game_datetime=game_datetime,
+        status="Preview",
+        away_team_id=111,
+        home_team_id=147,
+        away_abbrev="BOS",
+        home_abbrev="NYY",
+        venue="Yankee Stadium",
+        away_probable=ProbablePitcher(player_id=20, full_name="Away Starter"),
+        home_probable=ProbablePitcher(player_id=10, full_name="Home Starter"),
+    )
+
+
+def _build(games: list[SlateGame], *, clock_at: datetime) -> MoneylinePredictionBatch:
+    class Predictor:
+        def predict_home_probability(self, **kwargs: object) -> float:
+            return 0.61
+
+    return build_prediction_batch(
+        date(2026, 8, 27),
+        model_name="registered-win-model",
+        tracking_uri="file:mlruns",
+        model_version="v42",
+        slate_loader=lambda target_date, *, abstract_states: list(games),
+        team_label_loader=lambda season: {
+            111: ("Boston Red Sox", "BOS"),
+            147: ("New York Yankees", "NYY"),
+        },
+        predictor_builder=lambda d, *, tracking_uri, registered_model_name: Predictor(),
+        roster_loader=lambda team_id, slate_date: ((1, 2), (20, 21)),
+        clock=lambda: clock_at,
+    )
+
+
+def test_started_games_are_dropped_instead_of_invalidating_the_slate() -> None:
+    # Regression: the MLB API's abstract state lags first pitch, so a game that
+    # had already begun was scored and then rejected by the contract, discarding
+    # every other game in the batch.
+    already_started = _slate_game(1, "2026-08-27T13:35:00Z")
+    upcoming = _slate_game(2, "2026-08-28T02:10:00Z")
+
+    batch = _build([already_started, upcoming], clock_at=PREDICTED_AT)
+
+    assert [game.game_pk for game in batch.games] == [2]
+
+
+def test_a_fully_started_slate_reports_that_plainly() -> None:
+    started = _slate_game(1, "2026-08-27T13:35:00Z")
+
+    with pytest.raises(ValueError, match="had already started"):
+        _build([started], clock_at=PREDICTED_AT)
+
+
+def test_predicted_at_precedes_scoring_so_the_contract_holds_by_construction() -> None:
+    # The clock must be read before inference, not after: scoring is slow enough
+    # that a game could start mid-run.
+    reads: list[int] = []
+
+    def clock() -> datetime:
+        reads.append(len(reads))
+        return PREDICTED_AT
+
+    class Predictor:
+        def predict_home_probability(self, **kwargs: object) -> float:
+            assert reads, "clock must be read before any game is scored"
+            return 0.61
+
+    batch = build_prediction_batch(
+        date(2026, 8, 27),
+        model_name="registered-win-model",
+        tracking_uri="file:mlruns",
+        model_version="v42",
+        slate_loader=lambda target_date, *, abstract_states: [
+            _slate_game(2, "2026-08-28T02:10:00Z")
+        ],
+        team_label_loader=lambda season: {
+            111: ("Boston Red Sox", "BOS"),
+            147: ("New York Yankees", "NYY"),
+        },
+        predictor_builder=lambda d, *, tracking_uri, registered_model_name: Predictor(),
+        roster_loader=lambda team_id, slate_date: ((1, 2), (20, 21)),
+        clock=clock,
+    )
+
+    assert len(reads) == 1
+    assert batch.predicted_at == PREDICTED_AT.isoformat()

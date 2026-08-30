@@ -153,10 +153,43 @@ def build_prediction_batch(
     ),
 ) -> MoneylinePredictionBatch:
     """Score a slate without loading odds or applying any betting policy."""
+    # Stamp the decision time up front. The contract requires predicted_at to
+    # precede every game_time, and scoring is slow (MLflow artifact downloads
+    # plus per-game inference), so stamping afterwards left a window in which a
+    # game could start mid-run and invalidate an otherwise complete batch.
+    predicted_at = (clock or (lambda: datetime.now(UTC)))()
+    if predicted_at.tzinfo is None:
+        raise ValueError("prediction clock must return a timezone-aware datetime")
+    predicted_at = predicted_at.astimezone(UTC)
+
     states = None if all_games else {"Preview"}
     games = tuple(slate_loader(target_date, abstract_states=states))
     if not games:
         raise ValueError(f"No slate games found for {target_date.isoformat()}")
+
+    # The MLB API's abstract state lags first pitch, so "Preview" alone is not
+    # enough: drop anything already underway against the same clock the contract
+    # checks, keeping the invariant true by construction rather than discovering
+    # it as an exception that discards every other game in the slate.
+    scheduled = tuple(
+        game
+        for game in games
+        if game.game_datetime
+        and datetime.fromisoformat(game.game_datetime) > predicted_at
+    )
+    started = len(games) - len(scheduled)
+    if started:
+        print(
+            f"skipping {started} game(s) already started at "
+            f"{predicted_at.isoformat()}",
+            flush=True,
+        )
+    if not scheduled:
+        raise ValueError(
+            f"every {target_date.isoformat()} game had already started at "
+            f"{predicted_at.isoformat()}"
+        )
+    games = scheduled
 
     labels = team_label_loader(target_date.year)
     resolved_model_version = model_version or model_version_resolver(
@@ -201,12 +234,9 @@ def build_prediction_batch(
                 ),
             )
         )
-    predicted_at = (clock or (lambda: datetime.now(UTC)))()
-    if predicted_at.tzinfo is None:
-        raise ValueError("prediction clock must return a timezone-aware datetime")
     return MoneylinePredictionBatch(
         prediction_date=target_date.isoformat(),
-        predicted_at=predicted_at.astimezone(UTC).isoformat(),
+        predicted_at=predicted_at.isoformat(),
         model_name=model_name,
         model_version=resolved_model_version,
         games=tuple(predictions),
