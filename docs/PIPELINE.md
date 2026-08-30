@@ -93,7 +93,7 @@ for season in range(2009, datetime.now(tz=UTC).year + 1):
 Extract detailed game data for all scheduled games:
 
 ```bash
-python src/etl/get_live_feeds.py
+python mlb/etl/get_live_feeds.py
 ```
 
 This will:
@@ -232,7 +232,7 @@ mlb/
 │   ├── processed/
 │   │   └── livefeeds/              # Transformed data (Parquet)
 │   └── exports/                    # Optional Parquet exports from Postgres tables
-├── src/
+├── mlb/
 │   ├── endpoints/                  # MLB API endpoint classes
 │   │   ├── base_api.py            # Base API interface
 │   │   ├── schedule.py            # Schedule endpoint
@@ -347,7 +347,7 @@ class MyDataTransformer:
 uv run black .
 
 # Lint the PostgreSQL ETL surface
-uv run ruff check src/database src/etl/get_live_feeds.py src/etl/load_to_database.py src/etl/postgres_backfill.py scripts/backfill_postgres.py examples/database_examples.py test_game_dimensions.py test_game_pitches_relation.py test_postgres_backfill.py verify_database.py
+uv run ruff check mlb/database mlb/etl/get_live_feeds.py mlb/etl/load_to_database.py mlb/etl/postgres_backfill.py scripts/backfill_postgres.py examples/database_examples.py test_game_dimensions.py test_game_pitches_relation.py test_postgres_backfill.py verify_database.py
 
 # Type-check the PostgreSQL ETL surface with the local .venv
 uv run basedpyright
