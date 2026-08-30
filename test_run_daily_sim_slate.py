@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-import scripts.run_daily_sim_slate as daily_sim
+import mlb.cli.run_daily_sim_slate as daily_sim
 from mlb.live.publisher import PredictionPost, ResultPost
 from mlb.sim.slate import DailySlateState, save_daily_slate_state
 

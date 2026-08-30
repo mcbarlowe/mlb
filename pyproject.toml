@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "mlb"
 version = "0.1.0"
@@ -6,38 +10,63 @@ readme = "README.md"
 requires-python = ">=3.11.4"
 dependencies = [
     "aiofiles>=24.1.0",
+    "atproto>=0.0.55",
     "catboost>=1.2.8",
     "httpx>=0.27.0",
-    "jupyter>=1.1.1",
-    "pandas>=2.3.1",
-    "pandas-stubs==2.3.0.250703",
+    "matplotlib>=3.10",
     "mlflow>=2.17.0",
     "numpy<2",
+    "pandas>=2.3.1",
+    "pillow>=11.0",
+    "playwright>=1.62.0",
     "polars>=1.32.3",
     "psycopg[binary]>=3.2.9",
+    "psycopg2-binary>=2.9.10",
     "pyarrow>=21.0.0",
     "requests>=2.32.4",
     "scikit-learn>=1.3.0",
-    "seaborn>=0.13.2",
+    "scipy>=1.11",
     "torch>=2.0.0,<2.3.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "torch>=2.0.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
-    "atproto>=0.0.55",
     "tqdm>=4.67.1",
-    "playwright>=1.62.0",
     "xgboost==3.2.0",
-    "psycopg2-binary>=2.9.10",
 ]
+
+# Everything the four deployed launchd agents never import. Keeping these out of
+# the runtime distribution is what makes a host install tractable; jupyter alone
+# pulls a notebook stack the agents have no use for.
+[project.optional-dependencies]
+training = ["seaborn>=0.13.2"]
+notebooks = ["jupyter>=1.1.1"]
+
+[project.scripts]
+mlb-publish-prop-predictions = "mlb.cli.publish_prop_predictions:main"
+mlb-publish-moneyline-predictions = "mlb.cli.publish_moneyline_predictions:main"
+mlb-daily-postgres-etl = "mlb.cli.run_daily_postgres_etl:main"
+mlb-daily-sim-slate = "mlb.cli.run_daily_sim_slate:main"
+mlb-daily-season-projection = "mlb.cli.run_daily_season_projection:main"
+mlb-live-pipeline = "mlb.cli.run_live_pipeline:main"
+mlb-build-pitcher-movement-profiles = "mlb.cli.build_pitcher_movement_profiles:main"
+mlb-backtest-season-projections = "mlb.cli.backtest_season_projections:main"
+mlb-install-agents = "mlb.deploy.install:main"
 
 [dependency-groups]
 dev = [
     "basedpyright>=1.39.9",
     "black[d]>=25.1.0",
+    "pandas-stubs==2.3.0.250703",
     "pytest>=8.4.1",
     "ruff>=0.16.0",
 ]
 
-[tool.uv]
-package = false
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mlb*"]
+
+[tool.setuptools.package-data]
+"mlb.database" = ["schema.sql"]
+"mlb.live" = ["assets/*.png"]
+"mlb.deploy" = ["resources/*.sh", "resources/launchd/*.plist"]
 
 [tool.pytest.ini_options]
 norecursedirs = [".venv", "models", "output", "catboost_info", "notebooks"]

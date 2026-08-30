@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.publish_moneyline_predictions import build_prediction_batch
+from mlb.cli.publish_moneyline_predictions import build_prediction_batch
 from mlb.data_contracts.moneyline_predictions import (
     MoneylineGamePrediction,
     MoneylinePredictionBatch,

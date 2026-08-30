@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import sys
 import time
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
-
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 from mlb.live.publisher import (
     POST_PROVIDER_CHOICES,
@@ -48,7 +45,7 @@ MAX_ROWS_PER_BOARD = 4
 EASTERN = ZoneInfo("America/New_York")
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Generate and optionally post an all-games morning simulation board, "
@@ -115,7 +112,7 @@ def parse_args() -> argparse.Namespace:
         help="Registered MLflow model containing the champion win estimator.",
     )
     parser.add_argument("--mlflow-tracking-uri", type=str, default=None)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def resolve_target_date(date_arg: str | None) -> date:
@@ -455,8 +452,8 @@ def _poll_probable_starters(
         )
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
     target_date = resolve_target_date(args.date)
     season = target_date.year
     output_dir = Path(args.output_dir)

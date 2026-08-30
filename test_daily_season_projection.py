@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from types import SimpleNamespace
 
-from scripts.run_daily_season_projection import (
+from mlb.cli.run_daily_season_projection import (
     _caption_date,
     _default_caption,
     _projection_command,
@@ -72,7 +72,7 @@ def test_projection_command_writes_expected_outputs(tmp_path):
         outputs=outputs,
     )
 
-    assert "scripts/backtest_season_projections.py" in command
+    assert command[0].endswith("mlb-backtest-season-projections")
     assert command[command.index("--as-of") + 1] == "2026-08-16"
     assert command[command.index("--out") + 1].endswith("season_2026_model_projection.csv")
     assert "--no-tune-simulation-params" in command

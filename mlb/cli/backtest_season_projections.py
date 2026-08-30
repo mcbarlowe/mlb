@@ -6,14 +6,10 @@ from __future__ import annotations
 import argparse
 import csv
 import math
-import sys
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from pathlib import Path
-
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 from mlb.sim.market_priors import load_market_prior_offsets
 from mlb.sim.projection_charts import write_projection_graphics
@@ -108,7 +104,7 @@ class ModelAdjustments:
 ContextCache = dict[tuple[int, str], ProjectionContext]
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Backtest preseason division/playoff projections."
     )
@@ -373,7 +369,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional directory for model playoff-probability and playoff-stage PNG graphics.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _fit_as_of_predictor(
@@ -1845,8 +1841,8 @@ def _default_summary_path(args: argparse.Namespace) -> Path | None:
     return args.out.with_name(f"{args.out.stem}_summary{args.out.suffix}")
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
     if args.as_of is not None and len(args.seasons) != 1:
         raise SystemExit("--as-of can only be used with one season")
     if args.tune_window < 1:

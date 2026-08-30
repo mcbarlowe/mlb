@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.barloweanalytics.daily-sim-slate</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__MLB_RUNNER_DIR__/run_daily_sim_slate.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__MLB_STATE_ROOT__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>BARLOWE_DAILY_SIM_ALL_GAMES</key>
+        <string>0</string>
+        <key>BARLOWE_DAILY_SIM_OUTCOME_RUN_DIR</key>
+        <string>auto</string>
+        <key>BARLOWE_DAILY_SIM_POLL_INTERVAL_MINUTES</key>
+        <string>15</string>
+        <key>BARLOWE_DAILY_SIM_POST</key>
+        <string>1</string>
+        <key>BARLOWE_DAILY_SIM_SIMS</key>
+        <string>2000</string>
+        <key>BARLOWE_DAILY_SIM_WATCH_STARTERS</key>
+        <string>1</string>
+        <key>BARLOWE_DAILY_SIM_WIN_MODEL</key>
+        <string>mlb-team-strength-win</string>
+        <key>BARLOWE_SOCIAL_ENV</key>
+        <string>__MLB_SOCIAL_ENV__</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>MLB_BIN_DIR</key>
+        <string>__MLB_BIN_DIR__</string>
+        <key>MLB_STATE_ROOT</key>
+        <string>__MLB_STATE_ROOT__</string>
+        <key>PATH</key>
+        <string>__MLB_BIN_DIR__:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>UV_PYTHON_PREFERENCE</key>
+        <string>managed</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>__MLB_LOG_DIR__/daily-sim-slate.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__MLB_LOG_DIR__/daily-sim-slate.err.log</string>
+</dict>
+</plist>

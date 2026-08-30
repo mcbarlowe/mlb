@@ -14,7 +14,7 @@ def _install_etl_fakes(
     live=None,
     scheduled=None,
 ):
-    module = import_module("scripts.run_daily_postgres_etl")
+    module = import_module("mlb.cli.run_daily_postgres_etl")
     observed: dict[str, object] = {}
 
     def fake_run_daily_pipeline(*, target_date, skip_existing, poll_live):
@@ -63,7 +63,7 @@ def _install_etl_fakes(
     monkeypatch.setattr(
         backfill_module, "run_postgres_backfill", fake_run_postgres_backfill
     )
-    monkeypatch.setattr(module, "parse_args", lambda: SimpleNamespace(date=None))
+    monkeypatch.setattr(module, "parse_args", lambda argv=None: SimpleNamespace(date=None))
     return module, observed
 
 
@@ -149,7 +149,7 @@ def test_daily_postgres_etl_blocks_report_on_partial_pipeline(
 
 
 def test_postponed_and_cancelled_games_are_nonblocking_pipeline_states():
-    module = import_module("scripts.run_daily_postgres_etl")
+    module = import_module("mlb.cli.run_daily_postgres_etl")
 
     assert module.pipeline_failure_counts(
         {
@@ -170,7 +170,7 @@ def test_postponed_and_cancelled_games_are_nonblocking_pipeline_states():
 
 
 def test_completed_game_pks_accepts_legacy_ints_and_processed_dicts():
-    module = import_module("scripts.run_daily_postgres_etl")
+    module = import_module("mlb.cli.run_daily_postgres_etl")
 
     assert module.completed_game_pks(
         {
@@ -185,5 +185,5 @@ def test_completed_game_pks_accepts_legacy_ints_and_processed_dicts():
 
 
 def test_resolve_target_date_parses_explicit_date():
-    module = import_module("scripts.run_daily_postgres_etl")
+    module = import_module("mlb.cli.run_daily_postgres_etl")
     assert module.resolve_target_date("2024-07-15") == date(2024, 7, 15)

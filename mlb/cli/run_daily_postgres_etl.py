@@ -9,15 +9,12 @@ This is the main daily data pipeline:
 from __future__ import annotations
 
 import argparse
-import sys
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
-
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Download the previous day's games and ingest them into PostgreSQL.",
     )
@@ -27,7 +24,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Date to process in YYYY-MM-DD format. Defaults to yesterday.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def resolve_target_date(date_arg: str | None) -> date:
@@ -76,12 +73,12 @@ def pipeline_failure_counts(pipeline_summary: dict) -> dict[str, int]:
     }
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     from mlb.database import PostgresConfig
     from mlb.etl.daily_pipeline import run_daily_pipeline
     from mlb.etl.postgres_backfill import run_postgres_backfill
 
-    args = parse_args()
+    args = parse_args(argv)
     target_date = resolve_target_date(args.date)
 
     print(f"Running daily ETL for {target_date.isoformat()}")

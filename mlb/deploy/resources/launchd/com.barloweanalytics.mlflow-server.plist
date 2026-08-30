@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.barloweanalytics.mlflow-server</string>
+    <!-- The backend store URI carries a database password, so it is never
+         stored here: mlb-install-agents fills it from MLB_MLFLOW_BACKEND_URI. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__MLB_BIN_DIR__/mlflow</string>
+        <string>server</string>
+        <string>--backend-store-uri</string>
+        <string>__MLB_MLFLOW_BACKEND_URI__</string>
+        <string>--serve-artifacts</string>
+        <string>--artifacts-destination</string>
+        <string>file://__HOME__/mlflow-artifacts</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>5001</string>
+        <string>--cors-allowed-origins</string>
+        <string>http://10.0.0.171:5001,http://Matthews-iMac.local:5001,http://matthews-imac.local:5001,http://localhost:5001,http://127.0.0.1:5001</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__MLB_STATE_ROOT__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>MLB_BIN_DIR</key>
+        <string>__MLB_BIN_DIR__</string>
+        <key>MLB_STATE_ROOT</key>
+        <string>__MLB_STATE_ROOT__</string>
+        <key>PATH</key>
+        <string>__MLB_BIN_DIR__:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>__MLB_LOG_DIR__/mlflow-server.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__MLB_LOG_DIR__/mlflow-server.err.log</string>
+</dict>
+</plist>

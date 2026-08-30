@@ -7,13 +7,13 @@ renders a pitch card, and posts it to the configured social platform
 
 Usage:
     # Monitor all of today's games (dry run, no posts)
-    uv run python scripts/run_live_pipeline.py
+    mlb-live-pipeline
 
     # Monitor a specific date and post to X
-    uv run python scripts/run_live_pipeline.py --date 2026-08-09 --post --post-provider x
+    mlb-live-pipeline --date 2026-08-09 --post --post-provider x
 
     # Follow a single game
-    uv run python scripts/run_live_pipeline.py --game-pk 823490
+    mlb-live-pipeline --game-pk 823490
 """
 
 from __future__ import annotations
@@ -24,12 +24,8 @@ matplotlib.use("Agg", force=True)
 
 import argparse
 import asyncio
-import sys
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
-from pathlib import Path
-
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 from mlb.live.pipeline import (
     LiveGamePredictionService,
@@ -42,7 +38,7 @@ from mlb.live.publisher import POST_PROVIDER_CHOICES, build_publisher
 from mlb.ml.mlflow_utils import resolve_mlflow_tracking_uri
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Predict the next pitch for live MLB games and publish cards.",
     )
@@ -151,11 +147,11 @@ def parse_args() -> argparse.Namespace:
             "or 'matplotlib' (legacy)"
         ),
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
 
     target_date = (
         date.fromisoformat(args.date)

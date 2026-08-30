@@ -6,20 +6,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import tempfile
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
 
 from mlb.data_contracts.prop_predictions import (
     CONTRACT_VERSION,
     build_prop_prediction_artifact,
     resolve_adjustments,
 )
+from mlb.paths import state_root
 
 
 def _read_request(path: Path, prediction_date: date) -> dict[str, object]:
@@ -74,12 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         request = _read_request(args.request_json, args.date)
         curves, parks, provenance = resolve_adjustments(
-            repo=REPO_ROOT,
+            repo=state_root(),
             model_source=args.model_source,
             tracking_uri=args.mlflow_tracking_uri,
             aging_curves_path=args.aging_curves,

@@ -4,15 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Protocol
 
 import requests
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mlb.data_contracts.moneyline_predictions import (
     MoneylineGamePrediction,

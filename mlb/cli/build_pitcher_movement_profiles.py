@@ -17,12 +17,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 import polars as pl
 
@@ -36,7 +33,7 @@ from mlb.ml.movement_profiles import (
 )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build trailing pitcher movement profiles."
     )
@@ -53,7 +50,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Earliest season to include (default: all)",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def load_per_game_stats(min_season: int | None) -> pl.DataFrame:
@@ -96,8 +93,8 @@ def load_per_game_stats(min_season: int | None) -> pl.DataFrame:
     )
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

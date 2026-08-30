@@ -5,7 +5,6 @@ import asyncio
 import json
 import math
 import subprocess
-import sys
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -13,13 +12,11 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
 from mlb.database import PostgresConfig, PostgresHandler
 from mlb.endpoints.game_feed import GameFeed
 from mlb.etl.postgres_backfill import run_postgres_backfill
 from mlb.live.publisher import POST_PROVIDER_CHOICES, build_publisher
+from mlb.paths import console_script
 
 EASTERN = ZoneInfo("America/New_York")
 DEFAULT_RAW_DATA_PATH = Path("data/raw/livefeeds")
@@ -90,7 +87,7 @@ async def _download_live_feeds(
         raise RuntimeError(f"Failed to refresh {len(errors)} live feeds: {preview}{suffix}")
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Refresh current-season MLB data, render season-projection graphics, and optionally post them.",
     )
@@ -198,7 +195,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use fixed projection parameters instead of prior-season tuning.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _date_from_arg(value: str) -> date:
@@ -395,8 +392,10 @@ def _projection_command(
     outputs: ProjectionOutputs,
 ) -> list[str]:
     command = [
-        sys.executable,
-        "scripts/backtest_season_projections.py",
+        # Re-enter this distribution's own console script rather than a path
+        # inside a source checkout: installed as a wheel there is no scripts/
+        # directory to invoke, and PATH is not guaranteed to carry the venv.
+        str(console_script("mlb-backtest-season-projections")),
         "--seasons",
         str(args.season),
         "--as-of",
@@ -531,8 +530,8 @@ def _publish_outputs(
     print(f"post_state: {state_path}")
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
     as_of = _date_from_arg(args.as_of)
     if args.trials < 1:
         raise SystemExit("--trials must be positive")

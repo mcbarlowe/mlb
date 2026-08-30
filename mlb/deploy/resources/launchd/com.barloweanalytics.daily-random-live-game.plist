@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.barloweanalytics.daily-random-live-game</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__MLB_RUNNER_DIR__/run_daily_random_live_game.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__MLB_STATE_ROOT__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>BARLOWE_RANDOM_GAME_LEAD_MINUTES</key>
+        <string>15</string>
+        <key>BARLOWE_RANDOM_GAME_OUTCOME_RUN_DIR</key>
+        <string>auto</string>
+        <key>BARLOWE_RANDOM_GAME_POLL_INTERVAL</key>
+        <string>3</string>
+        <key>BARLOWE_RANDOM_GAME_POST</key>
+        <string>1</string>
+        <key>BARLOWE_RANDOM_GAME_POST_PROVIDER</key>
+        <string>both</string>
+        <key>BARLOWE_SOCIAL_ENV</key>
+        <string>__MLB_SOCIAL_ENV__</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>MLB_BIN_DIR</key>
+        <string>__MLB_BIN_DIR__</string>
+        <key>MLB_STATE_ROOT</key>
+        <string>__MLB_STATE_ROOT__</string>
+        <key>PATH</key>
+        <string>__MLB_BIN_DIR__:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>UV_PYTHON_PREFERENCE</key>
+        <string>managed</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>__MLB_LOG_DIR__/daily-random-live-game.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__MLB_LOG_DIR__/daily-random-live-game.err.log</string>
+</dict>
+</plist>

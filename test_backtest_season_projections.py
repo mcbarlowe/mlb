@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.backtest_season_projections import (
+from mlb.cli.backtest_season_projections import (
     ProbabilityCalibration,
     _apply_playoff_calibration,
     _candidate_params,
