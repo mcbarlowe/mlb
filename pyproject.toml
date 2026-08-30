@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlb"
-version = "0.2.1"
+version = "0.2.2"
 description = "MLB Stats API ETL and modeling pipeline"
 readme = "README.md"
 requires-python = ">=3.11.4"
