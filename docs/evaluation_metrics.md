@@ -1,6 +1,41 @@
 # Evaluation Metrics Documentation
 
-Comprehensive evaluation metrics for the pitch prediction models on the 2025 test set (801,978 pitches).
+Evaluation metrics for the pitch type and pitch location models, measured on
+the 2025 test set.
+
+## Staleness audit (2026-09-06)
+
+**This is a historical snapshot, last measured on or before 2026-03-23, and it
+does not reproduce against the current database.** Three specific facts below
+no longer hold:
+
+1. **Both model checkpoints named in this document are gone from disk.**
+   `models/attention_full/run_20260119_124719/final_model.pt` and
+   `models/pitch_type_location_20260121_003206/pitch_type_location_model.pt`
+   do not exist. Runs now live under `models/pitch_type/run_*` and
+   `models/pitch_type_location/pitch_type_location_*`, and what actually
+   serves is resolved from MLflow `@champion` aliases rather than a path (see
+   `mlb/ml/mlflow_artifacts.py`).
+2. **The test-set size does not reproduce.** This document says 801,978
+   pitches for 2025. `mlb.pitches` now holds 865,216 rows for 2025 across all
+   game types, or 710,084 regular-season rows (709,909 carrying a pitch-type
+   label). No obvious filter yields 801,978.
+3. **The underlying pitch rows were rewritten three times after these numbers
+   were produced**, so the metrics below describe data that no longer exists in
+   this form: the base/out state repair (2026-08-09), the spin-column repair
+   (2026-08-11, when `spin_rate` was found to be always NULL), and the
+   non-pitch-event purge (2026-09-05, which removed 225,619 junk rows and
+   restored 2,340 real pitches that a primary-key collision had evicted).
+
+Still current: the season split. `mlb/ml/season_splits.py` sets
+`DEFAULT_VAL_SEASON = "2024"` and `DEFAULT_TEST_SEASON = "2025"` and excludes
+2020, which matches the description in section 1.
+
+The metric values here are preserved as a historical record and have
+deliberately not been edited, because re-measuring them requires retraining.
+For live numbers use the shared MLflow server (`http://10.0.0.171:5001`), where
+`scripts/train_models_with_mlflow.py` logs test metrics for every run. Re-run
+the evaluation before citing anything in this document as current.
 
 ---
 
@@ -25,10 +60,14 @@ Comprehensive evaluation metrics for the pitch prediction models on the 2025 tes
 | Property | Value |
 |----------|-------|
 | **Season** | 2025 |
-| **Total Pitches** | 801,978 |
+| **Total Pitches** | 801,978 (does not reproduce — `mlb.pitches` now has 865,216 for 2025, 710,084 regular season) |
 | **Train Seasons** | 2021-2023 |
 | **Validation Season** | 2024 |
 | **Excluded** | 2020 (COVID season) |
+
+The season split above is still what the code does; the pitch count is not.
+Counts in this section and the next predate the 2026-08 and 2026-09 repairs
+of `mlb.pitches`.
 
 ### Pitch Type Distribution (Test Set)
 
@@ -51,7 +90,7 @@ Comprehensive evaluation metrics for the pitch prediction models on the 2025 tes
 ## 2. LSTM+Attention Model Metrics
 
 **Model**: `PitchPredictorWithAttention`
-**Checkpoint**: `models/attention_full/run_20260119_124719/final_model.pt`
+**Checkpoint**: `models/attention_full/run_20260119_124719/final_model.pt` — **no longer on disk** (runs are now `models/pitch_type/run_*`; what serves is the MLflow `@champion`)
 **Parameters**: 2,838,813
 
 ### 2.1 Classification Metrics
@@ -133,8 +172,8 @@ The LSTM model includes a 3-component MDN head for location prediction.
 ## 3. PitchTypeConditionedMDN Metrics
 
 **Model**: `PitchTypeConditionedMDN`
-**Checkpoint**: `models/pitch_type_location_20260121_003206/pitch_type_location_model.pt`
-**Test Samples**: 801,978
+**Checkpoint**: `models/pitch_type_location_20260121_003206/pitch_type_location_model.pt` — **no longer on disk** (runs are now `models/pitch_type_location/pitch_type_location_*`)
+**Test Samples**: 801,978 (see the warning at the top — does not reproduce)
 
 ### 3.1 Overall Performance
 
