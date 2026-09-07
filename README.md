@@ -64,6 +64,30 @@ uv run python scripts/publish_totals_simulations.py \
 
 These producers do not fetch sportsbook prices, select bets, size stakes, alert, or write paper ledgers.
 
+## Bayesian pitcher props
+
+Train the shared opportunity model on 2015–2023 starts, evaluate it
+chronologically on 2024, serialize the posterior state, and register every
+component with the shared MLflow server:
+
+```bash
+uv run python scripts/train_pitcher_prop_models.py
+```
+
+The command registers immutable challenger versions for:
+
+- `mlb-pitcher-outs-bayes`
+- `mlb-pitcher-batters-faced-bayes`
+- `mlb-pitcher-strikeouts-bayes`
+- `mlb-pitcher-hits-allowed-bayes`
+- `mlb-pitcher-walks-bayes`
+
+It does not promote `@champion` aliases unless `--set-champion` is passed and
+the component beats the league baseline on both validation MAE and count log
+loss. Use `--quick --skip-register` for a bounded local smoke run. Generated
+posterior and evaluation JSON files live under `models/pitcher_props/` and are
+not source-controlled.
+
 ## Verification
 
 ```bash
