@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -45,11 +46,10 @@ PITCH_TYPE_SPEC = PitchModelSpec(
         "Pitch type prediction model (LSTM+attention over at-bat sequences): "
         "per-pitch type logits plus an MDN location head. Predicts what the "
         "pitcher throws, not the pitch outcome (outcome models: "
-        "mlb-pitch-result-stage-a / mlb-in-play-event-stage-b). Load with "
-        "mlflow.pytorch.load_model from this repo (requires src.ml on "
-        "sys.path and MLFLOW_ALLOW_PICKLE_DESERIALIZATION=true) and "
-        "featurize inputs with the PitchFeatureEngine state in "
-        "extra_files/feature_engine.json."
+        "mlb-pitch-result-stage-a / mlb-in-play-event-stage-b). Rebuild it "
+        "from extra_files/architecture.json plus extra_files/state_dict.pt "
+        "with mlb.ml.model_spec.load_model_from_spec, and featurize inputs "
+        "with the PitchFeatureEngine state in extra_files/feature_engine.json."
     ),
 )
 
@@ -62,9 +62,9 @@ PITCH_LOCATION_SPEC = PitchModelSpec(
         "bivariate Gaussian mixture over plate coordinates with one head per "
         "pitch type. Predicts where the pitcher throws, not the pitch "
         "outcome (outcome models: mlb-pitch-result-stage-a / "
-        "mlb-in-play-event-stage-b). Load with mlflow.pytorch.load_model "
-        "from this repo (requires src.ml on sys.path and "
-        "MLFLOW_ALLOW_PICKLE_DESERIALIZATION=true); the feature contract is "
+        "mlb-in-play-event-stage-b). Rebuild it from "
+        "extra_files/architecture.json plus extra_files/state_dict.pt with "
+        "mlb.ml.model_spec.load_model_from_spec; the feature contract is "
         "feature_columns in extra_files/config.json."
     ),
 )
@@ -73,6 +73,7 @@ PITCH_LOCATION_SPEC = PitchModelSpec(
 @dataclass(frozen=True)
 class LoadedPitchModel:
     model: torch.nn.Module
+    architecture: dict[str, Any]
     params: dict[str, str | bool | int | float]
     metrics: dict[str, float]
     metadata: dict[str, Any]
@@ -142,7 +143,7 @@ def load_pitch_type_release(run_dir: Path) -> LoadedPitchModel:
     import torch
 
     from mlb.ml.features import PitchFeatureEngine
-    from mlb.ml.model import create_model
+    from mlb.ml.model_spec import build_model, pitch_type_spec
 
     run_dir = Path(run_dir)
     model_path = run_dir / "final_model.pt"
@@ -159,24 +160,31 @@ def load_pitch_type_release(run_dir: Path) -> LoadedPitchModel:
     feature_columns = engine.get_feature_columns()
     model_type = str(config["model_type"])
 
-    model_kwargs: dict[str, Any] = {
-        "n_pitch_types": engine.n_pitch_types,
-        "n_pitchers": engine.n_pitchers,
-        "n_batters": engine.n_batters,
-        "n_features": len(feature_columns),
-        "model_type": model_type,
-        "feature_indices": engine.get_feature_indices(),
-        "hidden_dim": config["hidden_dim"],
-        "n_layers": config["n_layers"],
-        "dropout": config["dropout"],
-        "embedding_dim": config["embedding_dim"],
-        "n_location_components": config["n_location_components"],
-    }
-    if model_type in ("lstm_attention", "enhanced_attention"):
-        model_kwargs["n_attention_heads"] = config["n_attention_heads"]
-        model_kwargs["n_attention_layers"] = config["n_attention_layers"]
+    spec = pitch_type_spec(
+        n_pitch_types=engine.n_pitch_types,
+        n_pitchers=engine.n_pitchers,
+        n_batters=engine.n_batters,
+        n_features=len(feature_columns),
+        model_type=model_type,
+        feature_indices=engine.get_feature_indices(),
+        hidden_dim=config["hidden_dim"],
+        n_layers=config["n_layers"],
+        dropout=config["dropout"],
+        embedding_dim=config["embedding_dim"],
+        n_location_components=config["n_location_components"],
+        n_attention_heads=(
+            config["n_attention_heads"]
+            if model_type in ("lstm_attention", "enhanced_attention")
+            else None
+        ),
+        n_attention_layers=(
+            config["n_attention_layers"]
+            if model_type in ("lstm_attention", "enhanced_attention")
+            else None
+        ),
+    )
 
-    model = create_model(**model_kwargs)
+    model = build_model(spec)
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.eval()
 
@@ -202,6 +210,7 @@ def load_pitch_type_release(run_dir: Path) -> LoadedPitchModel:
     }
     return LoadedPitchModel(
         model=model,
+        architecture=spec,
         params=build_param_dict(train_args, prefix="arg"),
         metrics=metrics,
         metadata={
@@ -238,7 +247,7 @@ def load_pitch_location_release(run_dir: Path) -> LoadedPitchModel:
     import torch
 
     from mlb.ml.features import PITCH_TYPE_CODES
-    from mlb.ml.pitch_type_location_model import PitchTypeConditionedMDN
+    from mlb.ml.model_spec import build_model, pitch_location_spec
 
     run_dir = Path(run_dir)
     model_path = run_dir / "pitch_type_location_model.pt"
@@ -254,13 +263,14 @@ def load_pitch_location_release(run_dir: Path) -> LoadedPitchModel:
     if not isinstance(feature_columns, list) or not feature_columns:
         raise ValueError(f"Expected non-empty feature_columns in {config_path}")
 
-    model = PitchTypeConditionedMDN(
+    spec = pitch_location_spec(
         n_features=len(feature_columns),
         n_pitch_types=len(PITCH_TYPE_CODES),
         hidden_dims=config["hidden_dims"],
         n_components=config["n_components"],
         dropout=config["dropout"],
     )
+    model = build_model(spec)
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.eval()
 
@@ -275,6 +285,7 @@ def load_pitch_location_release(run_dir: Path) -> LoadedPitchModel:
     }
     return LoadedPitchModel(
         model=model,
+        architecture=spec,
         params=build_param_dict(params, prefix="arg"),
         metrics=metrics,
         metadata={
@@ -312,11 +323,19 @@ def log_registered_pitch_model(
     loaded: LoadedPitchModel,
     set_champion: bool = False,
 ) -> RegisteredPitchModel:
-    """Log one pitch model release and register an immutable version."""
+    """Log one pitch model release and register an immutable version.
+
+    The pytorch flavor is kept for interoperability, but the authoritative
+    payload every consumer in this repo reads is ``extra_files/architecture.json``
+    plus ``extra_files/state_dict.pt``. Those two carry no import paths, so a
+    version registered today survives any later rename of the defining module.
+    """
     import numpy as np
     import torch
     from mlflow.pytorch import log_model
     from mlflow.tracking import MlflowClient
+
+    from mlb.ml.model_spec import SPEC_FILENAME, STATE_DICT_FILENAME
 
     active_run = mlflow.active_run()
     if active_run is None:
@@ -331,26 +350,36 @@ def log_registered_pitch_model(
     previous_env_setting = os.environ.get(env_key)
     os.environ[env_key] = "false"
     try:
-        model_info = log_model(
-            loaded.model,
-            name=spec.logged_model_name,
-            registered_model_name=spec.registered_model_name,
-            metadata={
-                "model_collection": PITCH_MODEL_COLLECTION,
-                "model_family": spec.model_family,
-                **loaded.metadata,
-            },
-            extra_files=[str(path) for path in loaded.extra_files],
-            # Dynamic-length multi-input forward; pt2 traced-graph export
-            # does not apply (and requires torch>=2.4).
-            serialization_format="pickle",
-            pip_requirements=[
-                f"mlflow=={mlflow.__version__}",
-                f"torch=={torch.__version__}",
-                f"numpy=={np.__version__}",
-            ],
-            await_registration_for=120,
-        )
+        with tempfile.TemporaryDirectory() as staging:
+            spec_path = Path(staging) / SPEC_FILENAME
+            state_dict_path = Path(staging) / STATE_DICT_FILENAME
+            spec_path.write_text(json.dumps(loaded.architecture, indent=2))
+            torch.save(loaded.model.state_dict(), state_dict_path)
+            model_info = log_model(
+                loaded.model,
+                name=spec.logged_model_name,
+                registered_model_name=spec.registered_model_name,
+                metadata={
+                    "model_collection": PITCH_MODEL_COLLECTION,
+                    "model_family": spec.model_family,
+                    "architecture_builder": loaded.architecture["builder"],
+                    **loaded.metadata,
+                },
+                extra_files=[
+                    *(str(path) for path in loaded.extra_files),
+                    str(spec_path),
+                    str(state_dict_path),
+                ],
+                # Dynamic-length multi-input forward; pt2 traced-graph export
+                # does not apply (and requires torch>=2.4).
+                serialization_format="pickle",
+                pip_requirements=[
+                    f"mlflow=={mlflow.__version__}",
+                    f"torch=={torch.__version__}",
+                    f"numpy=={np.__version__}",
+                ],
+                await_registration_for=120,
+            )
     finally:
         if previous_env_setting is None:
             os.environ.pop(env_key, None)

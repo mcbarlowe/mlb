@@ -9,17 +9,22 @@ Champion versions are downloaded once into a version-keyed cache under
 ``models/mlflow_cache/pitch``. If the tracking server is unreachable the
 newest cached champion serves as a loud fallback so a scheduled launch
 never dies on a registry blip.
+
+Serving never unpickles the registered module. Each version ships an
+``extra_files/architecture.json`` spec plus a bare ``extra_files/state_dict.pt``,
+and the module is rebuilt from repository code, so renaming the defining module
+cannot strand an already-registered champion.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mlb.ml.mlflow_registry import PITCH_LOCATION_SPEC, PITCH_TYPE_SPEC
+from mlb.ml.model_spec import SPEC_FILENAME, STATE_DICT_FILENAME
 
 if TYPE_CHECKING:
     from mlb.ml.pitch_predictor import PitchPredictor
@@ -27,9 +32,6 @@ if TYPE_CHECKING:
 
 PITCH_MODEL_CACHE_ROOT = Path("models/mlflow_cache/pitch")
 CHAMPION_ALIAS = "champion"
-
-# Registered pitch models are pickle-serialized torch modules.
-os.environ.setdefault("MLFLOW_ALLOW_PICKLE_DESERIALIZATION", "true")
 
 
 @dataclass(frozen=True)
@@ -53,7 +55,14 @@ def _find_model_root(directory: Path) -> Path | None:
     return candidates[0].parent if candidates else None
 
 
+def _is_servable(model_root: Path) -> bool:
+    """A cached version is servable only if it carries the portable payload."""
+    extras = model_root / "extra_files"
+    return (extras / SPEC_FILENAME).is_file() and (extras / STATE_DICT_FILENAME).is_file()
+
+
 def _newest_cached(name: str) -> tuple[str, Path] | None:
+    """Newest cached version that this code can actually rebuild and serve."""
     root = PITCH_MODEL_CACHE_ROOT / name
     if not root.is_dir():
         return None
@@ -62,7 +71,7 @@ def _newest_cached(name: str) -> tuple[str, Path] | None:
         if not entry.is_dir() or not entry.name.startswith("v"):
             continue
         model_root = _find_model_root(entry)
-        if model_root is None:
+        if model_root is None or not _is_servable(model_root):
             continue
         try:
             ordinal = int(entry.name[1:])
@@ -125,20 +134,34 @@ def resolve_champion_artifacts(
         )
 
 
+def _spec_paths(source: ChampionModelSource) -> tuple[Path, Path]:
+    extras = source.model_root / "extra_files"
+    spec_path = extras / SPEC_FILENAME
+    state_dict_path = extras / STATE_DICT_FILENAME
+    if not spec_path.is_file() or not state_dict_path.is_file():
+        raise FileNotFoundError(
+            f"{source.describe()} predates portable architecture specs "
+            f"({SPEC_FILENAME} + {STATE_DICT_FILENAME} under {extras}). Its only "
+            "payload is a pickled module that names the class's import path, so "
+            "it cannot be served. Re-register the release with "
+            "scripts/import_pitch_models_to_mlflow.py --set-champion."
+        )
+    return spec_path, state_dict_path
+
+
 def load_champion_pitch_type_predictor(
     device: str = "cpu",
     tracking_uri: str | None = None,
 ) -> tuple[PitchPredictor, ChampionModelSource]:
     """Load the champion pitch type model as a ready PitchPredictor."""
-    from mlflow.pytorch import load_model
-
     from mlb.ml.features import PitchFeatureEngine
+    from mlb.ml.model_spec import load_model_from_spec
     from mlb.ml.pitch_predictor import PitchPredictor
 
     source = resolve_champion_artifacts(
         PITCH_TYPE_SPEC.registered_model_name, tracking_uri
     )
-    model = load_model(str(source.model_root), map_location="cpu")
+    model = load_model_from_spec(*_spec_paths(source), device=device)
     engine_path = source.model_root / "extra_files" / "feature_engine.json"
     if not engine_path.is_file():
         raise FileNotFoundError(
@@ -162,21 +185,18 @@ def load_champion_location_model(
     tracking_uri: str | None = None,
 ) -> tuple[PitchTypeConditionedMDN, list[str], ChampionModelSource]:
     """Load the champion location model plus its feature-column contract."""
-    from mlflow.pytorch import load_model
-
+    from mlb.ml.model_spec import load_model_from_spec
     from mlb.ml.pitch_type_location_model import PitchTypeConditionedMDN
 
     source = resolve_champion_artifacts(
         PITCH_LOCATION_SPEC.registered_model_name, tracking_uri
     )
-    model = load_model(str(source.model_root), map_location="cpu")
+    model = load_model_from_spec(*_spec_paths(source), device=device)
     if not isinstance(model, PitchTypeConditionedMDN):
         raise TypeError(
             f"{source.describe()} is not a PitchTypeConditionedMDN "
             f"(got {type(model).__name__})"
         )
-    model = model.to(device)
-    model.eval()
     config_path = source.model_root / "extra_files" / "config.json"
     if not config_path.is_file():
         raise FileNotFoundError(f"{source.describe()} has no extra_files/config.json")
