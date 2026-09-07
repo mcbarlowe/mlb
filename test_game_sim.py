@@ -4,9 +4,11 @@ import json
 import random
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
 
+from mlb.ml.features import PITCH_TYPE_CODES, PitchFeatureEngine
 from mlb.sim.base_out import BaseOutEngine
 from mlb.sim.game import (
     Batter,
@@ -18,7 +20,12 @@ from mlb.sim.game import (
 )
 from mlb.sim.matchup import effective_bat_side
 from mlb.sim.pa import FixedDistributionProvider, MatchupOutcomeProvider
-from mlb.sim.pitch_mix import PitchMixProfiles, build_pitch_mix_tables
+from mlb.sim.pitch_mix import (
+    COUNTS,
+    PitchMixProfiles,
+    PitchModelCountProfiles,
+    build_pitch_mix_tables,
+)
 
 # --- pitch mix ----------------------------------------------------------------
 
@@ -94,6 +101,67 @@ def test_inputs_by_count_covers_types_with_locations():
     }
     assert set(locations_by_type) == set(types)
     assert all(len(v) == 3 for v in locations_by_type.values())
+
+
+def test_pitch_model_count_profiles_uses_model_types_and_empirical_locations():
+    mix = pl.DataFrame(
+        {
+            "pitcher_id": [1, 1] * len(COUNTS),
+            "balls": [balls for balls, _ in COUNTS for _ in range(2)],
+            "strikes": [strikes for _, strikes in COUNTS for _ in range(2)],
+            "stretch": [False, False] * len(COUNTS),
+            "pitch_type": ["FF", "SL"] * len(COUNTS),
+            "n": [10, 10] * len(COUNTS),
+        }
+    )
+    locations = pl.DataFrame(
+        {
+            "pitcher_id": [1, 1] * len(COUNTS),
+            "balls": [balls for balls, _ in COUNTS for _ in range(2)],
+            "strikes": [strikes for _, strikes in COUNTS for _ in range(2)],
+            "stretch": [False, False] * len(COUNTS),
+            "pitch_type": ["FF", "SL"] * len(COUNTS),
+            "px": [0.1, -0.1] * len(COUNTS),
+            "pz": [2.4, 2.1] * len(COUNTS),
+        }
+    )
+    fallback = PitchMixProfiles(mix, locations, seed=0)
+    engine = PitchFeatureEngine()
+    engine.pitcher_to_idx = {1: 0}
+    engine.batter_to_idx = {2: 0}
+    engine.pitcher_ff_pct = {1: 0.5}
+    engine.pitcher_repertoire_size = {1: 2}
+    engine._fitted = True
+
+    class FakePredictor:
+        feature_engine = engine
+        lstm_model = object()
+
+        def predict_batch(self, *, lstm_features, lengths):
+            probs = np.zeros(
+                (len(COUNTS), 1, len(PITCH_TYPE_CODES)), dtype=np.float64
+            )
+            probs[:, 0, PITCH_TYPE_CODES.index("FF")] = 0.8
+            probs[:, 0, PITCH_TYPE_CODES.index("SL")] = 0.2
+            return {"type_probabilities": probs}
+
+    profiles = PitchModelCountProfiles(FakePredictor(), fallback, season=2025)
+
+    inputs = profiles.inputs_for_matchup(
+        pitcher_id=1,
+        throw_side="R",
+        batter_id=2,
+        bat_side="L",
+        is_top_half=True,
+        times_through=1,
+        n_locations=1,
+        rng=random.Random(0),
+    )
+
+    types, locations_by_type = inputs[(0, 0)]
+    assert types == pytest.approx({"FF": 0.8, "SL": 0.2})
+    assert set(locations_by_type) == {"FF", "SL"}
+    assert all(len(points) == 1 for points in locations_by_type.values())
 
 
 def test_build_pitch_mix_tables_counts_and_canonicalizes():
@@ -224,6 +292,44 @@ def test_home_dominant_game_ends_without_bottom_nine():
         assert result.away_runs == 0
         assert result.home_won
         assert result.innings == 9  # home leads after top 9; bottom 9 skipped
+
+
+def test_prefix_simulation_plays_bottom_five_when_home_leads():
+    provider = FixedDistributionProvider({"called_strike": 1.0}, {"out": 1.0})
+    halves_seen: list[tuple[int, bool, bool, bool]] = []
+
+    class _PrefixTrackingSim(GameSimulator):
+        def _play_half_inning(
+            self,
+            inning,
+            is_top,
+            batting,
+            staff,
+            opponent,
+            *,
+            allow_walkoff=True,
+            use_ghost_runner=True,
+        ):
+            halves_seen.append((inning, is_top, allow_walkoff, use_ghost_runner))
+            if inning == 1 and not is_top:
+                batting.runs += 1
+            return True
+
+    sim = _PrefixTrackingSim(
+        lambda p, b, top, stretch=False, times_through=2: provider,
+        _engine(),
+        rng=random.Random(1),
+        config=GameConfig(innings=5, max_innings=7, ghost_runner=True),
+    )
+
+    result = sim.simulate_prefix(_lineup(1), _lineup(2))
+
+    assert result.innings == 5
+    assert (result.away_runs, result.home_runs) == (0, 1)
+    assert (5, False, False, False) in halves_seen
+    assert len(halves_seen) == 10
+    assert all(not allow_walkoff for _, _, allow_walkoff, _ in halves_seen)
+    assert all(not use_ghost_runner for _, _, _, use_ghost_runner in halves_seen)
 
 
 def test_extra_innings_walkoff_with_ghost_runner():

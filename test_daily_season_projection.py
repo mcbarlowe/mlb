@@ -78,6 +78,37 @@ def test_projection_command_writes_expected_outputs(tmp_path):
     assert "--no-tune-simulation-params" in command
 
 
+def test_projection_command_passes_optional_prior_controls(tmp_path):
+    outputs = _projection_outputs(2026, tmp_path)
+    market_path = tmp_path / "market_totals.csv"
+    roster_path = tmp_path / "roster_priors.csv"
+
+    command = _projection_command(
+        args=SimpleNamespace(
+            season=2026,
+            trials=100,
+            tune_trials=20,
+            no_tune_simulation_params=True,
+            calibrate_playoff_probs=False,
+            market_win_totals=market_path,
+            market_prior_scale=0.75,
+            market_prior_decay_games=30.0,
+            roster_priors=roster_path,
+            roster_prior_scale=0.50,
+            roster_prior_decay_games=14.0,
+        ),
+        as_of=date(2026, 8, 16),
+        outputs=outputs,
+    )
+
+    assert command[command.index("--market-win-totals") + 1] == str(market_path)
+    assert command[command.index("--market-prior-scale") + 1] == "0.75"
+    assert command[command.index("--market-prior-decay-games") + 1] == "30.0"
+    assert command[command.index("--roster-priors") + 1] == str(roster_path)
+    assert command[command.index("--roster-prior-scale") + 1] == "0.5"
+    assert command[command.index("--roster-prior-decay-games") + 1] == "14.0"
+
+
 def test_x_url_from_post_id_supports_plain_and_multi_ids():
     assert _x_url_from_post_id("2089093870017458335") == (
         "https://x.com/i/web/status/2089093870017458335"
