@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from mlb.live.card_html import HtmlCardRenderer
+from barlowe_graphics import HtmlCardRenderer
 from mlb.live.publisher import (
     POST_PROVIDER_CHOICES,
     PredictionPost,

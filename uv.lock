@@ -308,6 +308,15 @@ wheels = [
 ]
 
 [[package]]
+name = "barlowe-graphics"
+version = "0.2.0"
+source = { git = "ssh://git@github.com/mcbarlowe/barlowe-graphics.git?rev=v0.2.0#9a1d31b47e370e791dfdd126536f7f4415454579" }
+dependencies = [
+    { name = "numpy" },
+    { name = "playwright" },
+]
+
+[[package]]
 name = "basedpyright"
 version = "1.39.9"
 source = { registry = "https://pypi.org/simple" }
@@ -2019,6 +2028,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "atproto" },
+    { name = "barlowe-graphics" },
     { name = "catboost" },
     { name = "httpx" },
     { name = "matplotlib" },
@@ -2061,6 +2071,7 @@ dev = [
 requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
     { name = "atproto", specifier = ">=0.0.55" },
+    { name = "barlowe-graphics", git = "ssh://git@github.com/mcbarlowe/barlowe-graphics.git?rev=v0.2.0" },
     { name = "catboost", specifier = ">=1.2.8" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jupyter", marker = "extra == 'notebooks'", specifier = ">=1.1.1" },

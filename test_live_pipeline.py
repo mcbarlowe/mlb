@@ -602,7 +602,8 @@ def test_panel_xy_keeps_zone_inside_panel():
 def test_html_renderer_end_to_end(tmp_path: Path):
     import pytest
 
-    from mlb.live.card_html import HtmlCardRenderer, render_card_png
+    from barlowe_graphics import HtmlCardRenderer
+    from mlb.live.card_html import render_card_png
 
     renderer = HtmlCardRenderer()
     try:
@@ -1075,7 +1076,8 @@ def test_html_renderer_works_inside_asyncio_loop(tmp_path: Path):
 
     import pytest
 
-    from mlb.live.card_html import HtmlCardRenderer, render_card_png
+    from barlowe_graphics import HtmlCardRenderer
+    from mlb.live.card_html import render_card_png
 
     probe = HtmlCardRenderer()
     try:

@@ -1624,7 +1624,7 @@ def _write_graphics(
     labeled_projections: Sequence[LabeledProjection],
     teams: dict[int, TeamInfo],
 ) -> None:
-    from mlb.live.card_html import HtmlCardRenderer
+    from barlowe_graphics import HtmlCardRenderer
 
     wanted = [
         labeled

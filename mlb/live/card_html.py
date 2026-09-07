@@ -1,9 +1,8 @@
-"""Broadcast-style pitch card rendered with HTML/CSS in headless Chromium.
+"""Broadcast-style pitch-card HTML rendered through ``barlowe_graphics``.
 
-Matplotlib caps out on typography and finish; this renderer builds the
-card as a dark-theme HTML page (system SF/Helvetica stack, CSS gradients,
-glow-composited density layer) and screenshots it with Playwright at 2x
-as a fast social-ready JPEG.
+Matplotlib caps out on typography and finish; these builders compose a
+dark-theme HTML page (system SF/Helvetica stack, CSS gradients,
+glow-composited density layer) for Playwright screenshot rendering.
 """
 
 from __future__ import annotations
@@ -11,9 +10,7 @@ from __future__ import annotations
 import base64
 import io
 from pathlib import Path
-from queue import Queue
-from threading import Event, Thread
-from typing import Self
+from typing import TYPE_CHECKING
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -25,6 +22,9 @@ from mlb.ml.pitch_predictor import (
     PitchPrediction,
     fetch_mlb_headshot,
 )
+
+if TYPE_CHECKING:
+    from barlowe_graphics import HtmlCardRenderer
 
 CARD_W = 1200
 CARD_H = 675
@@ -593,130 +593,6 @@ def build_card_html(
 </div></body></html>"""
 
 
-class HtmlCardRenderer:
-    """Renders card HTML to JPEG with a persistent Chromium worker thread."""
-
-    def __init__(self) -> None:
-        self._thread: Thread | None = None
-        self._requests: Queue | None = None
-        self._ready = Event()
-        self._startup_error: BaseException | None = None
-
-    def _worker_main(self) -> None:
-        from playwright.sync_api import sync_playwright
-
-        try:
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
-                page = browser.new_page(
-                    viewport={"width": CARD_W, "height": CARD_H},
-                    device_scale_factor=SCALE,
-                )
-                self._ready.set()
-                while True:
-                    assert self._requests is not None
-                    item = self._requests.get()
-                    if item is None:
-                        break
-                    html, out_path, width, height, result_q = item
-                    try:
-                        result_q.put(
-                            self._render_with_page(page, html, out_path, width, height)
-                        )
-                    except BaseException as exc:
-                        result_q.put(exc)
-                browser.close()
-        except BaseException as exc:
-            self._startup_error = exc
-            self._ready.set()
-
-    def _ensure_page(self) -> None:
-        if self._thread is not None:
-            return
-        self._requests = Queue()
-        self._ready = Event()
-        self._startup_error = None
-        self._thread = Thread(
-            target=self._worker_main,
-            name="HtmlCardRenderer",
-            daemon=True,
-        )
-        self._thread.start()
-        self._ready.wait()
-        if self._startup_error is not None:
-            self.close()
-            raise RuntimeError("Failed to start Playwright card renderer") from self._startup_error
-
-    @staticmethod
-    def _render_with_page(
-        page,
-        html: str,
-        out_path: Path,
-        width: int,
-        height: int,
-    ) -> Path:
-        page.set_viewport_size({"width": width, "height": height})
-        page.set_content(html, wait_until="load")
-        jpeg_path = out_path.with_suffix(".jpg")
-        for quality in _JPEG_QUALITY_CANDIDATES:
-            page.screenshot(
-                path=str(jpeg_path),
-                type="jpeg",
-                quality=quality,
-                full_page=False,
-            )
-            if jpeg_path.stat().st_size <= _BLOB_LIMIT_BYTES:
-                return jpeg_path
-        raise RuntimeError(
-            f"Card image {jpeg_path} is {jpeg_path.stat().st_size:,} bytes even "
-            f"at JPEG quality {_JPEG_QUALITY_CANDIDATES[-1]}; Bluesky blobs must "
-            f"stay under {_BLOB_LIMIT_BYTES:,} bytes."
-        )
-
-    def render_with_size(
-        self,
-        html: str,
-        out_path: Path,
-        *,
-        width: int,
-        height: int,
-    ) -> Path:
-        self._ensure_page()
-        assert self._requests is not None
-        result_q = Queue(maxsize=1)
-        self._requests.put((html, out_path, width, height, result_q))
-        result = result_q.get()
-        if isinstance(result, BaseException):
-            raise result
-        return result
-
-    def render(self, html: str, out_path: Path) -> Path:
-        return self.render_with_size(html, out_path, width=CARD_W, height=CARD_H)
-
-    def __enter__(self) -> Self:
-        """Start the worker eagerly so a caller can hold one browser open."""
-        self._ensure_page()
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
-
-    def close(self) -> None:
-        requests = self._requests
-        thread = self._thread
-        self._requests = None
-        self._thread = None
-        self._startup_error = None
-        if requests is not None:
-            requests.put(None)
-        if thread is not None:
-            thread.join(timeout=5)
-
-
-
-# Bluesky rejects image blobs above ~976 KB; keep comfortable headroom.
-_BLOB_LIMIT_BYTES = 900_000
-_JPEG_QUALITY_CANDIDATES = (90, 85, 80, 75)
 
 def render_card_png(
     prediction: PitchPrediction,

@@ -9,8 +9,8 @@ from math import ceil
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from barlowe_graphics import HtmlCardRenderer
 from mlb.live.card_html import (
-    HtmlCardRenderer,
     _brand_footer_html,
     circular_headshot_png,
     team_logo_data_url,

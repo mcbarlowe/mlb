@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     # Imported lazily at call time so this module never pulls playwright in.
-    from mlb.live.card_html import HtmlCardRenderer
+    from barlowe_graphics import HtmlCardRenderer
 
 import requests
 

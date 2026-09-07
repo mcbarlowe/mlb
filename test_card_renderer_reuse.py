@@ -97,7 +97,7 @@ def test_without_a_renderer_one_is_owned_and_closed(tmp_path, monkeypatch) -> No
         created.append(renderer)
         return renderer
 
-    monkeypatch.setattr("mlb.live.card_html.HtmlCardRenderer", factory)
+    monkeypatch.setattr("barlowe_graphics.HtmlCardRenderer", factory)
 
     write_projection_graphics(_projection(2026), TEAMS, tmp_path)
 
@@ -120,7 +120,7 @@ def test_renderer_is_closed_even_when_a_render_raises(tmp_path, monkeypatch) -> 
         created.append(renderer)
         return renderer
 
-    monkeypatch.setattr("mlb.live.card_html.HtmlCardRenderer", factory)
+    monkeypatch.setattr("barlowe_graphics.HtmlCardRenderer", factory)
 
     try:
         write_projection_graphics(_projection(2026), TEAMS, tmp_path)

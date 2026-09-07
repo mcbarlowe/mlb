@@ -184,7 +184,8 @@ class LiveGamePredictionService:
         """Render a card, preferring the HTML renderer with mpl fallback."""
         if self.card_style == "html":
             try:
-                from mlb.live.card_html import HtmlCardRenderer, render_card_png
+                from barlowe_graphics import HtmlCardRenderer
+                from mlb.live.card_html import render_card_png
 
                 if self._html_renderer is None:
                     self._html_renderer = HtmlCardRenderer()

@@ -1,8 +1,7 @@
 """Game simulation result card: win probability, projected scores, run totals.
 
-Same dark-card look and rendering stack as the pitch prediction card
-(`src/live/card_html.py`); consumes Monte Carlo `GameResult` lists from
-`src.sim.game`.
+Uses the shared ``barlowe_graphics`` renderer and consumes Monte Carlo
+``GameResult`` lists from ``mlb.sim.game``.
 """
 
 from __future__ import annotations
@@ -11,13 +10,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from mlb.live.card_html import (
-    CARD_H,
-    CARD_W,
-    HtmlCardRenderer,
-    _brand_footer_html,
-    team_logo_data_url,
-)
+from barlowe_graphics import HtmlCardRenderer
+from mlb.live.card_html import CARD_H, CARD_W, _brand_footer_html, team_logo_data_url
 from mlb.sim.game import GameResult
 
 ACCENT = "#F59E0B"

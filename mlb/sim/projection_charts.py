@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Imported lazily at call time so this module never pulls playwright in.
-    from mlb.live.card_html import HtmlCardRenderer
+    from barlowe_graphics import HtmlCardRenderer
 
 from mlb.sim.season import SeasonProjection, TeamInfo, TeamProjection
 
@@ -34,7 +34,7 @@ def write_projection_graphics(
     projection_type: str = "model",
     renderer: HtmlCardRenderer | None = None,
 ) -> tuple[Path, Path]:
-    from mlb.live.card_html import HtmlCardRenderer
+    from barlowe_graphics import HtmlCardRenderer
 
     output_dir.mkdir(parents=True, exist_ok=True)
     file_stem = f"season_{projection.season}_{projection_type}"
