@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Mirror this repository's docs into Notion after a commit lands.
+#
+# Install with: scripts/install_git_hooks.sh
+#
+# Two properties this hook must have, both learned the hard way:
+#
+#   1. It NEVER blocks the commit. A sync makes 60-1500 requests against
+#      Notion's ~3 requests/second limit, so it runs detached with its output
+#      in a log. The commit is already written by the time post-commit fires,
+#      so there is nothing useful to fail.
+#   2. It costs nothing when no mirrored file changed. `--if-stale` compares
+#      content hashes against data/notion/sync_state.json and exits before
+#      opening a connection, so ordinary code commits are free.
+#
+# The sync itself takes an flock, so back-to-back commits cannot race.
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$repo_root" || exit 0
+
+# uv lives outside the PATH that GUI git clients hand to hooks.
+uv="/usr/local/bin/uv"
+if [ ! -x "$uv" ]; then
+    uv="$(command -v uv 2>/dev/null)" || exit 0
+fi
+[ -n "$uv" ] || exit 0
+
+log="$repo_root/data/notion/sync.log"
+mkdir -p "$(dirname "$log")" || exit 0
+
+printf '\n=== %s post-commit %s ===\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
+    "$(git rev-parse --short HEAD 2>/dev/null)" >>"$log"
+
+nohup "$uv" run python scripts/sync_notion_docs.py --if-stale \
+    </dev/null >>"$log" 2>&1 &
+
+exit 0
