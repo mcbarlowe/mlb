@@ -4,12 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from mlb.sim.team_strength import FEATURE_NAMES
 from scripts.evaluate_team_strength import (
     _resolve_season_windows,
     evaluate_rolling_seasons,
     paired_block_improvement_interval,
 )
-from mlb.sim.team_strength import FEATURE_NAMES
 
 
 def test_logged_training_window_must_match_terminal_rolling_fold() -> None:

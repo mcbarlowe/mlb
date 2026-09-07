@@ -186,7 +186,7 @@ uv run python verify_database.py
 Use the season projection backtest to evaluate preseason division and playoff forecasts against final standings. The script writes model, flat-schedule baseline, improvement, calibration, summary CSVs, and optional playoff-probability graphics. The optional `--market-win-totals` input is a caller-supplied model prior; market collection, normalization, and storage remain outside this repository.
 
 ```bash
-uv run python scripts/backtest_season_projections.py \
+uv run mlb-backtest-season-projections \
   --seasons 2022 2023 2024 2025 \
   --trials 5000 \
   --tune-trials 1000 \
@@ -200,10 +200,10 @@ Daily live-season graphics:
 
 ```bash
 # Refresh pre-cutoff games, render current-season JPEGs, and dry-run the social post
-uv run python scripts/run_daily_season_projection.py
+uv run mlb-daily-season-projection
 
 # Publish the generated playoff-probability and playoff-stage graphics to X
-uv run python scripts/run_daily_season_projection.py --post --post-provider x
+uv run mlb-daily-season-projection --post --post-provider x
 ```
 
 The daily runner bounds data mutation to current-season regular-season games that are either non-final before `--as-of` or within `--refresh-lookback-days` of it. It overwrites those raw live-feed JSON files, force-refreshes only those `game_pk`s into PostgreSQL, refuses to project while pre-`--as-of` games remain non-final, writes `output/season_projection_<season>/season_<season>_model_*.{csv,jpg}`, and records the posted ID in the output directory so a same-day relaunch does not duplicate the X post.
@@ -436,16 +436,16 @@ Predict the next pitch of in-progress games and publish pitch cards to Bluesky, 
 ```bash
 # Dry run for today's schedule: waits for first pitch, polls live games,
 # saves cards to output/live_cards/<game_pk>/ without posting
-uv run python scripts/run_live_pipeline.py
+uv run mlb-live-pipeline
 
 # Post to X
-uv run python scripts/run_live_pipeline.py --post --post-provider x
+uv run mlb-live-pipeline --post --post-provider x
 
 # Cross-post to Bluesky and X
-uv run python scripts/run_live_pipeline.py --post --post-provider both
+uv run mlb-live-pipeline --post --post-provider both
 
 # Follow one game only
-uv run python scripts/run_live_pipeline.py --game-pk 823514
+uv run mlb-live-pipeline --game-pk 823514
 ```
 
 How it works:
@@ -465,10 +465,10 @@ Generate one morning board image covering every preview game on the slate:
 
 ```bash
 # Dry run: build the board image and write probable-starter state locally
-uv run python scripts/run_daily_sim_slate.py
+uv run mlb-daily-sim-slate
 
 # Cross-post the board to Bluesky and X, then keep polling preview games for probable-starter changes
-uv run python scripts/run_daily_sim_slate.py --post --post-provider both --watch-starters
+uv run mlb-daily-sim-slate --post --post-provider both --watch-starters
 ```
 
 How it works:

@@ -15,7 +15,6 @@ from mlflow.sklearn import log_model as log_sklearn_model
 from sklearn.linear_model import LogisticRegression
 
 import mlb.sim.team_strength as team_strength_module
-from scripts.evaluate_team_strength import log_model_version, score
 from mlb.sim.team_strength import (
     DEFAULT_STRENGTH_CONFIG,
     FEATURE_NAMES,
@@ -31,6 +30,7 @@ from mlb.sim.team_strength import (
     TeamStrengthPredictor,
     build_live_strength_predictor,
 )
+from scripts.evaluate_team_strength import log_model_version, score
 
 
 def _fitted_model() -> tuple[StrengthModelFit, pd.DataFrame, pd.DataFrame]:

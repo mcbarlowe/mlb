@@ -25,8 +25,8 @@ PostgreSQL uses `MLB_DB_NAME`, `MLB_DB_USER`, `MLB_DB_PASSWORD`, `MLB_DB_HOST`, 
 ## Daily ETL
 
 ```bash
-uv run python scripts/run_daily_postgres_etl.py
-uv run python scripts/run_daily_postgres_etl.py --date 2026-08-27
+uv run mlb-daily-postgres-etl
+uv run mlb-daily-postgres-etl --date 2026-08-27
 ```
 
 The command exits nonzero for fetch, processing, unresolved-game, or backfill failures. It performs no betting settlement or reporting.
@@ -49,10 +49,10 @@ uv run python scripts/install_betting_data_contracts.py
 Model-only prediction producers:
 
 ```bash
-uv run python scripts/publish_moneyline_predictions.py \
+uv run mlb-publish-moneyline-predictions \
   --date 2026-08-28 --output-json /tmp/moneyline.json
 
-uv run python scripts/publish_prop_predictions.py \
+uv run mlb-publish-prop-predictions \
   --date 2026-08-28 \
   --request-json /tmp/prop-request.json \
   --output-json /tmp/prop-predictions.json
@@ -92,7 +92,7 @@ not source-controlled.
 
 ```bash
 uv run pytest -q
-uv run ruff check src scripts test_*.py
+uv run ruff check .
 uv run basedpyright
 ```
 

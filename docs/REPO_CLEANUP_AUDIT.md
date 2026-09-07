@@ -1,238 +1,104 @@
 # Repository Cleanup Audit
 
-Date: 2026-08-20
+Last applied: 2026-09-07. Supersedes the 2026-08-20 classification report,
+which was written against the `src/` layout and the betting code that
+`22a32b0`, `0191fe6`, `ed9c2d2`, and `4e6080b` removed.
 
-Purpose: separate durable MLB repo infrastructure from generated artifacts, stale documents, exploratory scripts, and failed-strategy code paths.
+Purpose: keep durable MLB infrastructure separate from generated artifacts,
+one-off exploration, and code that no longer has a caller.
 
-## Executive decision
+## Current shape
 
-Keep the infrastructure, registry contracts, tests, and final evidence. Archive or delete generated artifacts, superseded docs, unused endpoint wrappers, and failed-strategy scripts from the active path.
+- Tracked files: 290.
+- Python: 122 modules under `mlb/`, 54 scripts under `scripts/`, 50 root `test_*.py`.
+- Ignored local artifact trees: `data/` ~208 MB, `models/` ~143 MB. `output/`,
+  `catboost_info/`, `mlruns/`, and `mlflow.db` are ignored and currently small
+  or absent; the historical `output/` tree was archived to iCloud on 2026-09-05.
+- `.gitignore` excludes `/data/`, `/models/`, `/output/`, `/catboost_info/`,
+  `/mlflow.db`, `/mlruns/`, `/mlartifacts/`, `/artifacts/`, and `*.log`.
 
-The repository currently mixes two things:
+## Applied 2026-09-07
 
-1. Durable operational infrastructure: ETL, Postgres schema/loading, MLflow model contracts, simulation, live publishing, odds/paper-trading stores, and tests.
-2. Experimental debris: one-off notebooks, logs, obsolete docs, failed-strategy scripts, unused endpoint wrappers, and local artifacts.
+| Change | Reason |
+|---|---|
+| Deleted `scratch.py` | Throwaway schedule-dump script, no references. |
+| Deleted `f5_diagnostics.py` | Queried `{mlb_schema}.f5_odds`; that table exists only in the `betting` schema, so the script could not run and its subject is out of this repository's ownership. |
+| Deleted `notebooks/pitch_eda_executed.ipynb` | 2.4 MB of executed output for the tracked `notebooks/pitch_eda.ipynb`. |
+| Deleted `at_bat_analysis.png`, `sample_pitch_card.png` | Outputs of `scripts/analyze_at_bat.py` and `scripts/create_sample_pitch_card.py`. |
+| Deleted root `com.barloweanalytics.daily-season-projection.plist` | Hand-edited copy with hardcoded user paths, superseded by the templated `mlb/deploy/resources/launchd/` plist that `mlb-install-agents` renders. |
+| Untracked `logs/*.log` (4.1 MB) | Local run output; `*.log` was already ignored. |
+| Moved `cleaning_pitch_data.ipynb` to `notebooks/` | Root clutter; `notebooks/` is already excluded from pytest and ruff. |
+| Moved `GUMBOPDF3-29.pdf` to `docs/references/gumbo_documentation.pdf` | It is the MLBAM GUMBO feed specification, which is the format `mlb/data/game_feed_data.py` parses. Reference material, not junk. |
+| Removed `psycopg2-binary` | No `psycopg2` import anywhere; the code is `psycopg` v3 throughout. |
+| Moved `xgboost` to the `training` extra | `PitchXGBoostModel._require_xgboost` already imports it lazily and raises a clear message when absent, and no deployed agent trains XGBoost. |
+| Repointed documented commands at console entry points | `scripts/run_daily_postgres_etl.py`, `run_daily_season_projection.py`, `run_daily_sim_slate.py`, `run_live_pipeline.py`, `backtest_season_projections.py`, `build_pitcher_movement_profiles.py`, and the two `publish_*` scripts became `mlb-*` entry points in `e415bba`; README, `docs/PIPELINE.md`, and `.omp/AGENTS.md` still told readers to run the deleted files. |
 
-## Audit evidence
+Already handled by the betting split, so no longer listed as open: the
+evidence scripts under `scripts/test_*.py`, the failed-strategy futures and
+Kalshi scripts, and the superseded betting docs. `jupyter` and `seaborn` moved
+to optional extras in `e415bba`.
 
-- Tracked files: 388.
-- Python files reviewed by static scan: 301.
-  - `src/`: 100 Python files.
-  - `scripts/`: 134 Python files.
-- Large ignored local artifact directories:
-  - `data/`: ~3.6 GB.
-  - `output/`: ~429 MB.
-  - `models/`: ~149 MB.
-  - `logs/`: ~4.1 MB.
-- `.gitignore` already excludes `/data/`, `/models/`, `/output/`, `/catboost_info/`, `/mlflow.db`, `/mlruns/`, and `*.log`.
-- Tracked generated-ish files still present include 5 logs, 2 notebooks, 3 model JSONs, 5 resource CSVs, and 2 sample JSON fixtures.
-- `README.md` states the repo-level betting verdict: infrastructure is the asset; most forecasting/betting edges failed; line shopping is the only verified edge.
+Root `AGENTS.md` and `CLAUDE.md` stay. They are the discovery convention for
+coding agents and both are mirrored into Notion; the earlier suggestion to
+delete them as "thin stubs" was wrong.
 
-## Keep hard
+## Still open
 
-| Area | Keep | Why |
-|---|---|---|
-| ETL/database spine | `src/etl/`, `src/data/`, `src/database/postgres_handler.py`, `scripts/backfill_postgres.py`, `scripts/run_daily_postgres_etl.py`, `verify_database.py` | Canonical schedule/live-feed/backfill/Postgres pipeline. Operational docs and tests cover it. |
-| Used API wrappers | `src/endpoints/base_api.py`, `game_feed.py`, `schedule.py`, `positions.py`, `pitch_types.py`, `event_types.py`, `game_types.py` | Imported by ETL/reference loaders/live paths. |
-| Model serving contracts | `src/ml/mlflow_registry.py`, `src/ml/mlflow_artifacts.py`, `src/ml/pitch_predictor.py`, `src/outcome/*mlflow*`, `src/outcome/inference.py` | Registry-driven champion resolution and artifact caching. Production-critical. |
-| Current training contracts | `src/ml/train.py`, `src/ml/pitch_type_location_model.py`, `src/ml/features.py`, `src/ml/dataset.py`, `scripts/train_models_with_mlflow.py`, `scripts/train_outcome_models.py`, `scripts/import_*_to_mlflow.py` | Needed to retrain/register served pitch and outcome models. |
-| Simulation core | `src/sim/`, `scripts/simulate_game.py`, `scripts/calibrate_sim.py`, `scripts/fit_pa_outcome_calibration.py`, `scripts/build_base_out_tables.py`, `scripts/export_pitch_mix.py`, `scripts/publish_sim_artifacts.py` | Calibrated simulator is reusable infrastructure even when betting edges fail. |
-| Betting infrastructure | `src/betting/`, especially odds stores, line shopping, gates, paper ledgers | Stores/contracts are reusable; strategy conclusions sit above them. |
-| Active live/ops scripts | `scripts/shop_batter_props.py`, `scripts/run_prop_shop.sh`, `scripts/run_daily_season_projection.py`, `scripts/run_daily_sim_slate.py`, `scripts/run_live_pipeline.py`, `scripts/evaluate_team_strength.py`, prop model registration/build scripts | Referenced by repo notes or docs as active/operational. |
-| Tests | Root `test_*.py` files | Keep. They defend contracts. Organization is poor, but tests are not dead weight. |
-| Final docs | `README.md`, `docs/FINDINGS.md`, `docs/PIPELINE.md`, `docs/FUTURES_AUDIT.md`, likely `docs/win_model_recency_analysis.md` | Current source of truth and final evidence. |
-| Fixtures/resources | `example_json_files/example_live_feed.json`, `example_json_files/api_structure.json`, `resources/*.csv`, tracked `models/props/*.json`, tracked `models/sim/park_factors.json` | Fixtures and small source-like inputs/fallback artifacts. Keep unless registry-only serving becomes mandatory. |
+### Modules with no inbound reference
 
-## Delete or untrack with high confidence
+Re-verified 2026-09-07 against every tracked `.py`, `.md`, `.toml`, and `.sh`:
 
-| Candidate | Action | Evidence / risk |
-|---|---|---|
-| `scratch.py` | Delete | No references. Throwaway API script. |
-| `logs/*.log` tracked files | Untrack/delete from repo | `.gitignore` already says `*.log`; logs are local run output. |
-| `notebooks/pitch_eda_executed.ipynb` | Delete/untrack | Executed notebook output. Repo notes treat executed notebooks as generated. |
-| `cleaning_pitch_data.ipynb` | Delete or move to archived notes | Root one-off notebook, not referenced. |
-| `at_bat_analysis.png`, `sample_pitch_card.png` | Move to `output/` or delete | Generated by `scripts/analyze_at_bat.py` / `scripts/create_sample_pitch_card.py`; not source. |
-| `GUMBOPDF3-29.pdf` | Delete or move to `docs/references/` | No repo references found. Low confidence only because provenance is unknown. |
-| Root `AGENTS.md`, root `CLAUDE.md` | Delete or consolidate | Thin forwarding stubs; real guidance is `.omp/AGENTS.md`. |
-| `com.barloweanalytics.h2h-close-saver.plist` | Delete local copy | Points to `/Users/matthewbarlowe/code/python/mlb-paper-trading/...`; not tracked by Git. |
-| Root `com.barloweanalytics.daily-season-projection.plist` | Move under `scripts/` as template or keep only if this repo owns deployment | Hardcoded user paths. Tracked. Bad root clutter. |
-| `pyproject.toml` dependency `psycopg2-binary` | Remove | Code imports `psycopg` v3 everywhere; no `psycopg2` imports found. |
+- `mlb/endpoints/game_status.py`
+- `mlb/endpoints/live_feed.py`
+- `mlb/endpoints/logical_events.py`
+- `mlb/endpoints/schedule_types.py`
+- `mlb/endpoints/sky.py`
+- `mlb/endpoints/timestamps.py`
+- `mlb/endpoints/venues.py`
+- `mlb/endpoints/wind_direction.py`
+- `mlb/ml/lstm_predictor.py`
+- `mlb/model_evaluation/market_inputs.py`
+- `mlb/model_evaluation/moneyline_inputs.py`
 
-## Source code dead weight / archive candidates
+`mlb/endpoints/live_feed.py` duplicates `GameFeed` plus `GameFeedData` and is
+the clearest deletion. The other seven endpoint wrappers are only worth keeping
+if the intent is a complete Stats API client library; decide that once rather
+than case by case. `mlb/ml/lstm_predictor.py` duplicates
+`mlb/ml/pitch_predictor.py`. All of `mlb/model_evaluation/` is unreachable: its
+two modules reproduce leak-free moneyline inputs for historical evaluation and
+nothing imports either.
 
-Static import graph found these `src/` modules with no non-test inbound references:
+Before deleting any of them, re-run the reference check over tracked files and
+run the narrow affected tests; keep batches small.
 
-- `src/endpoints/live_feed.py`
-- `src/endpoints/game_status.py`
-- `src/endpoints/timestamps.py`
-- `src/endpoints/venues.py`
-- `src/endpoints/wind_direction.py`
-- `src/endpoints/sky.py`
-- `src/endpoints/schedule_types.py`
-- `src/endpoints/logical_events.py`
-- `src/ml/lstm_predictor.py`
+### Scripts that need `data/processed/livefeeds`
 
-Recommended split:
+`analyze_at_bat.py`, `create_sample_pitch_card.py`, `evaluate_combined_model.py`,
+`example_pitch_prediction.py`, `generate_*_pitch_cards.py`, and
+`save_feature_engine_for_lstm.py` default to that tree, which was deleted on
+2026-09-05 after every pitch key was proved present in `mlb.pitches`. They are
+not broken — `mlb/etl/get_live_feeds.py` regenerates the tree from raw feeds —
+but they cannot run against a fresh clone without that step.
 
-1. Delete/archive `src/endpoints/live_feed.py` first. It duplicates `GameFeed`/`GameFeedData` and is unreachable.
-2. Archive the unused thin endpoint wrappers unless the repo is intentionally maintaining a complete Stats API wrapper library.
-3. Archive `src/ml/lstm_predictor.py` after confirming no external import. It duplicates `src/ml/pitch_predictor.py`; no repo import references it.
+### Test layout
 
-## Scripts: keep active
+50 `test_*.py` files sit at the repository root, which makes real tests, helper
+modules, and fixtures visually indistinguishable. Moving them into
+`tests/{etl,ml,outcome,sim,live,analysis}/` and switching `testpaths` from `.`
+to `tests` is worth doing, but it produces a large diff and should land on its
+own after code changes settle.
 
-Keep these in the active `scripts/` path:
+### Plan documents
 
-- `scripts/backfill_postgres.py`
-- `scripts/run_daily_postgres_etl.py`
-- `scripts/train_models_with_mlflow.py`
-- `scripts/train_outcome_models.py`
-- `scripts/import_pitch_models_to_mlflow.py`
-- `scripts/import_outcome_models_to_mlflow.py`
-- `scripts/register_prop_model_mlflow.py`
-- `scripts/shop_batter_props.py`
-- `scripts/run_prop_shop.sh`
-- `scripts/settle_prop_alerts.py`
-- `scripts/build_prop_aging_curves.py`
-- `scripts/build_prop_park_factors.py`
-- `scripts/evaluate_team_strength.py`
-- `scripts/run_daily_season_projection.py`
-- `scripts/run_daily_sim_slate.py`
-- `scripts/run_live_pipeline.py`
-- `scripts/simulate_game.py`
-- `scripts/calibrate_sim.py`
-- `scripts/fit_pa_outcome_calibration.py`
-- `scripts/build_base_out_tables.py`
-- `scripts/export_pitch_mix.py`
-- `scripts/publish_sim_artifacts.py`
+`docs/pitcher_strikeout_model_plan.md` describes a `strikeout_model.py` design
+that shipped instead as the five-market `mlb/pitcher_props/` package, and
+`docs/training_plan.md` references a `scripts/evaluate_model.py` that does not
+exist. Both feed the Notion Tasks database, so reconcile them there rather than
+deleting.
 
-## Scripts: keep as evidence, not active ops
+## Verification used for cleanup batches
 
-These are valuable as reproducibility evidence, not active operational code. Move to `scripts/evidence/` or `docs/evidence/`. Rename `scripts/test_*.py` evidence scripts so pytest does not treat them as tests.
-
-- `scripts/test_june_scoped.py`
-- `scripts/analyze_monthly_performance.py`
-- `scripts/test_training_window_recency.py`
-- `scripts/survey_mlb_market_holds.py`
-- `scripts/test_beat_the_opener_ceiling.py`
-- `scripts/test_entry_point_ceiling.py`
-- `scripts/screen_movement_signal.py`
-- `scripts/backtest_moneyline_lineshop.py`
-- `scripts/review_futures_flat.py`
-- `scripts/test_playoff_calibration.py`
-- `scripts/reload_futures_preseason_odds.py`
-- `scripts/test_pinnacle_attribution.py`
-- `scripts/fetch_pinnacle_history.py`
-
-## Scripts: archive/delete unless actively experimenting
-
-These belong to failed or exploratory strategy branches. Preserve final evidence elsewhere; stop presenting them as active tools.
-
-- `scripts/train_enhanced.py`
-- `scripts/train_per_pitcher_models.py`
-- `scripts/finetune_location.py`
-- `scripts/run_xgboost_training.py`
-- `scripts/run_combined_training.py`
-- `scripts/evaluate_combined_model.py`
-- `scripts/backtest_futures.py`
-- `scripts/paper_trade_futures.py`
-- `scripts/paper_trade_futures_from_db.py`
-- `scripts/settle_futures_paper_trades.py`
-- `scripts/totals_clv_report.py`
-- `scripts/sim_totals_eval.py`
-- `scripts/f5_market_calibration.py`
-- `scripts/f5_residual_calibration.py`
-- `scripts/test_f5_line_bias.py`
-- `scripts/test_f5_totals_efficiency.py`
-- `scripts/test_totals_market_bias.py`
-- `scripts/test_prop_market_bias.py`
-- `scripts/test_win_totals_strategy.py`
-- `scripts/build_starter_stuff_features.py`
-- `scripts/kalshi_*.py` unless Kalshi is now an active thesis.
-- `scripts/kalshi_feature_test.py`
-
-## Docs cleanup
-
-Delete/archive all docs already marked superseded:
-
-- `docs/SUMMARY.md`
-- `docs/EXECUTIVE_SUMMARY.md`
-- `docs/FINAL_BACKTEST_RESULTS.md`
-- `docs/FUTURES_BACKTEST_COMPLETE.md`
-- `docs/HISTORICAL_DATA_STATUS.md`
-- `docs/STAKING_METHOD.md`
-- `docs/historical_futures_backtest.md`
-
-Consolidate or archive:
-
-- `docs/FUTURES_BACKTEST_SUMMARY.md`
-- `docs/MONEYLINE_BACKTEST_FINAL.md`
-- `docs/futures_betting_workflow.md`
-- `docs/training_plan.md`
-- `docs/evaluation_metrics.md`
-- `docs/model_documentation.md`
-- `docs/pitch_outcome_model_plan.md`
-
-Reason: `README.md`, `docs/FINDINGS.md`, `docs/PIPELINE.md`, and `docs/FUTURES_AUDIT.md` now carry the current conclusions. The older docs reference stale model paths, missing scripts, or superseded results.
-
-## Dependency trim
-
-High confidence:
-
-- Remove `psycopg2-binary`; only `psycopg` v3 is used.
-
-Conditional:
-
-- Move `jupyter` to dev dependencies, or remove it if notebooks are archived.
-- Remove `xgboost` if `run_xgboost_training.py` / `PitchXGBoostModel` are archived.
-- Keep `pyarrow` unless every pandas/Polars parquet path is verified to work without it.
-- Keep `seaborn` if `src/ml/evaluate.py` plotting remains.
-- Keep `atproto` if Bluesky posting remains.
-
-## Test organization
-
-Do not delete tests. Move them later into a domain layout:
-
-```text
-tests/
-  etl/
-  ml/
-  outcome/
-  sim/
-  betting/
-  live/
-  evidence/
-```
-
-Then update `pyproject.toml` from:
-
-```toml
-testpaths = ["."]
-```
-
-to:
-
-```toml
-testpaths = ["tests"]
-```
-
-Current root layout works but makes real tests, evidence scripts, and utilities visually indistinguishable.
-
-## Recommended cleanup order
-
-1. Delete/untrack obvious artifacts: logs, executed notebooks, root images, `scratch.py`.
-2. Delete/archive superseded docs.
-3. Move evidence scripts out of the active `scripts/` path.
-4. Remove unused endpoint wrappers and `src/ml/lstm_predictor.py`.
-5. Archive experimental trainer scripts and remove conditional dependencies.
-6. Reorganize tests only after code/doc cleanup, because test moves create noisy diffs.
-
-## Verification before applying cleanup
-
-Before deleting source modules:
-
-- Re-run import/reference checks for candidate modules.
-- Run the narrow affected test subset after each batch.
-- For dependency removals, run `uv sync --group dev`, then the narrow scripts/tests that import the affected package.
-- Keep cleanup batches small so rollback is obvious.
-
-No cleanup has been applied by this audit file; it is a plan and classification report only.
+- Reference check over tracked files before deleting any module.
+- `uv run pytest -q` for the affected subset, then the full suite.
+- `uv sync --group dev` plus an import check after any dependency change.
+- `uv run ruff check .` and `uv run basedpyright`.

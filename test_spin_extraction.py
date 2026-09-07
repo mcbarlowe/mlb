@@ -7,8 +7,8 @@ The legacy extraction read spin from the wrong level of ``pitchData``
 import json
 from pathlib import Path
 
-from scripts.fix_pitches_spin import extract_game_spin
 from mlb.data.game_feed_data import GameFeedData
+from scripts.fix_pitches_spin import extract_game_spin
 
 EXAMPLE_FEED = Path("example_json_files/example_live_feed.json")
 
