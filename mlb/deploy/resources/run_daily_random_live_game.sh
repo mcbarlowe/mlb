@@ -7,7 +7,9 @@ STATE_ROOT="${MLB_STATE_ROOT:-__MLB_STATE_ROOT__}"
 BIN_DIR="${MLB_BIN_DIR:-__MLB_BIN_DIR__}"
 CAFFEINATE_BIN="/usr/bin/caffeinate"
 SOCIAL_ENV="${BARLOWE_SOCIAL_ENV:-__MLB_SOCIAL_ENV__}"
-LOCK_DIR="${TMPDIR:-/tmp}/com.barloweanalytics.daily-random-live-game.lock"
+AGENT_LABEL="com.barloweanalytics.daily-random-live-game"
+ERR_LOG="__MLB_LOG_DIR__/daily-random-live-game.err.log"
+LOCK_DIR="${TMPDIR:-/tmp}/${AGENT_LABEL}.lock"
 LOCK_OWNED=0
 
 POST_ENABLED="${BARLOWE_RANDOM_GAME_POST:-1}"
@@ -72,6 +74,14 @@ cleanup() {
     if [[ "$LOCK_OWNED" == "1" ]]; then
         /bin/rm -f "$LOCK_DIR/pid"
         /bin/rmdir "$LOCK_DIR" 2>/dev/null
+    fi
+    # A scheduled run that only reports through its exit code reports nothing.
+    if [[ "$status" != "0" ]]; then
+        echo "[$(date '+%F %T')] runner failed with status $status; sending alert"
+        if ! "$BIN_DIR/mlb-notify-failure" --label "$AGENT_LABEL" \
+            --exit-code "$status" --log "$ERR_LOG"; then
+            echo "[$(date '+%F %T')] FAILURE ALERT COULD NOT BE SENT"
+        fi
     fi
     exit "$status"
 }

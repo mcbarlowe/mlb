@@ -52,6 +52,7 @@ mlb-live-pipeline = "mlb.cli.run_live_pipeline:main"
 mlb-build-pitcher-movement-profiles = "mlb.cli.build_pitcher_movement_profiles:main"
 mlb-backtest-season-projections = "mlb.cli.backtest_season_projections:main"
 mlb-install-agents = "mlb.deploy.install:main"
+mlb-notify-failure = "mlb.deploy.notify:main"
 
 [dependency-groups]
 dev = [

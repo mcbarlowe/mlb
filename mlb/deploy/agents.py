@@ -29,19 +29,23 @@ AGENTS: Final[tuple[Agent, ...]] = (
         label="com.barloweanalytics.daily-random-live-game",
         summary="daily random live-game pipeline with a movement-profile refresh",
         runner="run_daily_random_live_game.sh",
-        console_scripts=("mlb-live-pipeline", "mlb-build-pitcher-movement-profiles"),
+        console_scripts=(
+            "mlb-live-pipeline",
+            "mlb-build-pitcher-movement-profiles",
+            "mlb-notify-failure",
+        ),
     ),
     Agent(
         label="com.barloweanalytics.daily-season-projection",
         summary="daily season projection refresh, simulation, and post",
         runner="run_daily_season_projection.sh",
-        console_scripts=("mlb-daily-season-projection",),
+        console_scripts=("mlb-daily-season-projection", "mlb-notify-failure"),
     ),
     Agent(
         label="com.barloweanalytics.daily-sim-slate",
         summary="daily slate simulation with starter watching",
         runner="run_daily_sim_slate.sh",
-        console_scripts=("mlb-daily-sim-slate",),
+        console_scripts=("mlb-daily-sim-slate", "mlb-notify-failure"),
     ),
     Agent(
         # The tracking server is a long-lived binary, not a scheduled job, so
