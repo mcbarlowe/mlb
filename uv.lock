@@ -2023,7 +2023,7 @@ wheels = [
 
 [[package]]
 name = "mlb"
-version = "0.2.5"
+version = "0.2.6"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -2076,12 +2076,12 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jupyter", marker = "extra == 'notebooks'", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10" },
-    { name = "mlflow", specifier = ">=2.17.0" },
+    { name = "mlflow", specifier = "==3.14.0" },
     { name = "numpy", specifier = "<2" },
     { name = "pandas", specifier = ">=2.3.1" },
     { name = "pillow", specifier = ">=11.0" },
     { name = "playwright", specifier = ">=1.62.0" },
-    { name = "polars", specifier = ">=1.32.3" },
+    { name = "polars", specifier = "==1.32.3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.9" },
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
     { name = "pyarrow", specifier = ">=21.0.0" },
