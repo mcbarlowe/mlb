@@ -385,7 +385,7 @@ Defaults:
 Shared multi-machine setup:
 
 - MLflow metadata lives in the local PostgreSQL `mlflow` schema on the iMac; use the direct Postgres URI only as the iMac server's `--backend-store-uri`.
-- The server's SQLAlchemy backend URI uses `postgresql+psycopg2`; MLflow 3.14 binds model-version strings incompatibly with the `psycopg` v3 driver and breaks registered-model detail pages.
+- The server's SQLAlchemy backend URI uses `postgresql+psycopg2`, so its runtime dependencies include `psycopg2-binary`; MLflow 3.14 binds model-version strings incompatibly with the `psycopg` v3 driver and breaks registered-model detail pages.
 - The iMac runs `mlflow server` on `http://10.0.0.171:5001` with artifact serving enabled and `/Users/matthewbarlowe/mlflow-artifacts/` as `--artifacts-destination`.
 - The LaunchAgent allows `http://10.0.0.171:5001` as a CORS origin; without it, browser run searches fail even though direct MLflow client queries succeed.
 - `mlb-model-training-shared` is the production/import experiment for the live stack (pitch type, location, and outcome models).
