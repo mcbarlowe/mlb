@@ -385,7 +385,7 @@ Defaults:
 Shared multi-machine setup:
 
 - MLflow metadata lives in the local PostgreSQL `mlflow` schema on the iMac; use the direct Postgres URI only as the iMac server's `--backend-store-uri`.
-- The server's SQLAlchemy backend URI uses `postgresql+psycopg2`, so its runtime dependencies include `psycopg2-binary`. The MLflow 3.16.1 database is at Alembic revision `6f8d9c3b2a1e`; do not downgrade the server below it.
+- The server's SQLAlchemy backend URI uses `postgresql+psycopg2`, so its runtime dependencies include `psycopg2-binary`. The MLflow 3.16.1 database is at Alembic revision `b7e2c1a4d9f3`; do not downgrade the server below it.
 - The runtime package pins MLflow 3.16.1 and Polars 1.32.3; do not upgrade either independently of an iMac server smoke test.
 - The iMac runs `mlflow server` on `http://10.0.0.171:5001` with artifact serving enabled and `/Users/matthewbarlowe/mlflow-artifacts/` as `--artifacts-destination`.
 - The LaunchAgent allows `http://10.0.0.171:5001` as a CORS origin; without it, browser run searches fail even though direct MLflow client queries succeed.
