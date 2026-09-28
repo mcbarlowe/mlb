@@ -24,6 +24,7 @@ DEFAULT_REFRESH_LOOKBACK_DAYS = 3
 DEFAULT_MAX_REFRESH_GAMES = 500
 DEFAULT_TRIALS = 5_000
 DEFAULT_TUNE_TRIALS = 1_000
+CANCELLED_CODED_GAME_STATE = "C"
 MONTH_LABELS = {
     1: "Jan.",
     2: "Feb.",
@@ -217,7 +218,10 @@ def _has_value(value: object) -> bool:
     return value is not None and not (isinstance(value, float) and math.isnan(value))
 
 
-def _is_final_row(row: object) -> bool:
+def _is_resolved_row(row: object) -> bool:
+    """Final with a score, or cancelled for good (Final with no linescore)."""
+    if str(getattr(row, "coded_game_state", "")) == CANCELLED_CODED_GAME_STATE:
+        return True
     return (
         str(getattr(row, "status", "")) == "Final"
         and _has_value(getattr(row, "away_runs", None))
@@ -244,10 +248,10 @@ def _schedule_snapshot_from_rows(
         game_date = _coerce_date(row.game_date)
         status = str(row.status) or "unknown"
         status_counts[status] += 1
-        is_final = _is_final_row(row)
-        if is_final:
+        is_resolved = _is_resolved_row(row)
+        if is_resolved:
             final_games += 1
-        if game_date < as_of and not is_final:
+        if game_date < as_of and not is_resolved:
             stale_game_pks.add(game_pk)
         if refresh_start <= game_date <= as_of:
             refresh_game_pks.add(game_pk)
@@ -282,6 +286,7 @@ def _load_schedule_snapshot(
             g.game_pk,
             g.game_date,
             COALESCE(g.abstract_game_state, '') AS status,
+            COALESCE(g.coded_game_state, '') AS coded_game_state,
             s.away_runs,
             s.home_runs
         FROM games AS g

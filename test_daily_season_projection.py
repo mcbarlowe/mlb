@@ -19,11 +19,13 @@ def _row(
     status: str,
     away_runs: int | None = None,
     home_runs: int | None = None,
+    coded_game_state: str = "",
 ) -> SimpleNamespace:
     return SimpleNamespace(
         game_pk=game_pk,
         game_date=game_date,
         status=status,
+        coded_game_state=coded_game_state,
         away_runs=away_runs,
         home_runs=home_runs,
     )
@@ -47,6 +49,24 @@ def test_schedule_snapshot_refreshes_recent_and_stale_games():
     assert snapshot.stale_before_as_of == (2,)
     assert snapshot.refresh_game_pks == (2, 3, 4)
     assert snapshot.status_counts == {"Final": 2, "Preview": 3}
+
+
+def test_schedule_snapshot_treats_cancelled_game_as_resolved():
+    # StatsAPI marks a rain cancellation abstract "Final" with no linescore
+    # (game 823490, 2026-09-27); it will never gain a score, so it must not
+    # block every later run as a stale non-final game.
+    snapshot = _schedule_snapshot_from_rows(
+        [
+            _row(1, date(2026, 9, 27), "Final", 4, 3),
+            _row(2, date(2026, 9, 27), "Final", coded_game_state="C"),
+            _row(3, date(2026, 9, 27), "Final"),
+        ],
+        as_of=date(2026, 9, 28),
+        refresh_lookback_days=3,
+    )
+
+    assert snapshot.final_games == 2
+    assert snapshot.stale_before_as_of == (3,)
 
 
 def test_default_caption_matches_public_post_style():

@@ -97,3 +97,27 @@ def test_posted_state_prevents_duplicate_publish(tmp_path: Path):
         )
         is None
     )
+
+
+def test_empty_slate_is_a_clean_no_op(monkeypatch, tmp_path: Path, capsys):
+    # Off days (e.g. 2026-09-28, between the regular season and the Wild Card
+    # round) must exit 0; a nonzero exit fires the launchd failure alert.
+    monkeypatch.setattr(daily_sim, "fetch_slate_games", lambda *_a, **_k: [])
+
+    def _no_simulator(**_kwargs):
+        raise AssertionError("an empty slate must not build a simulator")
+
+    monkeypatch.setattr(daily_sim, "build_day_ahead_simulator", _no_simulator)
+
+    daily_sim.main(
+        [
+            "--date",
+            "2026-09-28",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--state-dir",
+            str(tmp_path / "state"),
+        ]
+    )
+
+    assert "No preview games on 2026-09-28" in capsys.readouterr().out

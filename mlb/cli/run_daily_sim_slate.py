@@ -475,7 +475,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     slate_games = fetch_slate_games(target_date, abstract_states=slate_states)
     if not slate_games:
         scope = "preview games" if preview_only else "games"
-        raise SystemExit(f"No {scope} on {target_date.isoformat()}")
+        print(f"No {scope} on {target_date.isoformat()}; nothing to simulate.")
+        return
 
     simulator, run_dir = build_day_ahead_simulator(
         season=season,
