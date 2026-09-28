@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date
 from types import SimpleNamespace
 
+import mlb.cli.run_daily_season_projection as season_projection
 from mlb.cli.run_daily_season_projection import (
+    ScheduleSnapshot,
     _caption_date,
     _default_caption,
     _projection_command,
@@ -48,6 +50,7 @@ def test_schedule_snapshot_refreshes_recent_and_stale_games():
     assert snapshot.final_games == 2
     assert snapshot.stale_before_as_of == (2,)
     assert snapshot.refresh_game_pks == (2, 3, 4)
+    assert snapshot.remaining_games == 2
     assert snapshot.status_counts == {"Final": 2, "Preview": 3}
 
 
@@ -67,6 +70,42 @@ def test_schedule_snapshot_treats_cancelled_game_as_resolved():
 
     assert snapshot.final_games == 2
     assert snapshot.stale_before_as_of == (3,)
+
+
+def test_remaining_games_ignores_cancelled_games_on_or_after_as_of():
+    snapshot = _schedule_snapshot_from_rows(
+        [
+            _row(1, date(2026, 9, 27), "Final", 4, 3),
+            _row(2, date(2026, 9, 28), "Final", coded_game_state="C"),
+            _row(3, date(2026, 9, 28), "Preview"),
+        ],
+        as_of=date(2026, 9, 28),
+        refresh_lookback_days=3,
+    )
+
+    assert snapshot.remaining_games == 1
+
+
+def test_season_over_skips_projection_and_post(monkeypatch, capsys):
+    finished = ScheduleSnapshot(
+        total_games=2430,
+        final_games=2430,
+        remaining_games=0,
+        stale_before_as_of=(),
+        refresh_game_pks=(),
+        status_counts={"Final": 2430},
+    )
+    monkeypatch.setattr(season_projection, "_ensure_fresh_inputs", lambda **_k: finished)
+
+    def _must_not_run(**_kwargs):
+        raise AssertionError("a finished season must not be projected or posted")
+
+    monkeypatch.setattr(season_projection, "_run_projection", _must_not_run)
+    monkeypatch.setattr(season_projection, "_publish_outputs", _must_not_run)
+
+    season_projection.main(["--season", "2026", "--as-of", "2026-09-28", "--post"])
+
+    assert "skipping projection and post" in capsys.readouterr().out
 
 
 def test_default_caption_matches_public_post_style():

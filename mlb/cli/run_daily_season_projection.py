@@ -45,6 +45,7 @@ MONTH_LABELS = {
 class ScheduleSnapshot:
     total_games: int
     final_games: int
+    remaining_games: int
     stale_before_as_of: tuple[int, ...]
     refresh_game_pks: tuple[int, ...]
     status_counts: dict[str, int]
@@ -218,9 +219,13 @@ def _has_value(value: object) -> bool:
     return value is not None and not (isinstance(value, float) and math.isnan(value))
 
 
+def _is_cancelled_row(row: object) -> bool:
+    return str(getattr(row, "coded_game_state", "")) == CANCELLED_CODED_GAME_STATE
+
+
 def _is_resolved_row(row: object) -> bool:
     """Final with a score, or cancelled for good (Final with no linescore)."""
-    if str(getattr(row, "coded_game_state", "")) == CANCELLED_CODED_GAME_STATE:
+    if _is_cancelled_row(row):
         return True
     return (
         str(getattr(row, "status", "")) == "Final"
@@ -241,6 +246,7 @@ def _schedule_snapshot_from_rows(
     refresh_game_pks: set[int] = set()
     total_games = 0
     final_games = 0
+    remaining_games = 0
 
     for row in rows:
         total_games += 1
@@ -255,11 +261,14 @@ def _schedule_snapshot_from_rows(
             stale_game_pks.add(game_pk)
         if refresh_start <= game_date <= as_of:
             refresh_game_pks.add(game_pk)
+        if game_date >= as_of and not _is_cancelled_row(row):
+            remaining_games += 1
 
     refresh_game_pks.update(stale_game_pks)
     return ScheduleSnapshot(
         total_games=total_games,
         final_games=final_games,
+        remaining_games=remaining_games,
         stale_before_as_of=tuple(sorted(stale_game_pks)),
         refresh_game_pks=tuple(sorted(refresh_game_pks)),
         status_counts=dict(sorted(status_counts.items())),
@@ -308,6 +317,7 @@ def _print_snapshot(label: str, snapshot: ScheduleSnapshot) -> None:
     statuses = ", ".join(f"{key}={value}" for key, value in snapshot.status_counts.items())
     print(
         f"{label}: total={snapshot.total_games} finals={snapshot.final_games} "
+        f"remaining={snapshot.remaining_games} "
         f"stale_before_as_of={len(snapshot.stale_before_as_of)} "
         f"refresh_candidates={len(snapshot.refresh_game_pks)} statuses=[{statuses}]"
     )
@@ -551,7 +561,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     db_config = PostgresConfig.from_env()
     print(f"database: {db_config.describe()}")
-    _ensure_fresh_inputs(
+    snapshot = _ensure_fresh_inputs(
         db_config=db_config,
         season=args.season,
         as_of=as_of,
@@ -562,6 +572,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         skip_refresh=args.skip_refresh,
         allow_stale_before_as_of=args.allow_stale_before_as_of,
     )
+    if snapshot.remaining_games == 0:
+        print(
+            f"No {args.season} regular-season games remain on or after {as_of}; "
+            "skipping projection and post."
+        )
+        return
     outputs = _projection_outputs(args.season, args.output_dir)
     _run_projection(args=args, as_of=as_of, outputs=outputs)
     _publish_outputs(args=args, as_of=as_of, outputs=outputs)
