@@ -206,7 +206,7 @@ uv run mlb-daily-season-projection
 uv run mlb-daily-season-projection --post --post-provider x
 ```
 
-The daily runner bounds data mutation to current-season regular-season games that are either non-final before `--as-of` or within `--refresh-lookback-days` of it. It overwrites those raw live-feed JSON files, force-refreshes only those `game_pk`s into PostgreSQL, refuses to project while pre-`--as-of` games remain non-final, writes `output/season_projection_<season>/season_<season>_model_*.{csv,jpg}`, and records the posted ID in the output directory so a same-day relaunch does not duplicate the X post.
+The daily runner bounds data mutation to current-season regular-season games that are either non-final before `--as-of` or within `--refresh-lookback-days` of it. It overwrites those raw live-feed JSON files, force-refreshes only those `game_pk`s into PostgreSQL, refuses to project while pre-`--as-of` games remain non-final, writes `output/season_projection_<season>/season_<season>_model_*.{csv,jpg}`, and records the posted ID in the output directory so a same-day relaunch does not duplicate the X post. A cancelled game (`coded_game_state = 'C'`, which StatsAPI reports as abstract `Final` with no linescore) counts as resolved, not stale. Once no non-cancelled regular-season games are dated on or after `--as-of`, the runner still refreshes feeds but then exits 0 without projecting or posting, so the finished season is not re-posted daily.
 
 
 Optional tuning knobs:
@@ -479,6 +479,8 @@ How it works:
 3. Fetches that day's preview games from the MLB schedule with hydrated probable starters.
 4. Uses the team-strength model for published win odds and the pitch/outcome Monte Carlo chain for score distributions, then renders the combined board to `output/sim_cards/daily/daily_sim_<date>.jpg`.
 5. Stores the probable-starter snapshot and published board ID in `output/sim_state/daily_sim_<date>.json`. A same-day restart reuses that post instead of publishing a duplicate; with `--watch-starters`, it resumes polling and posts a fresh one-game card only when a probable starter changes.
+
+A date with no preview games (an off day) prints `No preview games on <date>; nothing to simulate.` and exits 0, so the launchd failure alert does not fire. The slate is not filtered by game type, so postseason games are simulated with the regular-season models.
 
 The promotion gate uses at least three walk-forward season folds through the held-out season. A candidate must have positive 95% paired date-block bootstrap lower bounds for Brier-score and log-loss improvement over both the v1 champion contract and the fixed league-home-rate baseline, with no material single-season regression:
 
