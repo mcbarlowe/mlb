@@ -13,7 +13,10 @@ from mlb.data_contracts.result_views import install_result_views
 
 def main() -> None:
     install_result_views()
-    print("Installed mlb.betting_game_results_v1 and mlb.betting_player_results_v1.")
+    print(
+        "Installed mlb.betting_game_results_v1, mlb.betting_player_results_v1 "
+        "and mlb.betting_pitcher_results_v1."
+    )
 
 
 if __name__ == "__main__":

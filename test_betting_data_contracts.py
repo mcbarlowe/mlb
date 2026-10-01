@@ -89,9 +89,32 @@ def test_player_results_v1_contract_preserves_explicit_dnp_semantics():
     assert "null means appearance is unknown and must not void a bet" in SCHEMA_SQL
 
 
+def test_pitcher_results_v1_contract_keeps_unknown_starts_pending():
+    view_sql = _view_definition("betting_pitcher_results_v1")
+
+    assert _projection_names(view_sql) == [
+        "game_pk",
+        "game_date",
+        "abstract_game_state",
+        "player_id",
+        "player_name",
+        "started",
+        "strikeouts",
+        "outs",
+        "batters_faced",
+        "pitches",
+    ]
+    assert "WHEN p.gamesstarted = 0 THEN FALSE" in view_sql
+    assert "WHEN p.gamesstarted > 0 THEN TRUE" in view_sql
+    assert "ELSE NULL" in view_sql
+    assert "null started is unknown and must remain pending" in SCHEMA_SQL
+
+
 def test_existing_database_installer_uses_schema_qualified_additive_views():
     assert "CREATE OR REPLACE VIEW mlb.betting_game_results_v1" in RESULT_VIEW_SQL
     assert "CREATE OR REPLACE VIEW mlb.betting_player_results_v1" in RESULT_VIEW_SQL
+    assert "CREATE OR REPLACE VIEW mlb.betting_pitcher_results_v1" in RESULT_VIEW_SQL
+    assert "FROM mlb.pitching AS p" in RESULT_VIEW_SQL
     assert "FROM mlb.games AS g" in RESULT_VIEW_SQL
     assert "FROM mlb.batting AS b" in RESULT_VIEW_SQL
     assert "DROP " not in RESULT_VIEW_SQL.upper()

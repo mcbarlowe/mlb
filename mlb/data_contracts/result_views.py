@@ -58,11 +58,35 @@ COMMENT ON VIEW mlb.betting_player_results_v1 IS
     'Read-only v1 player result contract. Missing rows and null appeared remain pending.';
 COMMENT ON COLUMN mlb.betting_player_results_v1.appeared IS
     'False only when batting.gamesplayed explicitly equals zero, while null is unknown.';
+
+CREATE OR REPLACE VIEW mlb.betting_pitcher_results_v1 AS
+SELECT
+    p.game_pk,
+    g.game_date,
+    g.abstract_game_state,
+    p.player_id,
+    p.player_name,
+    CASE
+        WHEN p.gamesstarted = 0 THEN FALSE
+        WHEN p.gamesstarted > 0 THEN TRUE
+        ELSE NULL
+    END AS started,
+    p.strikeouts,
+    p.outs,
+    p.battersfaced AS batters_faced,
+    p.numberofpitches AS pitches
+FROM mlb.pitching AS p
+JOIN mlb.games AS g USING (game_pk);
+
+COMMENT ON VIEW mlb.betting_pitcher_results_v1 IS
+    'Read-only v1 pitcher result contract. Rows exist only for pitchers who appeared.';
+COMMENT ON COLUMN mlb.betting_pitcher_results_v1.started IS
+    'False when the pitcher appeared in relief, while null is unknown.';
 """
 
 
 def install_result_views(config: PostgresConfig | None = None) -> None:
-    """Create or replace both additive contracts in the existing MLB schema."""
+    """Create or replace the additive contracts in the existing MLB schema."""
     import psycopg
     from psycopg import sql
 
@@ -88,6 +112,6 @@ def install_result_views(config: PostgresConfig | None = None) -> None:
         connection.execute(
             sql.SQL(
                 "GRANT SELECT ON mlb.betting_game_results_v1, "
-                "mlb.betting_player_results_v1 TO {}"
+                "mlb.betting_player_results_v1, mlb.betting_pitcher_results_v1 TO {}"
             ).format(sql.Identifier(consumer_role))
         )

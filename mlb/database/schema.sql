@@ -2470,3 +2470,28 @@ COMMENT ON VIEW betting_player_results_v1 IS
 
 COMMENT ON COLUMN betting_player_results_v1.appeared IS
     'Derived from batting.gamesplayed. False is emitted only when the source explicitly stores gamesplayed=0, while null means appearance is unknown and must not void a bet.';
+
+CREATE OR REPLACE VIEW betting_pitcher_results_v1 AS
+SELECT
+    p.game_pk,
+    g.game_date,
+    g.abstract_game_state,
+    p.player_id,
+    p.player_name,
+    CASE
+        WHEN p.gamesstarted = 0 THEN FALSE
+        WHEN p.gamesstarted > 0 THEN TRUE
+        ELSE NULL
+    END AS started,
+    p.strikeouts,
+    p.outs,
+    p.battersfaced AS batters_faced,
+    p.numberofpitches AS pitches
+FROM pitching AS p
+JOIN games AS g USING (game_pk);
+
+COMMENT ON VIEW betting_pitcher_results_v1 IS
+    'Read-only v1 betting pitcher result contract. Rows exist only for pitchers who appeared; null started is unknown and must remain pending.';
+
+COMMENT ON COLUMN betting_pitcher_results_v1.started IS
+    'Derived from pitching.gamesstarted. False means the pitcher appeared in relief; null means the start is unknown and must not void a bet.';
