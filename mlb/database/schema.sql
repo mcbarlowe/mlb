@@ -2461,15 +2461,20 @@ SELECT
     b.runs,
     b.baseonballs AS walks,
     b.stolenbases AS stolen_bases,
-    b.strikeouts
+    b.strikeouts,
+    CASE b.team_type WHEN 'home' THEN g.home_team_id WHEN 'away' THEN g.away_team_id END
+        AS team_id
 FROM batting AS b
 JOIN games AS g USING (game_pk);
 
 COMMENT ON VIEW betting_player_results_v1 IS
-    'Read-only v1 betting player result contract. Missing rows and null appeared values are unknown and must remain pending even for Final games.';
+    'Read-only v1 betting player result contract. Rows exist only for players in the box score; null appeared values are unknown and must remain pending even for Final games. A consumer may treat a known player absent from a Final game whose box score has both teams as not having played.';
 
 COMMENT ON COLUMN betting_player_results_v1.appeared IS
     'Derived from batting.gamesplayed. False is emitted only when the source explicitly stores gamesplayed=0, while null means appearance is unknown and must not void a bet.';
+
+COMMENT ON COLUMN betting_player_results_v1.team_id IS
+    'Team the player appeared for.';
 
 CREATE OR REPLACE VIEW betting_pitcher_results_v1 AS
 SELECT
@@ -2486,7 +2491,9 @@ SELECT
     p.strikeouts,
     p.outs,
     p.battersfaced AS batters_faced,
-    p.numberofpitches AS pitches
+    p.numberofpitches AS pitches,
+    CASE p.team_type WHEN 'home' THEN g.home_team_id WHEN 'away' THEN g.away_team_id END
+        AS team_id
 FROM pitching AS p
 JOIN games AS g USING (game_pk);
 

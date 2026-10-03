@@ -50,7 +50,9 @@ SELECT
     b.runs,
     b.baseonballs AS walks,
     b.stolenbases AS stolen_bases,
-    b.strikeouts
+    b.strikeouts,
+    CASE b.team_type WHEN 'home' THEN g.home_team_id WHEN 'away' THEN g.away_team_id END
+        AS team_id
 FROM mlb.batting AS b
 JOIN mlb.games AS g USING (game_pk);
 
@@ -58,6 +60,8 @@ COMMENT ON VIEW mlb.betting_player_results_v1 IS
     'Read-only v1 player result contract. Missing rows and null appeared remain pending.';
 COMMENT ON COLUMN mlb.betting_player_results_v1.appeared IS
     'False only when batting.gamesplayed explicitly equals zero, while null is unknown.';
+COMMENT ON COLUMN mlb.betting_player_results_v1.team_id IS
+    'Team the player appeared for. Rows exist only for players in the box score.';
 
 CREATE OR REPLACE VIEW mlb.betting_pitcher_results_v1 AS
 SELECT
@@ -74,7 +78,9 @@ SELECT
     p.strikeouts,
     p.outs,
     p.battersfaced AS batters_faced,
-    p.numberofpitches AS pitches
+    p.numberofpitches AS pitches,
+    CASE p.team_type WHEN 'home' THEN g.home_team_id WHEN 'away' THEN g.away_team_id END
+        AS team_id
 FROM mlb.pitching AS p
 JOIN mlb.games AS g USING (game_pk);
 

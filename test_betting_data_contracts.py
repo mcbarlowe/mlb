@@ -74,6 +74,7 @@ def test_player_results_v1_contract_preserves_explicit_dnp_semantics():
         "walks",
         "stolen_bases",
         "strikeouts",
+        "team_id",
     ]
     assert "WHEN b.gamesplayed = 0 THEN FALSE" in view_sql
     assert "WHEN b.gamesplayed > 0 THEN TRUE" in view_sql
@@ -103,6 +104,7 @@ def test_pitcher_results_v1_contract_keeps_unknown_starts_pending():
         "outs",
         "batters_faced",
         "pitches",
+        "team_id",
     ]
     assert "WHEN p.gamesstarted = 0 THEN FALSE" in view_sql
     assert "WHEN p.gamesstarted > 0 THEN TRUE" in view_sql
