@@ -41,6 +41,7 @@ def test_contract_scores_over_once_without_betting_inputs() -> None:
                 "home_team_id": 111,
                 "away_team_id": 147,
                 "player": "Jane Doe",
+                "player_id": 501,
                 "market": "batter_home_runs",
                 "point": 0.5,
             }
@@ -58,7 +59,7 @@ def test_contract_scores_over_once_without_betting_inputs() -> None:
         requests,
         prediction_date=date(2026, 8, 27),
         predicted_at=datetime(2026, 8, 27, 16, tzinfo=UTC),
-        lines_by_name={"jane doe": history},
+        lines_by_player={501: history},
         aging_curves={},
         park_factors={},
         team_ids={},
@@ -92,6 +93,7 @@ def test_conditioned_market_excludes_bench_appearances_from_sample() -> None:
             "requests": [
                 {
                     "player": "Jane Doe",
+                    "player_id": 501,
                     "market": "batter_hits",
                     "point": 0.5,
                     "home_team_id": 111,
@@ -99,7 +101,7 @@ def test_conditioned_market_excludes_bench_appearances_from_sample() -> None:
             ]
         },
         prediction_date=date(2026, 8, 27),
-        lines_by_name={"jane doe": history},
+        lines_by_player={501: history},
         aging_curves={},
         park_factors={},
         team_ids={},
@@ -119,4 +121,34 @@ def test_request_rejects_betting_owned_fields(forbidden: str) -> None:
     }
 
     with pytest.raises(ValueError, match="non-model fields"):
+        validate_request({"requests": [request]})
+
+
+def test_namesakes_score_from_their_own_histories() -> None:
+    always = PlayerLines([(2026, 27.0, 4, _stats(hits=1)) for _ in range(200)], 27.0)
+    never = PlayerLines([(2026, 27.0, 4, _stats(hits=0)) for _ in range(200)], 27.0)
+    request = {"player": "Will Smith", "market": "batter_hits", "point": 0.5}
+    artifact = build_prop_prediction_artifact(
+        {
+            "requests": [
+                {**request, "request_id": "dodgers", "player_id": 669257},
+                {**request, "request_id": "royals", "player_id": 519293},
+            ]
+        },
+        prediction_date=date(2026, 8, 27),
+        lines_by_player={669257: always, 519293: never},
+        aging_curves={},
+        park_factors={},
+        team_ids={},
+        recency_half_life=0,
+    )
+    by_id = {p["player_id"]: p["probability_over"] for p in artifact["predictions"]}
+    assert by_id[669257] > 0.8
+    assert by_id[519293] < 0.2
+
+
+@pytest.mark.parametrize("player_id", [None, "", "abc", 0])
+def test_request_requires_a_positive_player_id(player_id: object) -> None:
+    request = {"player": "Jane Doe", "player_id": player_id, "market": "batter_hits", "point": 0.5}
+    with pytest.raises(ValueError, match="player_id"):
         validate_request({"requests": [request]})

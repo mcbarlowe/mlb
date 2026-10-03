@@ -112,7 +112,7 @@ def validate_request(payload: Mapping[str, object]) -> list[dict[str, object]]:
                 f"requests[{index}] contains non-model fields: {sorted(unknown)!r}"
             )
         request = dict(raw)
-        for field in ("player", "market", "point"):
+        for field in ("player", "player_id", "market", "point"):
             if request.get(field) in (None, ""):
                 raise ValueError(f"requests[{index}] is missing {field!r}")
         market = str(request["market"])
@@ -124,7 +124,14 @@ def validate_request(payload: Mapping[str, object]) -> list[dict[str, object]]:
             raise ValueError(f"requests[{index}].point must be numeric") from exc
         if not math.isfinite(point):
             raise ValueError(f"requests[{index}].point must be finite")
+        try:
+            player_id = int(request["player_id"])  # type: ignore[call-overload]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"requests[{index}].player_id must be an integer") from exc
+        if player_id <= 0:
+            raise ValueError(f"requests[{index}].player_id must be positive")
         request["player"] = str(request["player"])
+        request["player_id"] = player_id
         request["market"] = market
         request["point"] = point
         request_id = str(request.get("request_id") or index)
@@ -138,9 +145,16 @@ def validate_request(payload: Mapping[str, object]) -> list[dict[str, object]]:
 
 def load_game_lines(
     requests: Sequence[Mapping[str, object]], prediction_date: date
-) -> dict[str, PlayerLines]:
-    """Load each requested player's prior regular-season batting history."""
+) -> dict[int, PlayerLines]:
+    """Load each requested player's prior regular-season batting history, by player id.
 
+    The caller resolves names to ids against the game's rosters; keying on the
+    id keeps two players who share a name from pooling their histories.
+    """
+
+    player_ids = sorted({int(request["player_id"]) for request in requests})  # type: ignore[call-overload]
+    if not player_ids:
+        return {}
     config = PostgresConfig.from_env()
     connection = psycopg.connect(
         dbname=config.dbname,
@@ -152,21 +166,6 @@ def load_game_lines(
     )
     try:
         with connection.cursor() as cursor:
-            cursor.execute(f"SELECT player_id, full_name FROM {config.schema}.players")
-            by_norm: dict[str, list[int]] = {}
-            for player_id, full_name in cursor.fetchall():
-                by_norm.setdefault(normalize_name(str(full_name)), []).append(int(player_id))
-
-            player_id_to_norm: dict[int, str] = {}
-            for request in requests:
-                normalized = normalize_name(str(request["player"]))
-                explicit_id = request.get("player_id")
-                ids = [int(explicit_id)] if explicit_id not in (None, "") else by_norm.get(normalized, [])
-                for player_id in ids:
-                    player_id_to_norm[player_id] = normalized
-            if not player_id_to_norm:
-                return {}
-
             columns = ", ".join(
                 f"COALESCE(b.{column}, 0)::int AS {column}"
                 for column in STAT_COLUMNS
@@ -189,7 +188,7 @@ def load_game_lines(
                 ORDER BY COALESCE(g.game_datetime, g.game_date), g.game_pk
                 """,
                 (
-                    list(player_id_to_norm),
+                    player_ids,
                     prediction_date.year - RECENT_SEASONS + 1,
                     prediction_date.year,
                     prediction_date,
@@ -219,19 +218,11 @@ def load_game_lines(
     finally:
         connection.close()
 
-    best_for_name: dict[str, int] = {}
-    for player_id, normalized in player_id_to_norm.items():
-        incumbent = best_for_name.get(normalized)
-        if incumbent is None or len(per_player.get(player_id, [])) > len(
-            per_player.get(incumbent, [])
-        ):
-            best_for_name[normalized] = player_id
-
-    result: dict[str, PlayerLines] = {}
-    for normalized, player_id in best_for_name.items():
+    result: dict[int, PlayerLines] = {}
+    for player_id, lines in per_player.items():
         birth_date = births.get(player_id)
-        result[normalized] = PlayerLines(
-            lines=per_player.get(player_id, []),
+        result[player_id] = PlayerLines(
+            lines=lines,
             age_now=(
                 (prediction_date - birth_date).days / 365.25
                 if birth_date is not None
@@ -510,7 +501,7 @@ def build_prop_prediction_artifact(
     *,
     prediction_date: date,
     predicted_at: datetime | None = None,
-    lines_by_name: Mapping[str, PlayerLines] | None = None,
+    lines_by_player: Mapping[int, PlayerLines] | None = None,
     aging_curves: Mapping[str, Mapping[int, float]] | None = None,
     park_factors: Mapping[str, Mapping[int, float]] | None = None,
     team_ids: Mapping[str, int] | None = None,
@@ -525,7 +516,11 @@ def build_prop_prediction_artifact(
     if shrink_k < 0:
         raise ValueError("shrink_k cannot be negative")
     timestamp = (predicted_at or datetime.now(UTC)).astimezone(UTC)
-    histories = dict(lines_by_name) if lines_by_name is not None else load_game_lines(requests, prediction_date)
+    histories = (
+        dict(lines_by_player)
+        if lines_by_player is not None
+        else load_game_lines(requests, prediction_date)
+    )
     curves = aging_curves or {}
     parks = park_factors or {}
     resolved_team_ids = dict(team_ids) if team_ids is not None else load_team_ids()
@@ -534,15 +529,15 @@ def build_prop_prediction_artifact(
         if game_ids is not None
         else (
             load_game_ids(requests, prediction_date)
-            if lines_by_name is None
+            if lines_by_player is None
             else {}
         )
     )
     starts = {
-        name: PlayerLines(
+        player_id: PlayerLines(
             [line for line in entry.lines if line[2] >= START_PA], entry.age_now
         )
-        for name, entry in histories.items()
+        for player_id, entry in histories.items()
     }
     all_pool = [stats for entry in histories.values() for _year, _age, _pa, stats in entry.lines]
     starts_pool = [stats for entry in starts.values() for _year, _age, _pa, stats in entry.lines]
@@ -563,9 +558,7 @@ def build_prop_prediction_artifact(
         market = str(request["market"])
         point = float(request["point"])
         conditioned = market in CONDITIONED_MARKETS
-        history = (starts if conditioned else histories).get(
-            normalize_name(str(request["player"]))
-        )
+        history = (starts if conditioned else histories).get(int(request["player_id"]))  # type: ignore[call-overload]
         lines = history.lines if history else []
         age_now = history.age_now if history else float("nan")
         probability: float | None = None
